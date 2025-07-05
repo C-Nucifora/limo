@@ -12,6 +12,43 @@
 namespace sfs = std::filesystem;
 namespace pu = path_utils;
 
+bool Installer::sourceIsArchvie(const sfs::path& source_path)
+{
+    const auto archiveExtensions = {
+      ".zip",
+      ".rar",
+      ".7z",
+      ".tar.gz",
+      ".tar",
+      ".tar.xz",
+      ".gz",
+      ".xz",
+      ".bz2",
+      ".tar.bz2",
+      ".lz",
+      ".lz4",
+      ".lzma",
+      ".aar",
+      ".ace",
+      ".arc",
+      ".ark",
+      ".tgz",
+      ".tbz2",
+      ".tar.lz",
+      ".tlz",
+      ".txz",
+      ".tar.zst",
+      ".war"
+    };
+
+    const std::string file_name = source_path.c_str();
+    for(std::string ext : archiveExtensions){
+      if(file_name.ends_with(ext)){
+        return true;
+      }
+    }
+    return false;
+}
 
 void Installer::extract(const sfs::path& source_path,
                         const sfs::path& dest_path,
@@ -26,6 +63,16 @@ void Installer::extract(const sfs::path& source_path,
       sfs::rename(source_path, dest_path);
     else
       sfs::copy(source_path, dest_path, sfs::copy_options::recursive);
+    return;
+  }
+
+  // for singular, non-archive files, just create the temp directory and copy the file to it
+  if(!sourceIsArchvie(source_path)){
+    const std::string base_file_name = source_path.filename();
+    const std::filesystem::path new_dest = dest_path / base_file_name;
+
+    sfs::create_directories(dest_path);
+    sfs::copy(source_path, new_dest);
     return;
   }
 
@@ -219,6 +266,13 @@ std::vector<std::pair<sfs::path, bool>> Installer::getArchiveFileNames(const sfs
       file_names.emplace_back(pu::getRelativePath(dir_entry.path(), path), sfs::is_directory(path));
     return file_names;
   }
+
+  // for singular, non-archive files, return data without trying to extract it
+  if(!sourceIsArchvie(path)){
+    file_names.emplace_back(pu::getRelativePath(path, path.parent_path()), sfs::is_directory(path));
+    return file_names;
+  }
+
   struct archive* source;
   struct archive_entry* entry;
   source = archive_read_new();
