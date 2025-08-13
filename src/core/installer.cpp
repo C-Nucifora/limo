@@ -14,40 +14,19 @@ namespace pu = path_utils;
 
 bool Installer::sourceIsArchvie(const sfs::path& source_path)
 {
-    const auto archiveExtensions = {
-      ".zip",
-      ".rar",
-      ".7z",
-      ".tar.gz",
-      ".tar",
-      ".tar.xz",
-      ".gz",
-      ".xz",
-      ".bz2",
-      ".tar.bz2",
-      ".lz",
-      ".lz4",
-      ".lzma",
-      ".aar",
-      ".ace",
-      ".arc",
-      ".ark",
-      ".tgz",
-      ".tbz2",
-      ".tar.lz",
-      ".tlz",
-      ".txz",
-      ".tar.zst",
-      ".war"
-    };
+    struct archive* source;
+    source = archive_read_new();
+    archive_read_support_filter_all(source);
+    archive_read_support_format_all(source);
 
-    const std::string file_name = source_path.c_str();
-    for(std::string ext : archiveExtensions){
-      if(file_name.ends_with(ext)){
-        return true;
-      }
+    if(archive_read_open_filename(source, source_path.c_str(), 10240) != ARCHIVE_OK){
+        return false;
     }
-    return false;
+    if(archive_read_free(source) != ARCHIVE_OK){
+        return false;
+    }
+
+    return true;
 }
 
 void Installer::extract(const sfs::path& source_path,
