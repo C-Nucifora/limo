@@ -67,7 +67,7 @@ public:
   * \param source_path Path to the file.
   * \return bool true if supported archive file, otherwise false
   */
-  static bool sourceIsArchvie(const std::filesystem::path& source_path);
+  static bool sourceIsArchive(const std::filesystem::path& source_path);
 
   /*!
    * \brief Extracts the given archive to the given directory.

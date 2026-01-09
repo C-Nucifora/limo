@@ -12,7 +12,7 @@
 namespace sfs = std::filesystem;
 namespace pu = path_utils;
 
-bool Installer::sourceIsArchvie(const sfs::path& source_path)
+bool Installer::sourceIsArchive(const sfs::path& source_path)
 {
     struct archive* source;
     source = archive_read_new();
@@ -46,7 +46,7 @@ void Installer::extract(const sfs::path& source_path,
   }
 
   // for singular, non-archive files, just create the temp directory and copy the file to it
-  if(!sourceIsArchvie(source_path)){
+  if(!sourceIsArchive(source_path)){
     const std::string base_file_name = source_path.filename();
     const std::filesystem::path new_dest = dest_path / base_file_name;
 
@@ -247,7 +247,7 @@ std::vector<std::pair<sfs::path, bool>> Installer::getArchiveFileNames(const sfs
   }
 
   // for singular, non-archive files, return data without trying to extract it
-  if(!sourceIsArchvie(path)){
+  if(!sourceIsArchive(path)){
     file_names.emplace_back(pu::getRelativePath(path, path.parent_path()), sfs::is_directory(path));
     return file_names;
   }
