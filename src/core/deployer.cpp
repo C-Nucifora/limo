@@ -936,6 +936,9 @@ void Deployer::fixInvalidLinkDeployMode()
     sfs::remove(source_path_ / file_name);
     sfs::remove(dest_path_ / file_name);
 
+    // The source file must exist before a hard link to it can be created. Without this write
+    // the link always failed, so every hard-link deployer was needlessly downgraded to symlinks.
+    std::ofstream(source_path_ / file_name) << "test";
     sfs::create_hard_link(source_path_ / file_name, dest_path_ / file_name);
   }
   catch(...)

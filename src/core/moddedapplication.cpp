@@ -1030,7 +1030,9 @@ void ModdedApplication::removeBackupTarget(int target_id)
 
 void ModdedApplication::removeAllBackupTargets()
 {
-  for(int target = 0; target < bak_man_.getNumTargets(); target++)
+  // Iterate in reverse: removeBackupTarget erases the target, so forward iteration would shift
+  // the remaining targets and skip every other one.
+  for(int target = bak_man_.getNumTargets() - 1; target >= 0; target--)
     removeBackupTarget(target);
 }
 
@@ -1420,7 +1422,9 @@ void ModdedApplication::updateAutoTags(const std::vector<int> mod_ids)
 
 void ModdedApplication::deleteAllData()
 {
-  for(int i = 0; i < deployers_.size(); i++)
+  // Iterate in reverse: removeDeployer erases deployers_[i], so forward iteration would shift
+  // the vector and skip every other deployer (leaving its mods deployed with no .lmmfiles).
+  for(int i = static_cast<int>(deployers_.size()) - 1; i >= 0; i--)
     removeDeployer(i, true);
   for(const auto& mod : installed_mods_)
     sfs::remove_all(staging_dir_ / std::to_string(mod.id));
