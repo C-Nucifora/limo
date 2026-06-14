@@ -17,7 +17,10 @@
    <item>
     <widget class="QLabel" name="info_label">
      <property name="text">
-      <string>Edit mod sources</string>
+      <string>The local source is where this mod was installed from; the remote source is its web page (e.g. on Nexus Mods), used to check for updates. Both are optional.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
      </property>
     </widget>
    </item>
@@ -26,12 +29,16 @@
      <item row="0" column="0">
       <widget class="QLabel" name="label">
        <property name="text">
-        <string>Local Source:</string>
+        <string>Local Source (optional):</string>
        </property>
       </widget>
      </item>
      <item row="0" column="1">
-      <widget class="ValidatingLineEdit" name="local_source_field"/>
+      <widget class="ValidatingLineEdit" name="local_source_field">
+       <property name="placeholderText">
+        <string>Path the mod was installed from</string>
+       </property>
+      </widget>
      </item>
      <item row="0" column="2">
       <widget class="QPushButton" name="path_picker_button">
@@ -46,12 +53,16 @@
      <item row="1" column="0">
       <widget class="QLabel" name="label_2">
        <property name="text">
-        <string>Remote Source:</string>
+        <string>Remote Source (optional):</string>
        </property>
       </widget>
      </item>
      <item row="1" column="1">
-      <widget class="QLineEdit" name="remote_source_field"/>
+      <widget class="QLineEdit" name="remote_source_field">
+       <property name="placeholderText">
+        <string>e.g. https://www.nexusmods.com/...</string>
+       </property>
+      </widget>
      </item>
     </layout>
    </item>

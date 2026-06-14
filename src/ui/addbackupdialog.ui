@@ -20,12 +20,16 @@
       <string>Name for the new backup</string>
      </property>
      <property name="text">
-      <string>Backup name:</string>
+      <string>Backup name (required):</string>
      </property>
     </widget>
    </item>
    <item row="0" column="1">
-    <widget class="ValidatingLineEdit" name="name_field"/>
+    <widget class="ValidatingLineEdit" name="name_field">
+     <property name="placeholderText">
+      <string>Name for this backup</string>
+     </property>
+    </widget>
    </item>
    <item row="1" column="0">
     <widget class="QLabel" name="label_2">
@@ -33,7 +37,7 @@
       <string>Data from this backup will be copied to create the new backup</string>
      </property>
      <property name="text">
-      <string>Copy from:</string>
+      <string>Copy from (optional):</string>
      </property>
     </widget>
    </item>

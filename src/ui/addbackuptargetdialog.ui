@@ -17,7 +17,7 @@
    <item row="0" column="0">
     <widget class="QLabel" name="label">
      <property name="text">
-      <string>Target Name:</string>
+      <string>Target Name (required):</string>
      </property>
     </widget>
    </item>
@@ -27,12 +27,16 @@
    <item row="1" column="0">
     <widget class="QLabel" name="label_2">
      <property name="text">
-      <string>Target Path:</string>
+      <string>Target Path (required):</string>
      </property>
     </widget>
    </item>
    <item row="1" column="1">
-    <widget class="ValidatingLineEdit" name="target_path_field"/>
+    <widget class="ValidatingLineEdit" name="target_path_field">
+     <property name="placeholderText">
+      <string>File or folder to keep backup versions of</string>
+     </property>
+    </widget>
    </item>
    <item row="1" column="2">
     <widget class="QPushButton" name="path_picker_button">
@@ -48,7 +52,7 @@
    <item row="2" column="0">
     <widget class="QLabel" name="label_3">
      <property name="text">
-      <string>Default Backup Name:</string>
+      <string>Default Backup Name (optional):</string>
      </property>
     </widget>
    </item>
@@ -58,7 +62,7 @@
    <item row="3" column="0">
     <widget class="QLabel" name="label_4">
      <property name="text">
-      <string>First Backup Name:</string>
+      <string>First Backup Name (optional):</string>
      </property>
     </widget>
    </item>

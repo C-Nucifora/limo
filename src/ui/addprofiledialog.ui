@@ -17,7 +17,7 @@
    <item row="0" column="0">
     <widget class="QLabel" name="label">
      <property name="text">
-      <string>Enter a name and chose if you want to clone an existing profile.</string>
+      <string>Enter a name for the new profile. Cloning copies an existing profile's mod selection; the app version is optional (used only for FOMOD conditions).</string>
      </property>
     </widget>
    </item>
@@ -46,17 +46,21 @@
         <string>Profile name</string>
        </property>
        <property name="text">
-        <string>Name:</string>
+        <string>Name (required):</string>
        </property>
       </widget>
      </item>
      <item row="0" column="1">
-      <widget class="ValidatingLineEdit" name="name_field"/>
+      <widget class="ValidatingLineEdit" name="name_field">
+       <property name="placeholderText">
+        <string>e.g. Default</string>
+       </property>
+      </widget>
      </item>
      <item row="1" column="0">
       <widget class="QLabel" name="label_3">
        <property name="text">
-        <string>App Version:</string>
+        <string>App Version (optional):</string>
        </property>
       </widget>
      </item>

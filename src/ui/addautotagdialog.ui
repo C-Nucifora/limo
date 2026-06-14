@@ -11,18 +11,22 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>Dialog</string>
+   <string>Add Auto Tag</string>
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
     <widget class="QLabel" name="info_label">
      <property name="text">
-      <string>Enter a unique tag name:</string>
+      <string>Auto tags are applied automatically to mods that match a rule. Enter a unique name for the new tag:</string>
      </property>
     </widget>
    </item>
    <item>
-    <widget class="ValidatingLineEdit" name="name_field"/>
+    <widget class="ValidatingLineEdit" name="name_field">
+    <property name="placeholderText">
+     <string>e.g. Textures</string>
+    </property>
+   </widget>
    </item>
    <item>
     <spacer name="verticalSpacer">
