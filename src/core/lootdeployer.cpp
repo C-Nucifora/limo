@@ -72,21 +72,28 @@ void LootDeployer::addProfile(int source)
     saveSettings();
     return;
   }
+  // Overwrite any stale backup files left from a previously removed profile so creating a profile
+  // doesn't fail with a "file already exists" error (limo-app/limo#131).
+  const auto copy_opts = sfs::copy_options::overwrite_existing;
   if(source >= 0 && source <= num_profiles_ && num_profiles_ > 1)
   {
     sfs::copy(dest_path_ / ("." + plugin_file_name_ + EXTENSION + std::to_string(source)),
-              dest_path_ / ("." + plugin_file_name_ + EXTENSION + std::to_string(num_profiles_)));
+              dest_path_ / ("." + plugin_file_name_ + EXTENSION + std::to_string(num_profiles_)),
+              copy_opts);
     sfs::copy(dest_path_ / ("." + app_plugin_file_name_ + EXTENSION + std::to_string(source)),
               dest_path_ /
-                ("." + app_plugin_file_name_ + EXTENSION + std::to_string(num_profiles_)));
+                ("." + app_plugin_file_name_ + EXTENSION + std::to_string(num_profiles_)),
+              copy_opts);
   }
   else
   {
     sfs::copy(dest_path_ / plugin_file_name_,
-              dest_path_ / ("." + plugin_file_name_ + EXTENSION + std::to_string(num_profiles_)));
+              dest_path_ / ("." + plugin_file_name_ + EXTENSION + std::to_string(num_profiles_)),
+              copy_opts);
     sfs::copy(dest_path_ / app_plugin_file_name_,
               dest_path_ /
-                ("." + app_plugin_file_name_ + EXTENSION + std::to_string(num_profiles_)));
+                ("." + app_plugin_file_name_ + EXTENSION + std::to_string(num_profiles_)),
+              copy_opts);
   }
   num_profiles_++;
   saveSettings();
@@ -187,7 +194,7 @@ void LootDeployer::sortModsByConflicts(std::optional<ProgressNode*> progress_nod
   if(!sfs::exists(prelude_path))
     prelude_path = "";
   loot_handle->GetDatabase().LoadMasterlistWithPrelude(master_list_path, prelude_path);
-  if(!sfs::exists(user_list_path))
+  if(sfs::exists(user_list_path))
     loot_handle->GetDatabase().LoadUserlist(user_list_path);
   if(progress_node)
     (*progress_node)->child(1).advance();
