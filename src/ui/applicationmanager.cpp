@@ -799,6 +799,59 @@ void ApplicationManager::dissolveGroup(int app_id, int group)
   emit completedOperations("Group dissolved");
 }
 
+void ApplicationManager::mergeTw3Scripts(int app_id, int deployer)
+{
+  if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
+  {
+    auto result = handleExceptions(&ModdedApplication::mergeTw3Scripts, apps_[app_id], deployer);
+    if(result)
+      emit sendGameToolResult("Witcher 3 Script Merge", result->c_str());
+  }
+  emit completedOperations();
+}
+
+void ApplicationManager::mergeTw3Config(int app_id, int deployer)
+{
+  if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
+  {
+    auto result = handleExceptions(&ModdedApplication::mergeTw3Config, apps_[app_id], deployer);
+    if(result)
+      emit sendGameToolResult("Witcher 3 Config Merge", result->c_str());
+  }
+  emit completedOperations();
+}
+
+void ApplicationManager::getCyberpunkSetupInfo(int app_id, int deployer)
+{
+  if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
+  {
+    auto result =
+      handleExceptions(&ModdedApplication::getCyberpunkSetupInfo, apps_[app_id], deployer);
+    if(result)
+      emit sendGameToolResult("Cyberpunk 2077 Setup", result->c_str());
+  }
+  emit completedOperations();
+}
+
+void ApplicationManager::deployRedMods(int app_id, int deployer)
+{
+  if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
+  {
+    auto command =
+      handleExceptions(&ModdedApplication::buildRedmodDeployCommand, apps_[app_id], deployer);
+    if(command)
+    {
+      if(command->empty())
+        emit sendGameToolResult("Cyberpunk REDmod Deploy",
+                                "No REDmods (mods containing an info.json) were found among the "
+                                "enabled mods of this deployer.");
+      else
+        emit sendRunCommand("REDmod deploy", command->c_str());
+    }
+  }
+  emit completedOperations();
+}
+
 void ApplicationManager::sortModsByConflicts(int app_id, int deployer)
 {
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))

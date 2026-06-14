@@ -1,11 +1,15 @@
 #include "moddedapplication.h"
 #include <limits>
 #include "core/deployerinfo.h"
+#include "cyberpunkredmod.h"
+#include "cyberpunksetup.h"
 #include "deployerfactory.h"
 #include "installer.h"
 #include "parseerror.h"
 #include "pathutils.h"
 #include "reversedeployer.h"
+#include "tw3mergeutil.h"
+#include "tw3scriptmerge.h"
 #include <algorithm>
 #include <fstream>
 #include <memory>
@@ -2578,4 +2582,119 @@ std::string ModdedApplication::checkModRules() const
 
   return "Mod rule violations detected before deployment:\n" + warnings +
          "Deployment will proceed; resolve conflicts manually.";
+}
+
+std::vector<std::pair<int, sfs::path>> ModdedApplication::getEnabledModPathsInLoadOrder(
+  int deployer) const
+{
+  std::vector<std::pair<int, sfs::path>> result;
+  if(deployer < 0 || deployer >= static_cast<int>(deployers_.size()))
+    return result;
+  for(const auto& entry_weak : *deployers_[deployer]->getLoadorder())
+  {
+    auto entry = std::static_pointer_cast<DeployerModInfo>(entry_weak.lock());
+    if(!entry || entry->isSeparator || !entry->enabled)
+      continue;
+    result.emplace_back(entry->id, staging_dir_ / std::to_string(entry->id));
+  }
+  return result;
+}
+
+std::string ModdedApplication::mergeTw3Scripts(int deployer)
+{
+  if(deployer < 0 || deployer >= static_cast<int>(deployers_.size()))
+    return "Invalid deployer.";
+  const auto mods = getEnabledModPathsInLoadOrder(deployer);
+  if(mods.empty())
+    return "No enabled mods to merge scripts for.";
+  const sfs::path output_dir = staging_dir_ / "tw3_merged_scripts";
+  const auto result = tw3_script_merge::mergeScripts(mods, output_dir);
+  if(result.scripts_merged == 0)
+    return "No scripts are shared between two or more enabled mods; nothing to merge.";
+  std::string msg =
+    std::format("Merged {} conflicting script(s): {} auto-resolved, {} need manual review.\n\n"
+                "Merged scripts written to:\n{}\n",
+                result.scripts_merged,
+                result.conflicts_auto_resolved,
+                result.conflicts_unresolved,
+                output_dir.string());
+  if(!result.unresolved_paths.empty())
+  {
+    msg += "\nScripts containing conflict markers (resolve by hand):\n";
+    for(const auto& p : result.unresolved_paths)
+      msg += "  - " + p + "\n";
+  }
+  msg += "\nNote: experimental. The merged-scripts folder must be added as a high-priority mod "
+         "for the game to use it, and no vanilla script base was supplied.";
+  return msg;
+}
+
+std::string ModdedApplication::mergeTw3Config(int deployer)
+{
+  if(deployer < 0 || deployer >= static_cast<int>(deployers_.size()))
+    return "Invalid deployer.";
+  const auto mods = getEnabledModPathsInLoadOrder(deployer);
+  if(mods.empty())
+    return "No enabled mods to merge config for.";
+  std::vector<Tw3MergeUtil::MergeSource> sources;
+  for(const auto& [id, path] : mods)
+    sources.push_back(Tw3MergeUtil::MergeSource{ id, path });
+  const sfs::path game_root = deployers_[deployer]->getDestPath();
+  const auto result = Tw3MergeUtil::mergeInputXml(game_root, sources);
+  std::string msg = std::format("input.xml merge: {}\n  mods merged: {}, entries added: {}, "
+                                "file {}.\n",
+                                result.success ? "ok" : "failed",
+                                result.mods_merged,
+                                result.entries_merged,
+                                result.changed ? "updated" : "unchanged");
+  if(!result.message.empty())
+    msg += "  " + result.message + "\n";
+  msg += "\nNote: experimental. Only input.xml is merged; the *.settings files live in the "
+         "Proton Documents tree and are not auto-located yet.";
+  return msg;
+}
+
+std::string ModdedApplication::getCyberpunkSetupInfo(int deployer)
+{
+  std::string msg = "Cyberpunk 2077 mod setup checklist:\n";
+  for(const auto& item : cyberpunk_setup::setupChecklist())
+    msg += "  - " + item + "\n";
+  msg += std::format("\nRequired Steam launch options:\n  {}\n",
+                     cyberpunk_setup::REQUIRED_LAUNCH_OPTIONS);
+  msg += std::format("\nInstall required dependencies in the Proton prefix with:\n  {}\n",
+                     cyberpunk_setup::protontricksCommand());
+  if(deployer >= 0 && deployer < static_cast<int>(deployers_.size()))
+  {
+    const sfs::path target = deployers_[deployer]->getDestPath();
+    const int mode = static_cast<int>(deployers_[deployer]->getDeployMode());
+    const auto warning = cyberpunk_setup::checkCyberpunkDeployment(mode, staging_dir_, target);
+    if(warning)
+      msg += "\nWARNING about this deployer's deploy mode:\n  " + *warning + "\n";
+    else
+      msg += "\nThis deployer's deploy mode looks safe for CET/RED4ext.\n";
+  }
+  return msg;
+}
+
+std::string ModdedApplication::buildRedmodDeployCommand(int deployer)
+{
+  if(deployer < 0 || deployer >= static_cast<int>(deployers_.size()))
+    return {};
+  const auto mods = getEnabledModPathsInLoadOrder(deployer);
+  const sfs::path game_root = deployers_[deployer]->getDestPath();
+  std::vector<std::pair<int, sfs::path>> redmod_sources;
+  std::vector<std::string> names;
+  for(const auto& [id, path] : mods)
+  {
+    const auto redmod = cyberpunk_redmod::parseRedMod(path);
+    if(redmod)
+    {
+      redmod_sources.emplace_back(id, path);
+      names.push_back(redmod->name);
+    }
+  }
+  if(redmod_sources.empty())
+    return {};
+  cyberpunk_redmod::layoutRedMods(redmod_sources, game_root);
+  return cyberpunk_redmod::redmodDeployCommand(game_root, names, {});
 }

@@ -15,6 +15,7 @@
 #include "colors.h"
 #include "core/consts.h"
 #include "core/cryptography.h"
+#include "core/deployerfactory.h"
 #include "core/installer.h"
 #include "deployerlistview.h"
 #include "editmanualtagsdialog.h"
@@ -306,6 +307,18 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::setGroupNotes);
   connect(this, &MainWindow::dissolveGroup,
           app_manager_, &ApplicationManager::dissolveGroup);
+  connect(this, &MainWindow::mergeTw3Scripts,
+          app_manager_, &ApplicationManager::mergeTw3Scripts);
+  connect(this, &MainWindow::mergeTw3Config,
+          app_manager_, &ApplicationManager::mergeTw3Config);
+  connect(this, &MainWindow::getCyberpunkSetupInfo,
+          app_manager_, &ApplicationManager::getCyberpunkSetupInfo);
+  connect(this, &MainWindow::deployRedMods,
+          app_manager_, &ApplicationManager::deployRedMods);
+  connect(app_manager_, &ApplicationManager::sendGameToolResult,
+          this, &MainWindow::onGameToolResult);
+  connect(app_manager_, &ApplicationManager::sendRunCommand,
+          this, &MainWindow::onRunGameCommand);
   connect(ui->deployer_list, &DeployerListView::modMoved,
           this, &MainWindow::onModMoved);
   connect(this, &MainWindow::extractArchive,
@@ -580,11 +593,29 @@ void MainWindow::setupMenus()
   conflict_detail_action_ = new QAction("Conflict Details...", this);
   conflict_detail_action_->setToolTip("Show which files this mod wins and loses against other mods");
   connect(conflict_detail_action_, &QAction::triggered, this, &MainWindow::onConflictDetails);
+  merge_tw3_scripts_action_ = new QAction("Merge Witcher 3 Scripts (experimental)...", this);
+  merge_tw3_scripts_action_->setToolTip(
+    "Merge conflicting WitcherScript (.ws) files across the enabled mods of this deployer");
+  connect(merge_tw3_scripts_action_, &QAction::triggered, this, &MainWindow::onMergeTw3Scripts);
+  merge_tw3_config_action_ = new QAction("Merge Witcher 3 Config (experimental)...", this);
+  merge_tw3_config_action_->setToolTip(
+    "Merge each enabled mod's input.xml fragment into the game's shared input.xml");
+  connect(merge_tw3_config_action_, &QAction::triggered, this, &MainWindow::onMergeTw3Config);
+  cyberpunk_setup_action_ = new QAction("Cyberpunk 2077 Setup...", this);
+  cyberpunk_setup_action_->setToolTip(
+    "Show the Cyberpunk 2077 Proton setup checklist and a deploy-mode safety check");
+  connect(cyberpunk_setup_action_, &QAction::triggered, this, &MainWindow::onCyberpunkSetup);
+  deploy_redmods_action_ = new QAction("Deploy REDmods (experimental)...", this);
+  deploy_redmods_action_->setToolTip(
+    "Lay out enabled REDmods and run redMod.exe deploy under Proton");
+  connect(deploy_redmods_action_, &QAction::triggered, this, &MainWindow::onDeployRedmods);
   QList<QAction*> deployer_list_actions{
     ui->actionremove_from_deployer, ui->actionget_file_conflicts,
     ui->actionget_mod_conflicts,    ui->actionmove_mod,
     ui->actionbrowse_mod_files,     ui->actionSort_Mods,
-    ui->actionAdd_to_Ignore_List,   conflict_detail_action_
+    ui->actionAdd_to_Ignore_List,   conflict_detail_action_,
+    merge_tw3_scripts_action_,      merge_tw3_config_action_,
+    cyberpunk_setup_action_,        deploy_redmods_action_
   };
   std::sort(deployer_list_actions.begin(), deployer_list_actions.end(), sort_actions);
   deployer_list_menu_->addActions(deployer_list_actions);
@@ -1817,6 +1848,19 @@ void MainWindow::onDeployerListContextMenu(QPoint pos)
     else
       action->setVisible(false);
   }
+
+  // Game-specific tool actions: only show them for the matching deployer type.
+  const int depl = currentDeployer();
+  const std::string depl_type =
+    (depl >= 0 && depl < static_cast<int>(app_info_.deployer_types.size()))
+      ? app_info_.deployer_types[depl]
+      : std::string();
+  const bool is_tw3 = depl_type == DeployerFactory::WITCHER3DEPLOYER;
+  const bool is_cp = depl_type == DeployerFactory::CYBERPUNKDEPLOYER;
+  merge_tw3_scripts_action_->setVisible(is_tw3);
+  merge_tw3_config_action_->setVisible(is_tw3);
+  cyberpunk_setup_action_->setVisible(is_cp);
+  deploy_redmods_action_->setVisible(is_cp);
 
   bool has_visible_actions = false;
   for(auto&& action : deployer_list_menu_->actions())
@@ -3417,6 +3461,52 @@ void MainWindow::onGroupDissolved(int app_id, int group)
   emit dissolveGroup(app_id, group);
   if(app_id == currentApp())
     emit getModInfo(app_id);
+}
+
+void MainWindow::onMergeTw3Scripts()
+{
+  setStatusMessage("Merging Witcher 3 scripts");
+  setBusyStatus(true);
+  emit mergeTw3Scripts(currentApp(), currentDeployer());
+}
+
+void MainWindow::onMergeTw3Config()
+{
+  setStatusMessage("Merging Witcher 3 config");
+  setBusyStatus(true);
+  emit mergeTw3Config(currentApp(), currentDeployer());
+}
+
+void MainWindow::onCyberpunkSetup()
+{
+  setBusyStatus(true);
+  emit getCyberpunkSetupInfo(currentApp(), currentDeployer());
+}
+
+void MainWindow::onDeployRedmods()
+{
+  setStatusMessage("Preparing REDmod deployment");
+  setBusyStatus(true);
+  emit deployRedMods(currentApp(), currentDeployer());
+}
+
+void MainWindow::onGameToolResult(QString title, QString message)
+{
+  QMessageBox::information(this, title, message);
+}
+
+void MainWindow::onRunGameCommand(QString name, QString command)
+{
+  const auto answer =
+    QMessageBox::question(this,
+                          "Run " + name + "?",
+                          "This will run the following command:\n\n" + command +
+                            "\n\nThis is experimental and runs an external tool under Proton. "
+                            "Continue?",
+                          QMessageBox::Yes | QMessageBox::No,
+                          QMessageBox::No);
+  if(answer == QMessageBox::Yes)
+    runConcurrent(command, name, "REDmod");
 }
 
 void MainWindow::on_actionShow_Nexus_Page_triggered()

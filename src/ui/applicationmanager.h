@@ -542,6 +542,18 @@ signals:
                      std::vector<std::string> group_notes,
                      std::vector<std::vector<int>> group_members,
                      std::vector<int> active_members);
+  /*!
+   * \brief Sends the textual result of a game-specific tool (merge / setup) to the UI.
+   * \param title Title for the result window.
+   * \param message The result text.
+   */
+  void sendGameToolResult(QString title, QString message);
+  /*!
+   * \brief Asks the UI to run a shell command (e.g. the REDmod deploy command).
+   * \param name Display name for the command.
+   * \param command The shell command to run.
+   */
+  void sendRunCommand(QString name, QString command);
 
 public slots:
   /*!
@@ -1111,4 +1123,28 @@ public slots:
    * \param group Target group.
    */
   void dissolveGroup(int app_id, int group);
+  /*!
+   * \brief Merges conflicting Witcher 3 scripts for the given deployer. Emits sendGameToolResult.
+   * \param app_id Target app.
+   * \param deployer Target deployer.
+   */
+  void mergeTw3Scripts(int app_id, int deployer);
+  /*!
+   * \brief Merges Witcher 3 input.xml fragments for the given deployer. Emits sendGameToolResult.
+   * \param app_id Target app.
+   * \param deployer Target deployer.
+   */
+  void mergeTw3Config(int app_id, int deployer);
+  /*!
+   * \brief Produces the Cyberpunk setup report for the given deployer. Emits sendGameToolResult.
+   * \param app_id Target app.
+   * \param deployer Target deployer.
+   */
+  void getCyberpunkSetupInfo(int app_id, int deployer);
+  /*!
+   * \brief Lays out REDmods and emits the deploy command via sendRunCommand (or a result if none).
+   * \param app_id Target app.
+   * \param deployer Target deployer.
+   */
+  void deployRedMods(int app_id, int deployer);
 };

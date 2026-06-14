@@ -184,6 +184,14 @@ private:
   QAction* manage_groups_action_;
   /*! \brief Deployer context action: show per-file win/loss conflict detail for the selected mod. */
   QAction* conflict_detail_action_;
+  /*! \brief Deployer context action (Witcher 3): merge conflicting WitcherScript files. */
+  QAction* merge_tw3_scripts_action_;
+  /*! \brief Deployer context action (Witcher 3): merge input.xml config fragments. */
+  QAction* merge_tw3_config_action_;
+  /*! \brief Deployer context action (Cyberpunk 2077): show the Proton setup report. */
+  QAction* cyberpunk_setup_action_;
+  /*! \brief Deployer context action (Cyberpunk 2077): lay out and deploy REDmods. */
+  QAction* deploy_redmods_action_;
   /*! \brief If true: changes to ui->info_tool_list will not trigger table updates. */
   bool ignore_tool_changes_ = false;
   /*! \brief If true: Show confirmation box before removing a Deployer. */
@@ -1184,6 +1192,26 @@ private slots:
   void onGroupNotesChanged(int app_id, int group, QString notes);
   /*! \brief Forwards a group dissolve request to the ApplicationManager. */
   void onGroupDissolved(int app_id, int group);
+  /*! \brief Triggers a Witcher 3 script merge for the current deployer. */
+  void onMergeTw3Scripts();
+  /*! \brief Triggers a Witcher 3 input.xml config merge for the current deployer. */
+  void onMergeTw3Config();
+  /*! \brief Requests the Cyberpunk 2077 setup report for the current deployer. */
+  void onCyberpunkSetup();
+  /*! \brief Triggers REDmod layout + deploy for the current deployer. */
+  void onDeployRedmods();
+  /*!
+   * \brief Shows the textual result of a game-specific tool in a message box.
+   * \param title Window title.
+   * \param message The result text.
+   */
+  void onGameToolResult(QString title, QString message);
+  /*!
+   * \brief Confirms with the user and runs a game-specific shell command.
+   * \param name Display name for the command.
+   * \param command The shell command to run.
+   */
+  void onRunGameCommand(QString name, QString command);
 
 signals:
   /*!
@@ -1729,4 +1757,28 @@ signals:
    * \param group Target group.
    */
   void dissolveGroup(int app_id, int group);
+  /*!
+   * \brief Requests a Witcher 3 script merge for one deployer.
+   * \param app_id Target app.
+   * \param deployer Target deployer.
+   */
+  void mergeTw3Scripts(int app_id, int deployer);
+  /*!
+   * \brief Requests a Witcher 3 input.xml config merge for one deployer.
+   * \param app_id Target app.
+   * \param deployer Target deployer.
+   */
+  void mergeTw3Config(int app_id, int deployer);
+  /*!
+   * \brief Requests the Cyberpunk 2077 setup report for one deployer.
+   * \param app_id Target app.
+   * \param deployer Target deployer.
+   */
+  void getCyberpunkSetupInfo(int app_id, int deployer);
+  /*!
+   * \brief Requests REDmod layout + deploy for one deployer.
+   * \param app_id Target app.
+   * \param deployer Target deployer.
+   */
+  void deployRedMods(int app_id, int deployer);
 };

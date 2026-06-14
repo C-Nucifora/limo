@@ -743,10 +743,48 @@ public:
    * \return The warning message, or an empty string.
    */
   std::string checkModRules() const;
+  /*!
+   * \brief Merges conflicting WitcherScript (.ws) files across the enabled mods of the given
+   * Witcher 3 deployer into a dedicated merged-scripts folder in the staging directory.
+   * \param deployer Target deployer (should be a Witcher 3 deployer).
+   * \return A human-readable summary of what was merged and which scripts need manual review.
+   */
+  std::string mergeTw3Scripts(int deployer);
+  /*!
+   * \brief Merges each enabled mod's input.xml fragment into the Witcher 3 shared input.xml
+   * for the given deployer, idempotently (via LIMO_MERGE sentinel markers).
+   * \param deployer Target deployer (should be a Witcher 3 deployer).
+   * \return A human-readable summary of the merge.
+   */
+  std::string mergeTw3Config(int deployer);
+  /*!
+   * \brief Builds a human-readable Cyberpunk 2077 Proton setup report for the given deployer:
+   * the setup checklist, required launch options, the protontricks command, and a deploy-mode
+   * safety warning for the deployer's target.
+   * \param deployer Target deployer (should be a Cyberpunk 2077 deployer).
+   * \return The report text.
+   */
+  std::string getCyberpunkSetupInfo(int deployer);
+  /*!
+   * \brief Lays out the enabled REDmods of the given deployer into the game's mods directory
+   * and returns the shell command that runs redMod.exe deploy under Proton.
+   * \param deployer Target deployer (should be a Cyberpunk 2077 deployer).
+   * \return The deploy command, or an empty string if no REDmods were found among the enabled
+   * mods.
+   */
+  std::string buildRedmodDeployCommand(int deployer);
 
 private:
   /*! \brief The subdirectory used to store downloads. */
   static inline constexpr std::string DOWNLOAD_DIR = "_download";
+  /*!
+   * \brief Returns (mod id, staging path) for every enabled, non-separator entry in the given
+   * deployer's load order, in load order.
+   * \param deployer Target deployer.
+   * \return The mod id / staging path pairs.
+   */
+  std::vector<std::pair<int, std::filesystem::path>> getEnabledModPathsInLoadOrder(
+    int deployer) const;
 
   /*! \brief The name of this application. */
   std::string name_;
