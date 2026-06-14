@@ -23,6 +23,31 @@ std::string quote(const sfs::path& path)
 }
 
 /*!
+ * \brief POSIX-shell-escapes an arbitrary string by single-quoting it.
+ *
+ * Wraps \p s in single quotes and replaces every embedded single quote with the
+ * \c '\\'' sequence. Inside single quotes the shell treats every other character
+ * literally, so this neutralises $, backticks, ;, spaces, backslashes, etc. Used
+ * for values that originate from untrusted mod metadata (e.g. a REDmod's name from
+ * its info.json) before they are placed on a shell command line.
+ * \param s String to escape.
+ * \return The single-quoted, escaped string.
+ */
+std::string shellEscape(const std::string& s)
+{
+  std::string out = "'";
+  for(char c : s)
+  {
+    if(c == '\'')
+      out += "'\\''";
+    else
+      out += c;
+  }
+  out += "'";
+  return out;
+}
+
+/*!
  * \brief Reads and parses a JSON file from disk.
  * \param file_path File to read.
  * \param[out] out_value Receives the parsed value on success.
@@ -219,11 +244,13 @@ std::string redmodDeployCommand(const sfs::path& game_root,
   // is accepted (it may require a Windows path under Proton).
   command += " -root=" + quote(game_root);
 
-  // Pass the load order explicitly, one -mod= per entry, in order.
+  // Pass the load order explicitly, one -mod= per entry, in order. The mod name
+  // comes from untrusted info.json metadata, so it is shell-escaped to prevent
+  // command injection (see shellEscape).
   // TODO(cp-redmod): Confirm repeated -mod=<name> arguments are the correct way to
   // specify load order and that names (not folder paths) are expected.
   for(const auto& name : mod_names_in_order)
-    command += " -mod=" + name;
+    command += " -mod=" + shellEscape(name);
 
   return command;
 }
