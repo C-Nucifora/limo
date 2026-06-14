@@ -292,6 +292,9 @@ set(PROJECT_SOURCES
         src/ui/changelogdialog.h
         src/ui/changelogdialog.ui
         src/ui/colors.h
+        src/ui/conflictdetaildialog.cpp
+        src/ui/conflictdetaildialog.h
+        src/ui/conflictdetaildialog.ui
         src/ui/conflictsmodel.cpp
         src/ui/conflictsmodel.h
         src/ui/deployerlistmodel.cpp
