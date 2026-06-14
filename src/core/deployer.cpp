@@ -185,8 +185,10 @@ void Deployer::setModStatus(int mod_id, bool status)
     return;
   auto iter = std::find_if(loadorders_[current_profile_]->begin(),
                            loadorders_[current_profile_]->end(),
-                           [mod_id](const auto& entry) { return entry.lock()->id == mod_id; })->lock();
-  auto deployer_mod = static_pointer_cast<DeployerModInfo>(iter);
+                           [mod_id](const auto& entry) { return entry.lock()->id == mod_id; });
+  if(iter == loadorders_[current_profile_]->end())
+    return;
+  auto deployer_mod = static_pointer_cast<DeployerModInfo>(iter->lock());
   if (deployer_mod != nullptr && !deployer_mod->isSeparator)
     deployer_mod->enabled = status;
   return;
@@ -414,9 +416,9 @@ bool Deployer::swapMod(int old_id, int new_id)
   auto weak_iter = std::find_if(loadorders_[current_profile_]->begin(),
                            loadorders_[current_profile_]->end(),
                            [old_id](auto entry) { return entry.lock()->id == old_id; });
-  auto shared_iter = weak_iter->lock();
   if(weak_iter == loadorders_[current_profile_]->end())
     return false;
+  auto shared_iter = weak_iter->lock();
   shared_iter->id = new_id;
   if(auto_update_conflict_groups_)
     updateConflictGroups();
