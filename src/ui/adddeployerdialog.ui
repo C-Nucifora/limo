@@ -15,19 +15,37 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
+    <widget class="QLabel" name="help_label">
+     <property name="text">
+      <string>A deployer links the mods in its load order into a chosen folder of the game (its &lt;b&gt;target directory&lt;/b&gt;). Default deployers are created automatically when you add an application — add one here only for custom setups.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
     <layout class="QGridLayout" name="gridLayout">
      <item row="3" column="2">
-      <widget class="ValidatingLineEdit" name="source_path_field"/>
+      <widget class="ValidatingLineEdit" name="source_path_field">
+       <property name="placeholderText">
+        <string>Usually left empty (Limo's staging directory is used)</string>
+       </property>
+      </widget>
      </item>
      <item row="3" column="0">
       <widget class="QLabel" name="source_dir_label">
        <property name="text">
-        <string>Source directory:</string>
+        <string>Source directory (optional):</string>
        </property>
       </widget>
      </item>
      <item row="2" column="2">
-      <widget class="ValidatingLineEdit" name="path_field"/>
+      <widget class="ValidatingLineEdit" name="path_field">
+       <property name="placeholderText">
+        <string>Game folder the mods are linked into</string>
+       </property>
+      </widget>
      </item>
      <item row="0" column="0">
       <widget class="QLabel" name="label">
@@ -35,7 +53,7 @@
         <string>Name of the deployer</string>
        </property>
        <property name="text">
-        <string>Name:</string>
+        <string>Name (required):</string>
        </property>
       </widget>
      </item>
@@ -45,7 +63,7 @@
         <string>This is where installed mods will be deployed to</string>
        </property>
        <property name="text">
-        <string>Target directory:</string>
+        <string>Target directory (required):</string>
        </property>
       </widget>
      </item>
@@ -55,7 +73,7 @@
         <string>Determines how mods will be deployed</string>
        </property>
        <property name="text">
-        <string>Deployer type:</string>
+        <string>Deployer type (required):</string>
        </property>
       </widget>
      </item>
@@ -96,7 +114,11 @@
       </widget>
      </item>
      <item row="0" column="2">
-      <widget class="ValidatingLineEdit" name="name_field"/>
+      <widget class="ValidatingLineEdit" name="name_field">
+       <property name="placeholderText">
+        <string>e.g. Mods</string>
+       </property>
+      </widget>
      </item>
      <item row="4" column="2">
       <widget class="QComboBox" name="deploy_mode_box">

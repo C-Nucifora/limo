@@ -15,6 +15,16 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
+    <widget class="QLabel" name="help_label">
+     <property name="text">
+      <string>A tool is an external program Limo can launch for this game (e.g. a save editor, BodySlide, or a script merger). At minimum give it a name and the command used to run it.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
     <widget class="EditToolWidget" name="tool_widget" native="true"/>
    </item>
    <item>
