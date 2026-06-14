@@ -12,7 +12,11 @@ FomodRadioButton::FomodRadioButton(const QString& text,
   setText(text);
 }
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+void FomodRadioButton::enterEvent(QEnterEvent* event)
+#else
 void FomodRadioButton::enterEvent(QEvent* event)
+#endif
 {
   description_label_->setText(description_);
   QPixmap pixmap(image_path_);

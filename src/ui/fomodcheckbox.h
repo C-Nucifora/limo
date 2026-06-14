@@ -39,7 +39,11 @@ protected:
    * info panel.
    * \param event The source event.
    */
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+  void enterEvent(QEnterEvent* event) override;
+#else
   void enterEvent(QEvent* event) override;
+#endif
 
 private:
   /*! \brief Description of the plugin represented by this button. */

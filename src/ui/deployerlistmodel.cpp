@@ -4,6 +4,11 @@
 #include "core/treeitem.h"
 #include "modlistmodel.h"
 #include "qmodelindexutils.h"
+
+// Qt6 requires this type to be a registered metatype for the QVariant::setValue below; it was
+// previously only declared in mainwindow.cpp's translation unit.
+Q_DECLARE_METATYPE(std::vector<int>)
+
 #include <QApplication>
 #include <QBrush>
 
@@ -129,7 +134,7 @@ QVariant DeployerListModel::data(const QModelIndex& index, int role) const
   if(role == valid_mod_actions_role)
   {
     QVariant var;
-    var.setValue<std::vector<int>>(deployer_info_.valid_mod_actions[row]);
+    var.setValue(deployer_info_.valid_mod_actions[row]);
     return var;
   }
   if (role == ModListModel::expansion_role) {
