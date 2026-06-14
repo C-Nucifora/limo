@@ -454,7 +454,7 @@ void PluginDeployer::updateSourceMods()
     log_(Log::LOG_ERROR,
          std::format("Deployer '{}': Could not find deployed files at '{}'",
                      name_,
-                     deployed_source_path->string()));
+                     source_path_.string()));
     return;
   }
   auto deployed_files = loadDeployedFiles({}, *deployed_source_path);

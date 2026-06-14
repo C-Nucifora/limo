@@ -138,18 +138,28 @@ unsigned long Installer::install(const sfs::path& source,
     {
       const auto& [source_file, dest_file] = *iter;
       sfs::create_directories(destination / dest_file.parent_path());
-      if(!sfs::exists(tmp_dir / source_file))
+      sfs::path actual_source = source_file;
+      if(!sfs::exists(tmp_dir / actual_source))
       {
-        sfs::remove_all(destination);
-        sfs::remove_all(tmp_dir);
-        throw std::runtime_error("Could not find '" + source_file.string() + "'");
+        // The ModuleConfig may reference a source whose casing differs from the extracted files
+        // (Windows paths are case-insensitive), e.g. a "Required" folder; resolve it
+        // case-insensitively before giving up (limo-app/limo#46, #253).
+        auto resolved = pu::pathExists(source_file, tmp_dir, true);
+        if(resolved)
+          actual_source = *resolved;
+        else
+        {
+          sfs::remove_all(destination);
+          sfs::remove_all(tmp_dir);
+          throw std::runtime_error("Could not find '" + source_file.string() + "'");
+        }
       }
       bool contains_no_duplicates = std::find_if(std::next(iter),
                                                  fomod_files.end(),
                                                  [source_file](auto pair) {
                                                    return pair.first == source_file;
                                                  }) == fomod_files.end();
-      if(sfs::is_directory(tmp_dir / source_file))
+      if(sfs::is_directory(tmp_dir / actual_source))
       {
         contains_no_duplicates &= std::find_if(std::next(iter),
                                                fomod_files.end(),
@@ -171,10 +181,10 @@ unsigned long Installer::install(const sfs::path& source,
 
         if(sfs::exists(destination / dest_file))
           pu::moveFilesToDirectory(
-            tmp_dir / source_file, destination / dest_file, contains_no_duplicates);
+            tmp_dir / actual_source, destination / dest_file, contains_no_duplicates);
         else
           pu::copyOrMoveFiles(
-            tmp_dir / source_file, destination / dest_file, contains_no_duplicates);
+            tmp_dir / actual_source, destination / dest_file, contains_no_duplicates);
       }
       else
       {
@@ -182,10 +192,10 @@ unsigned long Installer::install(const sfs::path& source,
           sfs::remove(destination / dest_file);
         if(!dest_file.has_filename())
           pu::copyOrMoveFiles(
-            tmp_dir / source_file, destination / source_file.filename(), contains_no_duplicates);
+            tmp_dir / actual_source, destination / source_file.filename(), contains_no_duplicates);
         else
           pu::copyOrMoveFiles(
-            tmp_dir / source_file, destination / dest_file, contains_no_duplicates);
+            tmp_dir / actual_source, destination / dest_file, contains_no_duplicates);
       }
     }
     sfs::remove_all(tmp_dir);

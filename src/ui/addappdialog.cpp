@@ -188,11 +188,22 @@ void AddAppDialog::initConfigForApp()
       const std::string target_dir = target_string.toStdString();
       if(!sfs::exists(target_dir))
       {
-        Log::debug(std::format("App config for deployer {} for app {} contains invalid target {}",
-                               i,
-                               steam_app_id_,
-                               target_dir));
-        continue;
+        // A plugin/Loot deployer's target often lives inside the Proton prefix (e.g. ".../Local
+        // Settings/Application Data/<Game>") and is only created once the game has run. Create it
+        // rather than silently dropping the deployer, so imports set up every recommended deployer
+        // (limo-app/limo#224).
+        std::error_code ec;
+        sfs::create_directories(target_dir, ec);
+        if(ec)
+        {
+          Log::debug(std::format("App config for deployer {} for app {} contains invalid target {}",
+                                 i,
+                                 steam_app_id_,
+                                 target_dir));
+          continue;
+        }
+        Log::debug(std::format(
+          "Created missing target directory {} for deployer {} of app {}", target_dir, i, steam_app_id_));
       }
       info.target_dir = target_dir;
 
