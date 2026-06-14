@@ -112,8 +112,12 @@ set(CORE_SOURCES
         src/core/casematchingdeployer.h
         src/core/cyberpunkdeployer.cpp
         src/core/cyberpunkdeployer.h
+        src/core/cyberpunksetup.cpp
+        src/core/cyberpunksetup.h
         src/core/tw3deployer.cpp
         src/core/tw3deployer.h
+        src/core/tw3mergeutil.cpp
+        src/core/tw3mergeutil.h
         src/core/changelogentry.cpp
         src/core/changelogentry.h
         src/core/compressionerror.h
