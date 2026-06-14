@@ -564,8 +564,10 @@ void ModdedApplication::editDeployer(int deployer, const EditDeployerInfo& info)
       json_settings_["deployers"][deployer]["source_path"] = source_dir.string();
       json_settings_["deployers"][deployer]["update_profiles"] = true;
     }
-    else
+    else if(DeployerFactory::AUTONOMOUS_DEPLOYERS.at(info.type))
       json_settings_["deployers"][deployer]["source_path"] = info.source_dir;
+    else
+      json_settings_["deployers"][deployer]["source_path"] = staging_dir_.string();
     json_settings_["deployers"][deployer]["name"] = info.name;
     json_settings_["deployers"][deployer]["dest_path"] = info.target_dir;
     json_settings_["deployers"][deployer]["type"] = info.type;
