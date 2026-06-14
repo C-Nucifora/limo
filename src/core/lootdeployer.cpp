@@ -153,12 +153,16 @@ std::unordered_set<int> LootDeployer::getModConflicts(int mod_id,
   for(const auto& [path, s] : plugins_)
     plugin_paths.emplace_back(source_path_ / path);
   loot_handle->LoadPlugins(plugin_paths, false);
+  // Guard against null (plugin file missing on disk) (limo-app/limo#185, limo-app/limo#31).
   auto plugin = loot_handle->GetPlugin(plugins_[mod_id].first);
+  if(!plugin)
+    return conflicts;
   for(int i = 0; i < plugins_.size(); i++)
   {
     if(i == mod_id)
       continue;
-    if(loot_handle->GetPlugin(plugins_[i].first)->DoRecordsOverlap(*plugin))
+    auto other_plugin = loot_handle->GetPlugin(plugins_[i].first);
+    if(other_plugin && other_plugin->DoRecordsOverlap(*plugin))
       conflicts.insert(i);
   }
   return conflicts;
@@ -373,9 +377,18 @@ void LootDeployer::updateAppType()
         plugin_file_name_ = PLUGIN_FILE_NAMES.at(type);
         app_plugin_file_name_ = LOADORDER_FILE_NAME;
       }
+      // Resolve the actual on-disk filename for both the internal load-order file
+      // and the game-facing plugin file. On case-sensitive Linux filesystems, the
+      // game may have created e.g. "Plugins.txt" (Oblivion) but our constant holds
+      // "plugins.txt", so writing to the wrong case creates a second file the game
+      // never reads. Both names need the same case-resolution treatment.
+      // Fixes limo-app/limo#38 / limo-app/limo#184.
       auto file_name = pu::pathExists(plugin_file_name_, dest_path_);
       if(file_name)
         plugin_file_name_ = *file_name;
+      auto app_file_name = pu::pathExists(app_plugin_file_name_, dest_path_);
+      if(app_file_name)
+        app_plugin_file_name_ = *app_file_name;
       return;
     }
   }
@@ -557,6 +570,19 @@ void LootDeployer::updatePluginTagsPrivate()
   for(int i = 0; i < plugins_.size(); i++)
   {
     auto plugin = loot_handle->GetPlugin(plugins_[i].first);
+    // GetPlugin returns null when the plugin file was not actually loaded
+    // (e.g. the file does not exist on disk). Guard against this to avoid a
+    // null-dereference crash (limo-app/limo#185, limo-app/limo#31).
+    if(!plugin)
+    {
+      log_(Log::LOG_WARNING,
+           std::format("LOOT: Plugin '{}' could not be loaded (file missing?), "
+                       "treating as Standard plugin.",
+                       plugins_[i].first));
+      num_standard_plugins_++;
+      tags_.push_back({ STANDARD_PLUGIN });
+      continue;
+    }
     if(plugin->IsLightPlugin())
     {
       num_light_plugins_++;
