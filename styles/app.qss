@@ -1,0 +1,200 @@
+/*
+ * Limo — global application theme.
+ *
+ * Intentionally palette-aware: every colour is pulled from palette(...) roles so the theme
+ * adapts to the user's system light/dark palette (KDE Breeze, Fusion, etc.) instead of hard
+ * coding colours. It only refines shape and spacing — rounded corners, consistent padding,
+ * clearer hover/focus/selection states and slim scrollbars — for a modern, tidy look.
+ */
+
+/* ---- Buttons ---- */
+QPushButton, QToolButton {
+    background: palette(button);
+    border: 1px solid palette(mid);
+    border-radius: 6px;
+    padding: 5px 14px;
+    min-height: 18px;
+}
+QPushButton:hover, QToolButton:hover {
+    border-color: palette(highlight);
+}
+QPushButton:pressed, QToolButton:pressed {
+    background: palette(dark);
+}
+QPushButton:default {
+    border-color: palette(highlight);
+}
+QPushButton:disabled, QToolButton:disabled {
+    border-color: palette(mid);
+}
+QToolButton {
+    padding: 4px;
+}
+
+/* ---- Text inputs ---- */
+QLineEdit, QPlainTextEdit, QTextEdit, QSpinBox, QDoubleSpinBox, QComboBox {
+    background: palette(base);
+    border: 1px solid palette(mid);
+    border-radius: 6px;
+    padding: 4px 8px;
+    selection-background-color: palette(highlight);
+    selection-color: palette(highlighted-text);
+}
+QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus,
+QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
+    border-color: palette(highlight);
+}
+QComboBox::drop-down {
+    border: none;
+    width: 20px;
+}
+QComboBox QAbstractItemView {
+    background: palette(base);
+    border: 1px solid palette(mid);
+    border-radius: 6px;
+    selection-background-color: palette(highlight);
+    selection-color: palette(highlighted-text);
+    outline: none;
+}
+
+/* ---- Tabs ---- */
+QTabWidget::pane {
+    border: 1px solid palette(mid);
+    border-radius: 6px;
+    top: -1px;
+}
+QTabBar::tab {
+    background: transparent;
+    border: 1px solid transparent;
+    border-top-left-radius: 6px;
+    border-top-right-radius: 6px;
+    padding: 6px 14px;
+    margin-right: 2px;
+}
+QTabBar::tab:hover {
+    background: palette(alternate-base);
+}
+QTabBar::tab:selected {
+    background: palette(base);
+    border-color: palette(mid);
+    border-bottom-color: palette(base);
+}
+
+/* ---- Group boxes ---- */
+QGroupBox {
+    border: 1px solid palette(mid);
+    border-radius: 8px;
+    margin-top: 10px;
+    padding: 8px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    padding: 0 4px;
+}
+
+/* ---- Item views ---- */
+QListView, QTreeView, QTableView {
+    background: palette(base);
+    alternate-background-color: palette(alternate-base);
+    border: 1px solid palette(mid);
+    border-radius: 6px;
+    outline: none;
+    selection-background-color: palette(highlight);
+    selection-color: palette(highlighted-text);
+}
+QListView::item, QTreeView::item, QTableView::item {
+    padding: 3px;
+}
+QHeaderView::section {
+    background: palette(window);
+    border: none;
+    border-bottom: 1px solid palette(mid);
+    padding: 5px 8px;
+}
+
+/* ---- Scrollbars ---- */
+QScrollBar:vertical {
+    background: transparent;
+    width: 12px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: palette(mid);
+    border-radius: 5px;
+    min-height: 28px;
+    margin: 2px;
+}
+QScrollBar::handle:vertical:hover {
+    background: palette(dark);
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 12px;
+    margin: 0;
+}
+QScrollBar::handle:horizontal {
+    background: palette(mid);
+    border-radius: 5px;
+    min-width: 28px;
+    margin: 2px;
+}
+QScrollBar::handle:horizontal:hover {
+    background: palette(dark);
+}
+QScrollBar::add-line, QScrollBar::sub-line {
+    height: 0;
+    width: 0;
+}
+QScrollBar::add-page, QScrollBar::sub-page {
+    background: transparent;
+}
+
+/* ---- Menus ---- */
+QMenu {
+    background: palette(base);
+    border: 1px solid palette(mid);
+    border-radius: 6px;
+    padding: 4px;
+}
+QMenu::item {
+    padding: 5px 24px 5px 12px;
+    border-radius: 4px;
+}
+QMenu::item:selected {
+    background: palette(highlight);
+    color: palette(highlighted-text);
+}
+QMenu::separator {
+    height: 1px;
+    background: palette(mid);
+    margin: 4px 8px;
+}
+
+/* ---- Progress bar ---- */
+QProgressBar {
+    border: 1px solid palette(mid);
+    border-radius: 6px;
+    text-align: center;
+    background: palette(base);
+}
+QProgressBar::chunk {
+    background: palette(highlight);
+    border-radius: 5px;
+}
+
+/* ---- Check boxes / radio buttons ---- */
+QCheckBox, QRadioButton {
+    spacing: 6px;
+    padding: 2px;
+}
+
+/* ---- Tool tips ---- */
+QToolTip {
+    background: palette(base);
+    color: palette(text);
+    border: 1px solid palette(mid);
+    border-radius: 4px;
+    padding: 4px 6px;
+}

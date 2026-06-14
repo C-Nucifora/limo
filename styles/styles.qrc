@@ -1,5 +1,6 @@
 <RCC>
   <qresource prefix="/styles">
+    <file>app.qss</file>
     <file>tablecellstyle.qss</file>
   </qresource>
 </RCC>

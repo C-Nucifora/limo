@@ -6,6 +6,7 @@
 #include "ui/ipcclient.h"
 #include "ui/mainwindow.h"
 #include <QApplication>
+#include <QFile>
 #include <filesystem>
 #include <iostream>
 
@@ -21,6 +22,10 @@ int main(int argc, char* argv[])
 {
   QCoreApplication::setApplicationName("Limo");
   QApplication app(argc, argv);
+  // Apply the bundled palette-aware theme on top of the platform style.
+  QFile style_file(":/styles/app.qss");
+  if(style_file.open(QFile::ReadOnly | QFile::Text))
+    app.setStyleSheet(QString::fromUtf8(style_file.readAll()));
   QIcon::setFallbackSearchPaths(
     QIcon::fallbackSearchPaths()
     << (std::filesystem::path(__FILE__).parent_path().parent_path() / "resources").c_str());
