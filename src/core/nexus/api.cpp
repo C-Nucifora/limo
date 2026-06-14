@@ -340,6 +340,26 @@ std::optional<std::pair<std::string, int>> Api::extractDomainAndModId(const std:
 bool Api::initModInfo(ImportModInfo& info)
 {
   std::vector<File> files;
+
+  // The built-in Nexus "Files" tab populates remote_source + remote_file_id directly and never sets
+  // an nxm:// request URL. Without this branch initModInfo would bail on the empty request URL below,
+  // silently aborting the download (see limo-app/limo#261, #41).
+  if(info.remote_request_url.empty() && modUrlIsValid(info.remote_source) && info.remote_file_id >= 0)
+  {
+    files = getModFiles(info.remote_source);
+    auto iter = str::find_if(files, [&info](File& f) { return f.file_id == info.remote_file_id; });
+    if(iter == files.end())
+      return false;
+    auto domain_and_mod = extractDomainAndModId(info.remote_source);
+    if(!domain_and_mod)
+      return false;
+    info.remote_mod_id = (*domain_and_mod).second;
+    info.remote_file_name = iter->name;
+    info.remote_file_version = iter->version;
+    info.remote_type = ImportModInfo::RemoteType::nexus;
+    return true;
+  }
+
   auto match = nxmUrlIsValid(info.remote_request_url);
   if(!match)
     return false;
