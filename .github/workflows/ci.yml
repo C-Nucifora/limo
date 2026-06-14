@@ -1,0 +1,43 @@
+name: Build
+
+on:
+  push:
+    branches: [ dev, main ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (Qt5, LOOT/UNRAR off)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++-14 pkg-config git \
+            qtbase5-dev qtbase5-dev-tools qt5-qmake libqt5svg5-dev \
+            libjsoncpp-dev libarchive-dev libpugixml-dev libssl-dev \
+            liblz4-dev libzstd-dev zlib1g-dev libcurl4-openssl-dev
+
+      - name: Build and install cpr from source
+        run: |
+          git clone --depth 1 https://github.com/libcpr/cpr /tmp/cpr
+          cmake -S /tmp/cpr -B /tmp/cpr/build -G Ninja \
+            -DCPR_USE_SYSTEM_CURL=ON -DCPR_BUILD_TESTS=OFF \
+            -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=/tmp/cpr-prefix
+          cmake --build /tmp/cpr/build --target install
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++-14 \
+            -DLIMO_WITH_LOOT=OFF \
+            -DLIMO_WITH_UNRAR=OFF \
+            -DCMAKE_PREFIX_PATH=/tmp/cpr-prefix
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"

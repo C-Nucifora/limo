@@ -5,7 +5,9 @@
 
 #pragma once
 
+#ifdef LIMO_WITH_LOOT
 #include "loot/api.h"
+#endif
 #include <QDialog>
 #include <QIcon>
 #include <map>

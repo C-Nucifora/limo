@@ -1,4 +1,5 @@
 #include "moddedapplication.h"
+#include <limits>
 #include "core/deployerinfo.h"
 #include "deployerfactory.h"
 #include "installer.h"

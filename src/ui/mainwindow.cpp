@@ -1,7 +1,9 @@
 #include "mainwindow.h"
 #include "../core/deployerfactory.h"
 #include "../core/log.h"
+#ifdef LIMO_WITH_LOOT
 #include "../core/lootdeployer.h"
+#endif
 #include "./ui_mainwindow.h"
 #include "addappdialog.h"
 #include "adddeployerdialog.h"
@@ -1046,6 +1048,7 @@ void MainWindow::loadSettings()
   ask_remove_profile_ = settings.value("ask_remove_profile", true).toBool();
   mod_list_slider_pos_ = settings.value("mod_list_slider_pos", 0).toInt();
   deployer_list_slider_pos_ = settings.value("deployer_list_slider_pos", 0).toInt();
+#ifdef LIMO_WITH_LOOT
   LootDeployer::LIST_URLS[loot::GameType::fo3] =
     settings.value("fo3_url", LootDeployer::DEFAULT_LIST_URLS.at(loot::GameType::fo3).c_str())
       .toString()
@@ -1091,6 +1094,7 @@ void MainWindow::loadSettings()
     settings.value("prelude_url", LootDeployer::DEFAULT_PRELUDE_URL.c_str())
       .toString()
       .toStdString();
+#endif
   deploy_for_all_ = settings.value("deploy_for_all", true).toBool();
   show_log_on_error_ = settings.value("log_on_error", true).toBool();
   show_log_on_warning_ = settings.value("log_on_warning", true).toBool();
@@ -1293,6 +1297,7 @@ void MainWindow::updateOutdatedSettings()
   auto settings = QSettings(QCoreApplication::applicationName());
   previous_app_version_ = settings.value("app_version", "1.0.4").toString();
 
+#ifdef LIMO_WITH_LOOT
   if(versionIsLessOrEqual(previous_app_version_, "1.0.4"))
   {
     const std::map<std::string, std::string> old_urls = {
@@ -1330,6 +1335,7 @@ void MainWindow::updateOutdatedSettings()
     }
     Log::info("Default LOOT masterlist URLs have been updated");
   }
+#endif
 
   settings.setValue("app_version", QString(APP_VERSION));
 }

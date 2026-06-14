@@ -1,4 +1,5 @@
 #include "modlistmodel.h"
+#include <iomanip>
 #include "colors.h"
 #include <QApplication>
 #include <QDebug>

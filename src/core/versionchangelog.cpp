@@ -1,4 +1,5 @@
 #include "versionchangelog.h"
+#include <iomanip>
 #include <algorithm>
 #include <chrono>
 

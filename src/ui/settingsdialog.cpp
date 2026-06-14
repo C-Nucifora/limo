@@ -1,6 +1,8 @@
 #include "settingsdialog.h"
 #include "../core/log.h"
+#ifdef LIMO_WITH_LOOT
 #include "../core/lootdeployer.h"
+#endif
 #include "../core/nexus/api.h"
 #include "addapikeydialog.h"
 #include "changeapipwdialog.h"
@@ -48,6 +50,7 @@ void SettingsDialog::init()
     settings.value("ask_remove_tool", true).toBool() ? Qt::Checked : Qt::Unchecked);
   ui->log_level_box->setCurrentIndex(settings.value("log_level", Log::LogLevel::LOG_INFO).toInt() -
                                      2);
+#ifdef LIMO_WITH_LOOT
   ui->fo3_url_field->setText(
     settings.value("fo3_url", LootDeployer::DEFAULT_LIST_URLS.at(loot::GameType::fo3).c_str())
       .toString());
@@ -81,6 +84,7 @@ void SettingsDialog::init()
       .toString());
   ui->prelude_list_url_field->setText(
     settings.value("prelude_url", LootDeployer::DEFAULT_PRELUDE_URL.c_str()).toString());
+#endif
   ui->show_warning_cb->setCheckState(
     settings.value("log_on_warning", true).toBool() ? Qt::Checked : Qt::Unchecked);
   ui->show_error_cb->setCheckState(settings.value("log_on_error", true).toBool() ? Qt::Checked
@@ -118,28 +122,30 @@ void SettingsDialog::on_buttonBox_accepted()
   QSettings settings(QCoreApplication::applicationName());
 
   settings.setValue("fo3_url", ui->fo3_url_field->text());
-  LootDeployer::LIST_URLS[loot::GameType::fo3] = ui->fo3_url_field->text().toStdString();
   settings.setValue("fo4_url", ui->fo4_url_field->text());
-  LootDeployer::LIST_URLS[loot::GameType::fo4] = ui->fo4_url_field->text().toStdString();
   settings.setValue("fo4vr_url", ui->fo4vr_url_field->text());
-  LootDeployer::LIST_URLS[loot::GameType::fo4vr] = ui->fo4vr_url_field->text().toStdString();
   settings.setValue("fonv_url", ui->fonv_url_field->text());
-  LootDeployer::LIST_URLS[loot::GameType::fonv] = ui->fonv_url_field->text().toStdString();
   settings.setValue("starfield_url", ui->starfield_url_field->text());
+  settings.setValue("tes3_url", ui->tes3_url_field->text());
+  settings.setValue("tes4_url", ui->tes4_url_field->text());
+  settings.setValue("tes5_url", ui->tes5_url_field->text());
+  settings.setValue("tes5se_url", ui->tes5se_url_field->text());
+  settings.setValue("tes5vr_url", ui->tes5vr_url_field->text());
+  settings.setValue("prelude_url", ui->prelude_list_url_field->text());
+#ifdef LIMO_WITH_LOOT
+  LootDeployer::LIST_URLS[loot::GameType::fo3] = ui->fo3_url_field->text().toStdString();
+  LootDeployer::LIST_URLS[loot::GameType::fo4] = ui->fo4_url_field->text().toStdString();
+  LootDeployer::LIST_URLS[loot::GameType::fo4vr] = ui->fo4vr_url_field->text().toStdString();
+  LootDeployer::LIST_URLS[loot::GameType::fonv] = ui->fonv_url_field->text().toStdString();
   LootDeployer::LIST_URLS[loot::GameType::starfield] =
     ui->starfield_url_field->text().toStdString();
-  settings.setValue("tes3_url", ui->tes3_url_field->text());
   LootDeployer::LIST_URLS[loot::GameType::tes3] = ui->tes3_url_field->text().toStdString();
-  settings.setValue("tes4_url", ui->tes4_url_field->text());
   LootDeployer::LIST_URLS[loot::GameType::tes4] = ui->tes4_url_field->text().toStdString();
-  settings.setValue("tes5_url", ui->tes5_url_field->text());
   LootDeployer::LIST_URLS[loot::GameType::tes5] = ui->tes5_url_field->text().toStdString();
-  settings.setValue("tes5se_url", ui->tes5se_url_field->text());
   LootDeployer::LIST_URLS[loot::GameType::tes5se] = ui->tes5se_url_field->text().toStdString();
-  settings.setValue("tes5vr_url", ui->tes5vr_url_field->text());
   LootDeployer::LIST_URLS[loot::GameType::tes5vr] = ui->tes5vr_url_field->text().toStdString();
-  settings.setValue("prelude_url", ui->prelude_list_url_field->text());
   LootDeployer::PRELUDE_URL = ui->prelude_list_url_field->text().toStdString();
+#endif
 
   Log::log_level = static_cast<Log::LogLevel>(ui->log_level_box->currentIndex() + 2);
   settings.setValue("log_level", Log::log_level);

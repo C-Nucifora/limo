@@ -14,6 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(IS_FLATPAK "Whether this is being built for a flatpak." OFF)
 option(USE_SYSTEM_LIBUNRAR "Whether to use the system version of libunrar." OFF)
 option(LIMO_WITH_LOOT "Build the LOOT/OpenMW deployers (Bethesda/Morrowind support; requires libloot)." OFF)
+option(LIMO_WITH_UNRAR "Build RAR-archive extraction support (requires libunrar)." OFF)
 
 # jsoncpp
 find_package(PkgConfig REQUIRED)
@@ -36,7 +37,8 @@ find_package(OpenSSL REQUIRED)
 find_package(QT NAMES Qt5 REQUIRED COMPONENTS Widgets)
 find_package(Qt5 REQUIRED COMPONENTS Widgets Svg Network)
 
-# libunrar
+# libunrar (only required for RAR-archive extraction support)
+if(LIMO_WITH_UNRAR)
 if(NOT DEFINED LIBUNRAR_INCLUDE_DIR)
   if(IS_FLATPAK)
     set(LIBUNRAR_INCLUDE_DIR "/app/include/unrar")
@@ -62,6 +64,10 @@ if(NOT DEFINED LIBUNRAR_PATH)
       set(LIBUNRAR_PATH "${PROJECT_SOURCE_DIR}/unrar/libunrar.a")
     endif()
   endif()
+endif()
+else()
+  set(LIBUNRAR_INCLUDE_DIR "")
+  set(LIBUNRAR_PATH "")
 endif()
 
 # libloot (only required for the LOOT / OpenMW deployers)
@@ -196,6 +202,10 @@ add_library(core OBJECT ${CORE_SOURCES})
 
 if(LIMO_WITH_LOOT)
     target_compile_definitions(core PUBLIC LIMO_WITH_LOOT)
+endif()
+
+if(LIMO_WITH_UNRAR)
+    target_compile_definitions(core PUBLIC LIMO_WITH_UNRAR)
 endif()
 
 target_include_directories(core

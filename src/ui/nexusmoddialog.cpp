@@ -1,4 +1,5 @@
 #include "nexusmoddialog.h"
+#include <iomanip>
 #include "core/log.h"
 #include "tablepushbutton.h"
 #include "ui_nexusmoddialog.h"
