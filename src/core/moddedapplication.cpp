@@ -910,7 +910,11 @@ DeployerInfo ModdedApplication::getDeployerInfo(int deployer)
     {
       auto entry = static_pointer_cast<DeployerModInfo>(entry_weak.lock());
       if (entry->isSeparator) continue;
-      auto mod_name = std::ranges::find_if(installed_mods_, [&entry](auto& mod) { return mod.id == entry->id; })->name;
+      auto mod_iter =
+        std::ranges::find_if(installed_mods_, [&entry](auto& mod) { return mod.id == entry->id; });
+      if(mod_iter == installed_mods_.end()) // load order references an uninstalled mod (desync)
+        continue;
+      auto mod_name = mod_iter->name;
       entry->name = mod_name;
       mod_names.push_back(mod_name);
       if(manual_tag_map_.contains(entry->id))
