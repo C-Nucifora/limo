@@ -540,9 +540,13 @@ void Deployer::backupOrRestoreFiles(const std::map<sfs::path, int>& source_files
       continue;
     }
     sfs::path backup_name = absolute_path.string() + backup_extension_;
-    sfs::remove(absolute_path);
+    // Restore atomically: when a backup exists, rename overwrites the deployed file in one step so
+    // an I/O failure can't leave the target missing. Only plainly remove the deployed file when
+    // there is no backup (it was added by a mod rather than backed up from the game).
     if(pu::exists(backup_name))
       sfs::rename(backup_name, absolute_path);
+    else
+      sfs::remove(absolute_path);
   }
   for(const auto& [path, id] : restore_directories)
   {

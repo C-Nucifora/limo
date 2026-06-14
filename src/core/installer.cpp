@@ -250,7 +250,7 @@ std::vector<std::pair<sfs::path, bool>> Installer::getArchiveFileNames(const sfs
   if(sfs::is_directory(path))
   {
     for(const auto& dir_entry : sfs::recursive_directory_iterator(path))
-      file_names.emplace_back(pu::getRelativePath(dir_entry.path(), path), sfs::is_directory(path));
+      file_names.emplace_back(pu::getRelativePath(dir_entry.path(), path), dir_entry.is_directory());
     return file_names;
   }
 
@@ -375,6 +375,18 @@ void Installer::extractWithProgress(const sfs::path& source_path,
   }
   catch(std::filesystem::filesystem_error& error)
   {}
+  // Restore the working directory on every exit path (including exceptions): the extraction loop
+  // chdir's into dest_path, and a leaked cwd would make later relative-path operations act on the
+  // wrong directory.
+  struct CwdGuard
+  {
+    sfs::path dir;
+    ~CwdGuard()
+    {
+      std::error_code ec;
+      sfs::current_path(dir, ec);
+    }
+  } cwd_guard{ working_dir };
   if(!sfs::exists(dest_path))
     sfs::create_directories(dest_path);
   sfs::current_path(dest_path);

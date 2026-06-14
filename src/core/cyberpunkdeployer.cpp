@@ -134,9 +134,17 @@ void CyberpunkDeployer::deployFilesWithRemap(
     if(!checkModPathExistsAndMaybeLogError(id))
       continue;
     const auto source_iter = source_paths.find(dest_relative_path);
-    const sfs::path source_relative_path =
-      source_iter != source_paths.end() ? source_iter->second : dest_relative_path;
-    const sfs::path source_path = source_path_ / std::to_string(id) / source_relative_path;
+    if(source_iter == source_paths.end())
+    {
+      // The dest->source maps are built in lock-step, so this should be unreachable. Skip rather
+      // than silently read from the (prefixed) destination path, which would not exist on disk.
+      log_(Log::LOG_DEBUG,
+           std::format("Deployer '{}': no source mapping for deployed path '{}'; skipping.",
+                       name_,
+                       dest_relative_path.string()));
+      continue;
+    }
+    const sfs::path source_path = source_path_ / std::to_string(id) / source_iter->second;
     if(sfs::is_directory(source_path) ||
        pu::exists(dest_path) && (deploy_mode_ == hard_link && !sfs::is_symlink(dest_path) &&
                                    sfs::equivalent(source_path, dest_path) ||
