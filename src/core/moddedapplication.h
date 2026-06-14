@@ -18,6 +18,7 @@
 #include "log.h"
 #include "manualtag.h"
 #include "modinfo.h"
+#include "modrule.h"
 #include "nexus/api.h"
 #include "tool.h"
 #include <filesystem>
@@ -708,6 +709,41 @@ public:
    */
   void unpinModVersion(int mod_id);
 
+  /*!
+   * \brief Returns all mod rules for this application.
+   * \return A const reference to the rules vector.
+   */
+  const std::vector<ModRule>& getModRules() const;
+  /*!
+   * \brief Returns all mod rules that have the given mod as their source.
+   * \param source_mod_id The source mod.
+   * \return A vector of matching rules.
+   */
+  std::vector<ModRule> getModRulesFor(int source_mod_id) const;
+  /*!
+   * \brief Adds a new rule. Does nothing if an identical rule already exists.
+   * \param rule The rule to add.
+   */
+  void addModRule(const ModRule& rule);
+  /*!
+   * \brief Removes a rule. Does nothing if the rule does not exist.
+   * \param rule The rule to remove.
+   */
+  void removeModRule(const ModRule& rule);
+  /*!
+   * \brief Replaces all rules for the given source mod with the provided list.
+   * \param source_mod_id The source mod.
+   * \param rules New rules for this mod. All must have source_mod_id as their source.
+   */
+  void setModRulesFor(int source_mod_id, const std::vector<ModRule>& rules);
+  /*!
+   * \brief Checks all rules against the currently enabled mods in all deployers.
+   * Returns a human-readable warning string listing violations.
+   * An empty string means no violations.
+   * \return The warning message, or an empty string.
+   */
+  std::string checkModRules() const;
+
 private:
   /*! \brief The subdirectory used to store downloads. */
   static inline constexpr std::string DOWNLOAD_DIR = "_download";
@@ -772,6 +808,8 @@ private:
   std::string export_file_name = "exported_config";
   /*! \brief Steam app id. Or -1 if not a Steam app. */
   long steam_app_id_;
+  /*! \brief App-global mod dependency / conflict rules. */
+  std::vector<ModRule> mod_rules_;
 
   /*!
    * \brief Updates json_settings_ with the current state of this object.
@@ -839,4 +877,16 @@ private:
   void updateSteamIconPath();
   /*! \brief If steam_app_id_ == -1: Try to determine the app id. */
   void updateSteamAppId();
+  /*!
+   * \brief Builds the set of mod ids that are enabled in at least one deployer for the
+   * current profile.
+   * \return Set of enabled mod ids.
+   */
+  std::unordered_set<int> getEnabledModIds() const;
+  /*!
+   * \brief Builds the set of all mod ids present in any deployer (enabled or disabled)
+   * for the current profile.
+   * \return Set of mod ids in any deployer.
+   */
+  std::unordered_set<int> getDeployedModIds() const;
 };

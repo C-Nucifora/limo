@@ -53,6 +53,10 @@ void ModdedApplication::deployModsFor(std::vector<int> deployers)
                      this->deployers_[depl_r]->getDeployPriority();
             });
 
+  const std::string rule_warnings = checkModRules();
+  if(!rule_warnings.empty())
+    log_(Log::LOG_WARNING, rule_warnings);
+
   std::vector<float> weights;
   for(int deployer : deployers)
   {
@@ -1814,6 +1818,9 @@ void ModdedApplication::updateSettings(bool write)
 
   json_settings_["steam_app_id"] = steam_app_id_;
 
+  for(int i = 0; i < mod_rules_.size(); i++)
+    json_settings_["mod_rules"][i] = mod_rules_[i].toJson();
+
   if(write)
     writeSettings();
 }
@@ -1859,6 +1866,7 @@ void ModdedApplication::updateState(bool read)
   auto_tags_.clear();
   auto_tag_map_.clear();
   installer_map_.clear();
+  mod_rules_.clear();
 
   if(read)
   {
@@ -2060,6 +2068,12 @@ void ModdedApplication::updateState(bool read)
     steam_app_id_ = json_settings_["steam_app_id"].asInt64();
   else
     updateSteamAppId();
+
+  if(json_settings_.isMember("mod_rules"))
+  {
+    for(const auto& rule_entry : json_settings_["mod_rules"])
+      mod_rules_.emplace_back(rule_entry);
+  }
 
   updateSteamIconPath();
 }
@@ -2430,4 +2444,138 @@ void ModdedApplication::updateSteamAppId()
       return;
     }
   }
+}
+
+std::unordered_set<int> ModdedApplication::getEnabledModIds() const
+{
+  std::unordered_set<int> enabled;
+  for(const auto& depl : deployers_)
+  {
+    if(depl->isAutonomous())
+      continue;
+    for(const auto& entry_weak : *depl->getLoadorder())
+    {
+      auto entry = std::static_pointer_cast<DeployerModInfo>(entry_weak.lock());
+      if(!entry || entry->isSeparator)
+        continue;
+      if(entry->enabled)
+        enabled.insert(entry->id);
+    }
+  }
+  return enabled;
+}
+
+std::unordered_set<int> ModdedApplication::getDeployedModIds() const
+{
+  std::unordered_set<int> present;
+  for(const auto& depl : deployers_)
+  {
+    if(depl->isAutonomous())
+      continue;
+    for(const auto& entry_weak : *depl->getLoadorder())
+    {
+      auto entry = std::static_pointer_cast<DeployerModInfo>(entry_weak.lock());
+      if(!entry || entry->isSeparator)
+        continue;
+      present.insert(entry->id);
+    }
+  }
+  return present;
+}
+
+const std::vector<ModRule>& ModdedApplication::getModRules() const
+{
+  return mod_rules_;
+}
+
+std::vector<ModRule> ModdedApplication::getModRulesFor(int source_mod_id) const
+{
+  std::vector<ModRule> result;
+  for(const auto& rule : mod_rules_)
+  {
+    if(rule.source_mod_id == source_mod_id)
+      result.push_back(rule);
+  }
+  return result;
+}
+
+void ModdedApplication::addModRule(const ModRule& rule)
+{
+  if(str::find(mod_rules_, rule) != mod_rules_.end())
+    return;
+  mod_rules_.push_back(rule);
+  updateSettings(true);
+}
+
+void ModdedApplication::removeModRule(const ModRule& rule)
+{
+  auto it = str::find(mod_rules_, rule);
+  if(it == mod_rules_.end())
+    return;
+  mod_rules_.erase(it);
+  updateSettings(true);
+}
+
+void ModdedApplication::setModRulesFor(int source_mod_id, const std::vector<ModRule>& rules)
+{
+  std::erase_if(mod_rules_, [source_mod_id](const ModRule& r)
+  {
+    return r.source_mod_id == source_mod_id;
+  });
+  for(const auto& rule : rules)
+    mod_rules_.push_back(rule);
+  updateSettings(true);
+}
+
+std::string ModdedApplication::checkModRules() const
+{
+  if(mod_rules_.empty())
+    return {};
+
+  const auto enabled = getEnabledModIds();
+  const auto present = getDeployedModIds();
+
+  std::string warnings;
+
+  for(const auto& rule : mod_rules_)
+  {
+    // Only evaluate rules whose source mod is currently enabled.
+    if(!enabled.contains(rule.source_mod_id))
+      continue;
+
+    const std::string source_name = getModName(rule.source_mod_id);
+    const std::string target_name = getModName(rule.target_mod_id);
+    const std::string target_label = target_name.empty()
+                                       ? "(id " + std::to_string(rule.target_mod_id) + ")"
+                                       : "\"" + target_name + "\"";
+
+    if(rule.type == RuleType::requires_mod)
+    {
+      // Violation: target is absent or disabled.
+      if(!enabled.contains(rule.target_mod_id))
+      {
+        const bool absent = !present.contains(rule.target_mod_id);
+        warnings += std::format("  - \"{}\" requires {} which is {}.\n",
+                                source_name,
+                                target_label,
+                                absent ? "not installed in any deployer" : "disabled");
+      }
+    }
+    else // conflicts_with
+    {
+      // Violation: both source and target are enabled.
+      if(enabled.contains(rule.target_mod_id))
+      {
+        warnings += std::format("  - \"{}\" conflicts with {} but both are enabled.\n",
+                                source_name,
+                                target_label);
+      }
+    }
+  }
+
+  if(warnings.empty())
+    return {};
+
+  return "Mod rule violations detected before deployment:\n" + warnings +
+         "Deployment will proceed; resolve conflicts manually.";
 }

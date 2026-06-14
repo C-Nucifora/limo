@@ -167,6 +167,7 @@ set(CORE_SOURCES
         src/core/mod.h
         src/core/moddedapplication.cpp
         src/core/moddedapplication.h
+        src/core/modrule.h
         src/core/modinfo.h
         src/core/nexus/api.cpp
         src/core/nexus/api.h
@@ -348,6 +349,9 @@ set(PROJECT_SOURCES
         src/ui/managemodtagsdialog.cpp
         src/ui/managemodtagsdialog.h
         src/ui/managemodtagsdialog.ui
+        src/ui/managemodrulesdialog.cpp
+        src/ui/managemodrulesdialog.h
+        src/ui/managemodrulesdialog.ui
         src/ui/modlistmodel.cpp
         src/ui/modlistmodel.h
         src/ui/modlistproxymodel.cpp
