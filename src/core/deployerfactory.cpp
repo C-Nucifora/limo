@@ -1,7 +1,9 @@
 #include "deployerfactory.h"
 #include "bg3deployer.h"
 #include "casematchingdeployer.h"
+#include "cyberpunkdeployer.h"
 #include "reversedeployer.h"
+#include "tw3deployer.h"
 #ifdef LIMO_WITH_LOOT
 #include "lootdeployer.h"
 #include "openmwarchivedeployer.h"
@@ -36,6 +38,10 @@ std::unique_ptr<Deployer> DeployerFactory::makeDeployer(const std::string& type,
 #endif
   else if(type == BG3DEPLOYER)
     return std::make_unique<Bg3Deployer>(source_path, dest_path, name);
+  else if(type == WITCHER3DEPLOYER)
+    return std::make_unique<Tw3Deployer>(source_path, dest_path, name, deploy_mode);
+  else if(type == CYBERPUNKDEPLOYER)
+    return std::make_unique<CyberpunkDeployer>(source_path, dest_path, name, deploy_mode);
   else
     throw std::runtime_error("Unknown deployer type \"" + type + "\"!");
 }

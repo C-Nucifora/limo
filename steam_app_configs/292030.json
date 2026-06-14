@@ -5,7 +5,7 @@
 			"deploy_mode" : "hard_link",
 			"name" : "Mods",
 			"target_dir" : "$STEAM_INSTALL_PATH$/Mods",
-			"type" : "Case Matching Deployer"
+			"type" : "Witcher 3 Deployer"
 		},
 		{
 			"deploy_mode" : "hard_link",

@@ -25,6 +25,10 @@ public:
   inline static const std::string OPENMWARCHIVEDEPLOYER{ "OpenMW Archive Deployer" };
   /*! \brief Manages plugin files for Baldurs Gate 3. */
   inline static const std::string BG3DEPLOYER{ "Baldurs Gate 3 Deployer" };
+  /*! \brief Deploys mods into The Witcher 3's Mods directory with load-order folder prefixing. */
+  inline static const std::string WITCHER3DEPLOYER{ "Witcher 3 Deployer" };
+  /*! \brief Deploys Cyberpunk 2077 mods with .archive load-order filename prefixing. */
+  inline static const std::string CYBERPUNKDEPLOYER{ "Cyberpunk 2077 Deployer" };
   /*!
    * \brief Returns a vector of available deployer types.
    * \return The vector of deployer types.
@@ -40,7 +44,9 @@ public:
                                                                OPENMWPLUGINDEPLOYER,
                                                                OPENMWARCHIVEDEPLOYER,
 #endif
-                                                               BG3DEPLOYER };
+                                                               BG3DEPLOYER,
+                                                               WITCHER3DEPLOYER,
+                                                               CYBERPUNKDEPLOYER };
   /*! \brief Maps deployer types to a description of what they do. */
   inline static const std::map<std::string, std::string> DEPLOYER_DESCRIPTIONS{
     { SIMPLEDEPLOYER,
@@ -69,7 +75,15 @@ public:
     { BG3DEPLOYER,
       "Manages plugins contained in .pak files for Baldurs Gate 3. "
       "Source path should point to the Mods directory. "
-      "Target path should point to the directory containing modsettings.lsx." }
+      "Target path should point to the directory containing modsettings.lsx." },
+    { WITCHER3DEPLOYER,
+      "Deploys mods into The Witcher 3's Mods directory. Rewrites each mod's top-level mod* "
+      "folder name with a load-order index prefix so the game's alphabetical folder order "
+      "matches Limo's load order. Target path should point to the game's Mods directory." },
+    { CYBERPUNKDEPLOYER,
+      "Deploys Cyberpunk 2077 mods into the game's root directory. Prefixes each .archive file "
+      "under archive/pc/mod/ with a load-order index so the game's first-wins archive order "
+      "matches Limo's load order. Target path should point to the Cyberpunk 2077 root directory." }
   };
   /*! \brief Maps deployer types to a bool indicating
    *  if the type refers to an autonomous deployer. */
@@ -80,7 +94,9 @@ public:
                                                                         { REVERSEDEPLOYER, true },
                                                                         { OPENMWPLUGINDEPLOYER, true },
                                                                         { OPENMWARCHIVEDEPLOYER, true },
-                                                                        { BG3DEPLOYER, true } };
+                                                                        { BG3DEPLOYER, true },
+                                                                        { WITCHER3DEPLOYER, false },
+                                                                        { CYBERPUNKDEPLOYER, false } };
   /*!
    * \brief Constructs a unique pointer to a new deployer of given type.
    * \param type Deployer type to be constructed.

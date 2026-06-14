@@ -110,6 +110,10 @@ set(CORE_SOURCES
         src/core/bg3plugin.h
         src/core/casematchingdeployer.cpp
         src/core/casematchingdeployer.h
+        src/core/cyberpunkdeployer.cpp
+        src/core/cyberpunkdeployer.h
+        src/core/tw3deployer.cpp
+        src/core/tw3deployer.h
         src/core/changelogentry.cpp
         src/core/changelogentry.h
         src/core/compressionerror.h

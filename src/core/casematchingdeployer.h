@@ -68,6 +68,7 @@ private:
   void adaptDirectoryFiles(const std::filesystem::path& path,
                            int mod_id,
                            const std::filesystem::path& target_path) const;
+protected:
   /*!
    * \brief Renames every file in every mod in the given load order
    * such that all paths are case invariant and match the case of files in \ref dest_path_.
