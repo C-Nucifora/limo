@@ -155,6 +155,13 @@ std::vector<std::pair<sfs::path, sfs::path>> FomodInstaller::getInstallationFile
     std::string destination = file.destination.string();
     while(destination.starts_with("/") || destination.starts_with("\\"))
       destination.erase(0, 1);
+    // Security: reject FOMOD destinations that escape the installation directory via ".."
+    // traversal or absolute paths (malicious ModuleConfig.xml path traversal).
+    const sfs::path normalized_dest = sfs::path(destination).lexically_normal();
+    if(normalized_dest.is_absolute() ||
+       (!normalized_dest.empty() && normalized_dest.begin()->string() == ".."))
+      throw std::runtime_error(
+        std::format("FOMOD destination '{}' escapes the installation directory", destination));
     files.emplace_back(file.source, destination);
   }
   return files;

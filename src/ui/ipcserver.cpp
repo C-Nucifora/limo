@@ -5,7 +5,9 @@
 
 IpcServer::IpcServer() : server_(new QLocalServer())
 {
-  server_->setSocketOptions(QLocalServer::WorldAccessOption);
+  // Security: restrict the IPC socket to the current user so other local users cannot inject
+  // nxm:// download requests. The nxm:// desktop handler delivers links to this user's instance.
+  server_->setSocketOptions(QLocalServer::UserAccessOption);
 }
 
 IpcServer::~IpcServer()
