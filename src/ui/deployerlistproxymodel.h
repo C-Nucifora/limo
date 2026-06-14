@@ -132,11 +132,16 @@ public:
   void setFilterString(const QString& filter_string);
 
 private:
-  /*! \brief Re-applies the row filter; replaces the deprecated invalidateFilter(). */
+  /*! \brief Re-applies the row filter. Uses the granular Qt 6.9+ API where
+   *  available, falling back to invalidateFilter() on older Qt 6. */
   void reapplyRowFilter()
   {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 9, 0)
     beginFilterChange();
     endFilterChange(QSortFilterProxyModel::Direction::Rows);
+#else
+    invalidateFilter();
+#endif
   }
   /*! \brief Contains the sum of all currently active filter modes. */
   int filter_mode_ = 0;
