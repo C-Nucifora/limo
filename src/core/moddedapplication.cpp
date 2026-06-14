@@ -707,11 +707,27 @@ void ModdedApplication::removeModFromGroup(int mod_id,
           loadorder, [mod_id](const auto& entry) { return entry.lock()->getData()->id == mod_id; });
         if(iter != loadorder.end() && !iter->lock()->getData()->isSeparator)
         {
-          deployers_[depl]->addMod(active_group_members_[group], static_pointer_cast<DeployerModInfo>(iter->lock()->getData())->enabled, false);
-          // This swap causes a segfault
-          deployers_[depl]->swapNodes(loadorder.back().lock(), iter->lock());
+          const int new_member_id = active_group_members_[group];
+          const bool enabled =
+            static_pointer_cast<DeployerModInfo>(iter->lock()->getData())->enabled;
+          deployers_[depl]->addMod(new_member_id, enabled, false);
+          // addMod restructures the load-order tree, invalidating the `loadorder` snapshot taken
+          // above. The previous code swapped stale pointers (loadorder.back()/iter) and
+          // segfaulted; re-fetch the tree and swap the live nodes instead, placing the new group
+          // member where the removed mod was.
+          auto fresh_loadorder = deployers_[depl]->getLoadorder()->getTraversal();
+          auto new_member_iter =
+            str::find_if(fresh_loadorder,
+                         [new_member_id](const auto& entry)
+                         { return entry.lock()->getData()->id == new_member_id; });
+          auto removed_iter =
+            str::find_if(fresh_loadorder,
+                         [mod_id](const auto& entry)
+                         { return entry.lock()->getData()->id == mod_id; });
+          if(new_member_iter != fresh_loadorder.end() && removed_iter != fresh_loadorder.end())
+            deployers_[depl]->swapNodes(new_member_iter->lock(), removed_iter->lock());
           update_targets[depl].push_back(prof);
-          weights.push_back(loadorder.size());
+          weights.push_back(fresh_loadorder.size());
         }
       }
       deployers_[depl]->setProfile(current_profile_);
