@@ -13,6 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(IS_FLATPAK "Whether this is being built for a flatpak." OFF)
 option(USE_SYSTEM_LIBUNRAR "Whether to use the system version of libunrar." OFF)
+option(LIMO_WITH_LOOT "Build the LOOT/OpenMW deployers (Bethesda/Morrowind support; requires libloot)." OFF)
 
 # jsoncpp
 find_package(PkgConfig REQUIRED)
@@ -63,13 +64,18 @@ if(NOT DEFINED LIBUNRAR_PATH)
     endif()
 endif()
 
-# libloot
-if(NOT DEFINED LIBLOOT_INCLUDE_DIR)
-    find_file(LIBLOOT_API_PATH "loot/api.h" REQUIRED)
-    cmake_path(GET LIBLOOT_API_PATH PARENT_PATH LIBLOOT_INCLUDE_DIR)
-endif()
-if(NOT DEFINED LIBLOOT_PATH)
-    find_library(LIBLOOT_PATH libloot.so REQUIRED)
+# libloot (only required for the LOOT / OpenMW deployers)
+if(LIMO_WITH_LOOT)
+    if(NOT DEFINED LIBLOOT_INCLUDE_DIR)
+        find_file(LIBLOOT_API_PATH "loot/api.h" REQUIRED)
+        cmake_path(GET LIBLOOT_API_PATH PARENT_PATH LIBLOOT_INCLUDE_DIR)
+    endif()
+    if(NOT DEFINED LIBLOOT_PATH)
+        find_library(LIBLOOT_PATH libloot.so REQUIRED)
+    endif()
+else()
+    set(LIBLOOT_INCLUDE_DIR "")
+    set(LIBLOOT_PATH "")
 endif()
 
 # lz4
@@ -133,8 +139,6 @@ set(CORE_SOURCES
         src/core/installer.h
         src/core/log.cpp
         src/core/log.h
-        src/core/lootdeployer.cpp
-        src/core/lootdeployer.h
         src/core/lspakextractor.cpp
         src/core/lspakextractor.h
         src/core/lspakfilelistentry.h
@@ -152,10 +156,6 @@ set(CORE_SOURCES
         src/core/nexus/file.h
         src/core/nexus/mod.cpp
         src/core/nexus/mod.h
-        src/core/openmwarchivedeployer.cpp
-        src/core/openmwarchivedeployer.h
-        src/core/openmwplugindeployer.cpp
-        src/core/openmwplugindeployer.h
         src/core/parseerror.h
         src/core/pathutils.cpp
         src/core/pathutils.h
@@ -178,7 +178,22 @@ set(CORE_SOURCES
         src/core/wildcardmatching.h
 )
 
+if(LIMO_WITH_LOOT)
+    list(APPEND CORE_SOURCES
+            src/core/lootdeployer.cpp
+            src/core/lootdeployer.h
+            src/core/openmwarchivedeployer.cpp
+            src/core/openmwarchivedeployer.h
+            src/core/openmwplugindeployer.cpp
+            src/core/openmwplugindeployer.h)
+endif()
+
 add_library(core OBJECT ${CORE_SOURCES})
+
+if(LIMO_WITH_LOOT)
+    target_compile_definitions(core PUBLIC LIMO_WITH_LOOT)
+endif()
+
 target_include_directories(core
     PRIVATE ${PROJECT_SOURCE_DIR}/src
     PUBLIC ${LibArchive_INCLUDE_DIRS}

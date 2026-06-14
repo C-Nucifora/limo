@@ -1,0 +1,12 @@
+{
+	"deployers" :
+	[
+		{
+			"deploy_mode" : "hard_link",
+			"name" : "Cyberpunk 2077",
+			"target_dir" : "$STEAM_INSTALL_PATH$",
+			"type" : "Case Matching Deployer"
+		}
+	],
+	"name" : "Cyberpunk 2077"
+}

@@ -32,10 +32,14 @@ public:
   /*! \brief Contains all available deployer types. */
   inline static const std::vector<std::string> DEPLOYER_TYPES{ CASEMATCHINGDEPLOYER,
                                                                SIMPLEDEPLOYER,
+#ifdef LIMO_WITH_LOOT
                                                                LOOTDEPLOYER,
+#endif
                                                                REVERSEDEPLOYER,
+#ifdef LIMO_WITH_LOOT
                                                                OPENMWPLUGINDEPLOYER,
                                                                OPENMWARCHIVEDEPLOYER,
+#endif
                                                                BG3DEPLOYER };
   /*! \brief Maps deployer types to a description of what they do. */
   inline static const std::map<std::string, std::string> DEPLOYER_DESCRIPTIONS{

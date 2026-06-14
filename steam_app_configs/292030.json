@@ -1,0 +1,18 @@
+{
+	"deployers" :
+	[
+		{
+			"deploy_mode" : "hard_link",
+			"name" : "Mods",
+			"target_dir" : "$STEAM_INSTALL_PATH$/Mods",
+			"type" : "Case Matching Deployer"
+		},
+		{
+			"deploy_mode" : "hard_link",
+			"name" : "DLC",
+			"target_dir" : "$STEAM_INSTALL_PATH$/dlc",
+			"type" : "Case Matching Deployer"
+		}
+	],
+	"name" : "The Witcher 3: Wild Hunt"
+}
