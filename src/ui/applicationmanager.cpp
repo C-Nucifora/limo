@@ -23,7 +23,12 @@ bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
   sfs::path download_path = info.target_path;
   if(!sfs::exists(download_path))
     sfs::create_directories(download_path);
-  sfs::path file_name = match[1].str();
+  // Security: a malicious/compromised CDN could return a URL whose last path segment is empty
+  // or "..", redirecting the write outside the download directory. Use the basename only.
+  sfs::path file_name = sfs::path(match[1].str()).filename();
+  if(file_name.empty() || file_name == "..")
+    throw std::runtime_error(
+      std::format("Invalid file name in download URL \"{}\"", info.remote_download_url));
   const std::string file_name_prefix = file_name.stem();
   const std::string extension = file_name.extension();
   int suffix = 1;

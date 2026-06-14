@@ -496,6 +496,9 @@ Deployer::getDeploymentSourceFilesAndModSizes(const std::vector<int>& loadorder)
     unsigned long mod_size = 0;
     for(auto const& dir_entry : sfs::recursive_directory_iterator(mod_base_path))
     {
+      // Security: never deploy symlinks (a mod could link to a file outside its directory).
+      if(dir_entry.is_symlink())
+        continue;
       const bool is_regular_file = dir_entry.is_regular_file();
       if(is_regular_file)
         mod_size += dir_entry.file_size();

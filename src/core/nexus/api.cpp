@@ -156,6 +156,10 @@ std::string Api::getDownloadUrl(const std::string& nxm_url)
     throw std::runtime_error(std::format("Invalid NXM URL: \"{}\"", nxm_url));
   std::smatch match = *match_opt;
   const std::string domain_name = match[1];
+  // Security: domain_name is interpolated into the API URL path; reject anything but a plain
+  // game-domain token so a crafted nxm:// link cannot redirect the call to another endpoint.
+  if(!std::regex_match(domain_name, std::regex("[a-zA-Z0-9]+")))
+    throw std::runtime_error(std::format("Invalid game domain in NXM URL: \"{}\"", nxm_url));
   const std::string mod_id = match[2];
   const std::string file_id = match[3];
   const std::string key = match[4];
