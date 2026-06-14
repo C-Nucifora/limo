@@ -344,6 +344,14 @@ std::pair<int, std::string> Deployer::verifyDirectories()
                          f.code().value(),
                          f.code().message()) };
   }
+  // When the source and destination directories are identical, writability is already proven by
+  // the test file written above. Removing dest/test_file would delete that very file and the
+  // subsequent link/copy of a file onto itself would fail, so report success directly.
+  if(source_path_ == dest_path_)
+  {
+    sfs::remove(source_path_ / file_name);
+    return { 0, "" };
+  }
   try
   {
     sfs::remove(dest_path_ / file_name);

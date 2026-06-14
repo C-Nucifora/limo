@@ -950,7 +950,7 @@ void MainWindow::setupLog()
         color = blue;
       log->moveCursor(QTextCursor::End);
       log->appendHtml(QString("<p style='color: " + color.name(QColor::HexRgb) + "'>") +
-                      QString(message.c_str()).toHtmlEscaped() + "</p>");
+                      QString(message.c_str()).toHtmlEscaped().replace("\n", "<br/>") + "</p>");
       if(*show_error && level <= Log::LOG_ERROR || *show_warning && level <= Log::LOG_WARNING)
         log_container->setVisible(true);
     });
@@ -974,7 +974,7 @@ void MainWindow::setupLog()
         color = blue;
       log->moveCursor(QTextCursor::End);
       log->appendHtml(QString("<p style='color: " + color.name(QColor::HexRgb) + "'>") +
-                      QString(message.c_str()).toHtmlEscaped() + "</p>");
+                      QString(message.c_str()).toHtmlEscaped().replace("\n", "<br/>") + "</p>");
       if(*show_error && level <= Log::LOG_ERROR || *show_warning && level <= Log::LOG_WARNING)
         log_container->setVisible(true);
     });

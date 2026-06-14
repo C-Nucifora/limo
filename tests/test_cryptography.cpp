@@ -8,11 +8,11 @@
 std::string generateRandomString(std::default_random_engine& e)
 {
   std::uniform_int_distribution<int> length_dist(1, 100);
-  std::uniform_int_distribution<char> char_dist(0, 255);
+  std::uniform_int_distribution<int> char_dist(0, 255);
   std::string str;
   const int str_len = length_dist(e);
   for(int j = 0; j < str_len; j++)
-    str += char_dist(e);
+    str += static_cast<char>(char_dist(e));
   return str;
 }
 
