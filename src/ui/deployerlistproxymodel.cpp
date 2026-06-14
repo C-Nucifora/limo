@@ -171,7 +171,7 @@ void DeployerListProxyModel::updateRowCountLabel()
 void DeployerListProxyModel::updateFilter(bool invalidate)
 {
   if(invalidate)
-    invalidateFilter();
+    reapplyRowFilter();
 
   row_text_colors_.clear();
   int prev_group = -1;
@@ -221,5 +221,5 @@ void DeployerListProxyModel::setFilterString(const QString& filter_string)
     else
       filter_string_targets_id_ = false;
   }
-  invalidateFilter();
+  reapplyRowFilter();
 }

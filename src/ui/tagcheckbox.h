@@ -52,7 +52,7 @@ private slots:
    * Emits tagBoxChecked with the display text and the check state as arguments.
    * \param state The new check state.
    */
-  void onChecked(int state);
+  void onChecked(Qt::CheckState state);
 
 signals:
   /*!

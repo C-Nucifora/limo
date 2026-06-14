@@ -37,7 +37,7 @@ void BackupListView::mouseReleaseEvent(QMouseEvent* event)
   }
   else if(is_valid_row && event_col == BackupListModel::backup_col &&
           event->button() == Qt::LeftButton &&
-          columnViewportPosition(event_col) + columnWidth(event_col) - 18 < event->x() &&
+          columnViewportPosition(event_col) + columnWidth(event_col) - 18 < event->position().x() &&
           static_cast<BackupListModel*>(model())->isEditable())
     edit(model()->index(event_row, event_col));
 }
@@ -52,7 +52,7 @@ void BackupListView::mouseDoubleClickEvent(QMouseEvent* event)
   if(sameRow(index, mouse_down_) && is_valid_row && event->button() == Qt::LeftButton &&
      (event_col == BackupListModel::target_col ||
       event_col == BackupListModel::backup_col &&
-        columnViewportPosition(event_col) + columnWidth(event_col) - 18 >= event->x()) &&
+        columnViewportPosition(event_col) + columnWidth(event_col) - 18 >= event->position().x()) &&
      static_cast<BackupListModel*>(model())->isEditable())
     edit(model()->index(event_row, event_col));
 }

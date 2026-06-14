@@ -34,7 +34,7 @@ find_package(cpr REQUIRED)
 find_package(OpenSSL REQUIRED)
 
 # Qt
-find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets)
+find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Svg Network)
 
 # libunrar (only required for RAR-archive extraction support)

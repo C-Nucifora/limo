@@ -14,8 +14,8 @@ ModListView::ModListView(QWidget* parent) : QTreeView(parent)
 {
   setMouseTracking(true);
   QFile styleFile(":/styles/tablecellstyle.qss");
-  styleFile.open(QFile::ReadOnly);
-  setStyleSheet(styleFile.readAll());
+  if(styleFile.open(QFile::ReadOnly))
+    setStyleSheet(styleFile.readAll());
 }
 
 void ModListView::dropEvent(QDropEvent* event)
@@ -101,7 +101,7 @@ void ModListView::mouseReleaseEvent(QMouseEvent* event)
                       model()->data(index, ModListModel::mod_name_role).toString());
   }
   else if(event_col == ModListModel::version_col && event->button() == Qt::LeftButton &&
-          columnViewportPosition(event_col) + columnWidth(event_col) - 18 < event->x() &&
+          columnViewportPosition(event_col) + columnWidth(event_col) - 18 < event->position().x() &&
           static_cast<ModListProxyModel*>(model())->isEditable())
     edit(model()->index(event_row, event_col));
 }
@@ -198,7 +198,7 @@ void ModListView::mouseDoubleClickEvent(QMouseEvent* event)
   if(event->button() == Qt::LeftButton && event_row == mouse_down_.row() &&
      (event_col == ModListModel::name_col ||
       event_col == ModListModel::version_col &&
-        columnViewportPosition(event_col) + columnWidth(event_col) - 18 >= event->x()) &&
+        columnViewportPosition(event_col) + columnWidth(event_col) - 18 >= event->position().x()) &&
      static_cast<ModListProxyModel*>(model())->isEditable())
     edit(index);
 }

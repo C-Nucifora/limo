@@ -10,8 +10,8 @@ DeployerListView::DeployerListView(QWidget* parent) : ModListView(parent)
 {
   setTreePosition(0);
   QFile styleFile(":/styles/tablecellstyle.qss");
-  styleFile.open(QFile::ReadOnly | QFile::Text);
-  setStyleSheet(styleFile.readAll());
+  if(styleFile.open(QFile::ReadOnly | QFile::Text))
+    setStyleSheet(styleFile.readAll());
   connect(this, &DeployerListView::expanded,
           this, &DeployerListView::onExpanded);
   connect(this, &DeployerListView::collapsed,

@@ -136,6 +136,12 @@ protected:
   bool lessThan(const QModelIndex& left, const QModelIndex& right) const override;
 
 private:
+  /*! \brief Re-applies the row filter; replaces the deprecated invalidateFilter(). */
+  void reapplyRowFilter()
+  {
+    beginFilterChange();
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
+  }
   /*! \brief Contains the sum of all currently active filter modes. */
   int filter_mode_ = 0;
   /*!

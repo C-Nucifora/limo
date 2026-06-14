@@ -27,7 +27,7 @@ void ModListProxyModel::setFilterMode(FilterMode mode, bool status, bool invalid
   else
     removeFilter(mode, false);
   if(invalidate_filter)
-    invalidateFilter();
+    reapplyRowFilter();
   updateRowCountLabel();
 }
 
@@ -42,7 +42,7 @@ void ModListProxyModel::addFilter(FilterMode mode, bool invalidate_filter)
   else if((filter_mode_ & filter_updates) && (filter_mode_ & filter_no_updates))
     filter_mode_ -= filter_updates + filter_no_updates - mode;
   if(invalidate_filter)
-    invalidateFilter();
+    reapplyRowFilter();
   updateRowCountLabel();
 }
 
@@ -53,7 +53,7 @@ void ModListProxyModel::removeFilter(FilterMode mode, bool invalidate_filter)
   if(mode == filter_tags)
     tag_filters_.clear();
   if(invalidate_filter)
-    invalidateFilter();
+    reapplyRowFilter();
   updateRowCountLabel();
 }
 
@@ -120,7 +120,7 @@ void ModListProxyModel::clearFilter(bool invalidate_filter)
   filter_mode_ = 0;
   tag_filters_.clear();
   if(invalidate_filter)
-    invalidateFilter();
+    reapplyRowFilter();
   updateRowCountLabel();
 }
 
@@ -137,7 +137,7 @@ void ModListProxyModel::addTagFilter(const QString& tag, bool include, bool inva
   else
     tag_filters_.emplace_back(tag, include);
   if(invalidate_filter)
-    invalidateFilter();
+    reapplyRowFilter();
   updateRowCountLabel();
 }
 
@@ -148,7 +148,7 @@ void ModListProxyModel::removeTagFilter(const QString& tag, bool invalidate_filt
     return;
   tag_filters_.erase(filter);
   if(invalidate_filter)
-    invalidateFilter();
+    reapplyRowFilter();
   updateRowCountLabel();
 }
 
@@ -194,5 +194,5 @@ void ModListProxyModel::setFilterString(const QString& filter_string)
     else
       filter_string_targets_id_ = false;
   }
-  invalidateFilter();
+  reapplyRowFilter();
 }

@@ -132,6 +132,12 @@ public:
   void setFilterString(const QString& filter_string);
 
 private:
+  /*! \brief Re-applies the row filter; replaces the deprecated invalidateFilter(). */
+  void reapplyRowFilter()
+  {
+    beginFilterChange();
+    endFilterChange(QSortFilterProxyModel::Direction::Rows);
+  }
   /*! \brief Contains the sum of all currently active filter modes. */
   int filter_mode_ = 0;
   /*! \brief Contains all mod ids to be shown when the conflicts filter is active. */
