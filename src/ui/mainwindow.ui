@@ -850,6 +850,9 @@
                </item>
                <item row="0" column="2">
                 <widget class="QToolButton" name="deployer_tool_button">
+                 <property name="toolTip">
+                  <string>Add or manage deployers — these link a group of mods into a target directory of the game. Click the arrow for more options.</string>
+                 </property>
                  <property name="text">
                   <string/>
                  </property>
@@ -1306,6 +1309,9 @@
           </item>
           <item row="0" column="5">
            <widget class="QToolButton" name="profile_tool_button">
+            <property name="toolTip">
+             <string>Add or manage profiles — separate mod load-outs you can switch between. Click the arrow for more options.</string>
+            </property>
             <property name="text">
              <string/>
             </property>
@@ -1355,6 +1361,9 @@
           </item>
           <item row="0" column="2">
            <widget class="QToolButton" name="app_tool_button">
+            <property name="toolTip">
+             <string>Add or manage applications (games) for Limo to mod. Click the arrow for more options.</string>
+            </property>
             <property name="text">
              <string/>
             </property>

@@ -6,15 +6,25 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>525</width>
-    <height>280</height>
+    <width>560</width>
+    <height>340</height>
    </rect>
   </property>
   <property name="windowTitle">
    <string>Add Application</string>
   </property>
   <layout class="QGridLayout" name="gridLayout_3">
-   <item row="4" column="0">
+   <item row="0" column="0">
+    <widget class="QLabel" name="help_label">
+     <property name="text">
+      <string>Add a game or application for Limo to manage mods for. Only &lt;b&gt;Name&lt;/b&gt; and &lt;b&gt;Staging directory&lt;/b&gt; are required — everything else is optional. Tip: use &lt;b&gt;Import from Steam&lt;/b&gt; below to fill most of this in automatically.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item row="5" column="0">
     <layout class="QGridLayout" name="gridLayout_2">
      <item row="0" column="0">
       <spacer name="horizontalSpacer">
@@ -32,7 +42,7 @@
      <item row="0" column="1">
       <widget class="QPushButton" name="import_button">
        <property name="toolTip">
-        <string>Import an application from steam</string>
+        <string>Auto-fill the fields above from an installed Steam game (recommended)</string>
        </property>
        <property name="text">
         <string>Import from Steam</string>
@@ -41,7 +51,7 @@
      </item>
     </layout>
    </item>
-   <item row="5" column="0">
+   <item row="6" column="0">
     <spacer name="verticalSpacer">
      <property name="orientation">
       <enum>Qt::Vertical</enum>
@@ -54,7 +64,7 @@
      </property>
     </spacer>
    </item>
-   <item row="1" column="0">
+   <item row="2" column="0">
     <widget class="QCheckBox" name="move_dir_box">
      <property name="enabled">
       <bool>true</bool>
@@ -67,7 +77,7 @@
      </property>
     </widget>
    </item>
-   <item row="6" column="0">
+   <item row="7" column="0">
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>
@@ -77,12 +87,12 @@
      </property>
     </widget>
    </item>
-   <item row="0" column="0">
+   <item row="1" column="0">
     <layout class="QGridLayout" name="gridLayout">
      <item row="2" column="2">
       <widget class="QPushButton" name="icon_picker_button">
        <property name="toolTip">
-        <string>Pick staging directory</string>
+        <string>Pick an icon image</string>
        </property>
        <property name="text">
         <string/>
@@ -96,48 +106,63 @@
      <item row="0" column="0">
       <widget class="QLabel" name="label">
        <property name="toolTip">
-        <string>Application name</string>
+        <string>The display name for this application in Limo. Required.</string>
        </property>
        <property name="text">
-        <string>Name:</string>
+        <string>Name (required):</string>
        </property>
       </widget>
      </item>
      <item row="3" column="0" rowspan="2">
       <widget class="QLabel" name="label_2">
        <property name="toolTip">
-        <string>All installed mods are stored here. For hard link deployment, this has to be on the same partition as the application</string>
+        <string>Required. All installed mods are stored here. For hard link deployment, this has to be on the same partition as the application.</string>
        </property>
        <property name="text">
-        <string>Staging directory:</string>
+        <string>Staging directory (required):</string>
        </property>
       </widget>
      </item>
      <item row="2" column="0">
       <widget class="QLabel" name="label_3">
+       <property name="toolTip">
+        <string>Optional. An image shown as this application's icon.</string>
+       </property>
        <property name="text">
-        <string>Icon path</string>
+        <string>Icon (optional):</string>
        </property>
       </widget>
      </item>
      <item row="5" column="0">
       <widget class="QLabel" name="label_4">
        <property name="toolTip">
-        <string>Command used to run the application</string>
+        <string>Optional. The command Limo runs to launch the application (e.g. the Steam/Proton launch command). Leave empty if you only manage mods.</string>
        </property>
        <property name="text">
-        <string>Command:</string>
+        <string>Command (optional):</string>
        </property>
       </widget>
      </item>
      <item row="4" column="1">
-      <widget class="ValidatingLineEdit" name="path_field"/>
+      <widget class="ValidatingLineEdit" name="path_field">
+       <property name="placeholderText">
+        <string>Folder where Limo will store installed mods</string>
+       </property>
+      </widget>
      </item>
      <item row="0" column="1">
-      <widget class="ValidatingLineEdit" name="name_field"/>
+      <widget class="ValidatingLineEdit" name="name_field">
+       <property name="placeholderText">
+        <string>e.g. The Witcher 3</string>
+       </property>
+      </widget>
      </item>
      <item row="2" column="1">
-      <widget class="QLineEdit" name="icon_field"/>
+      <widget class="QLineEdit" name="icon_field">
+       <property name="placeholderText">
+        <string>Path to an icon image — optional</string>
+       </property>
+      </widget>
      </item>
      <item row="3" column="2" rowspan="2">
       <widget class="QPushButton" name="file_picker_button">
@@ -154,24 +179,32 @@
       </widget>
      </item>
      <item row="5" column="1">
-      <widget class="QLineEdit" name="command_field"/>
+      <widget class="QLineEdit" name="command_field">
+       <property name="placeholderText">
+        <string>Launch command — optional</string>
+       </property>
+      </widget>
      </item>
      <item row="1" column="0">
       <widget class="QLabel" name="label_5">
        <property name="toolTip">
-        <string>This will be used for FOMOD conditions</string>
+        <string>Optional. Only used to evaluate FOMOD install conditions that check the application's version.</string>
        </property>
        <property name="text">
-        <string>Version:</string>
+        <string>Version (optional):</string>
        </property>
       </widget>
      </item>
      <item row="1" column="1">
-      <widget class="QLineEdit" name="version_field"/>
+      <widget class="QLineEdit" name="version_field">
+       <property name="placeholderText">
+        <string>e.g. 4.04 — only for FOMOD version checks</string>
+       </property>
+      </widget>
      </item>
     </layout>
    </item>
-   <item row="2" column="0">
+   <item row="3" column="0">
     <widget class="QCheckBox" name="import_checkbox">
      <property name="toolTip">
       <string>Create default deployers for this game</string>
@@ -184,7 +217,7 @@
      </property>
     </widget>
    </item>
-   <item row="3" column="0">
+   <item row="4" column="0">
     <widget class="QCheckBox" name="import_tags_checkbox">
      <property name="toolTip">
       <string>Import default auto tags for this game</string>
