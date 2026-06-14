@@ -21,6 +21,12 @@
 int main(int argc, char* argv[])
 {
   QCoreApplication::setApplicationName("Limo");
+  // Associate the running app with its .desktop file so Wayland/KDE shows the Limo icon in the
+  // taskbar/switcher instead of the generic fallback (limo-app/limo#257). The flatpak ships the
+  // reverse-DNS desktop id; the native install ships limo.desktop.
+  QGuiApplication::setDesktopFileName(std::filesystem::exists("/.flatpak-info")
+                                        ? "io.github.limo_app.limo"
+                                        : "limo");
   QApplication app(argc, argv);
   // Apply the bundled palette-aware theme on top of the platform style.
   QFile style_file(":/styles/app.qss");
