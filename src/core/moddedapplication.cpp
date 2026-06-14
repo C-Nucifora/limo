@@ -762,6 +762,10 @@ void ModdedApplication::removeModFromGroup(int mod_id,
   {
     groups_.erase(groups_.begin() + group);
     active_group_members_.erase(active_group_members_.begin() + group);
+    if(group < (int)group_names_.size())
+      group_names_.erase(group_names_.begin() + group);
+    if(group < (int)group_notes_.size())
+      group_notes_.erase(group_notes_.begin() + group);
     for(auto& pair : group_map_)
     {
       if(pair.second > group)
@@ -791,6 +795,8 @@ void ModdedApplication::createGroup(int first_mod_id,
   group_map_[first_mod_id] = group;
   group_map_[second_mod_id] = group;
   active_group_members_.push_back(first_mod_id);
+  group_names_.push_back("");
+  group_notes_.push_back("");
   ProgressNode node(progress_callback_);
   updateDeployerGroups(progress_node ? progress_node : &node);
   updateSettings(true);
@@ -822,6 +828,60 @@ void ModdedApplication::changeModVersion(int mod_id, const std::string& new_vers
 int ModdedApplication::getNumGroups()
 {
   return groups_.size();
+}
+
+std::string ModdedApplication::getGroupName(int group) const
+{
+  if(group < 0 || group >= (int)group_names_.size())
+    return "";
+  return group_names_[group];
+}
+
+void ModdedApplication::setGroupName(int group, const std::string& name)
+{
+  if(group < 0 || group >= (int)group_names_.size())
+    return;
+  group_names_[group] = name;
+  updateSettings(true);
+}
+
+std::string ModdedApplication::getGroupNotes(int group) const
+{
+  if(group < 0 || group >= (int)group_notes_.size())
+    return "";
+  return group_notes_[group];
+}
+
+void ModdedApplication::setGroupNotes(int group, const std::string& notes)
+{
+  if(group < 0 || group >= (int)group_notes_.size())
+    return;
+  group_notes_[group] = notes;
+  updateSettings(true);
+}
+
+std::vector<std::pair<std::string, std::string>> ModdedApplication::getGroupMetadata() const
+{
+  std::vector<std::pair<std::string, std::string>> result;
+  result.reserve(groups_.size());
+  for(int i = 0; i < (int)groups_.size(); i++)
+    result.emplace_back(i < (int)group_names_.size() ? group_names_[i] : "",
+                        i < (int)group_notes_.size() ? group_notes_[i] : "");
+  return result;
+}
+
+std::vector<int> ModdedApplication::getGroupMembers(int group) const
+{
+  if(group < 0 || group >= (int)groups_.size())
+    return {};
+  return groups_[group];
+}
+
+int ModdedApplication::getActiveGroupMember(int group) const
+{
+  if(group < 0 || group >= (int)active_group_members_.size())
+    return -1;
+  return active_group_members_[group];
 }
 
 bool ModdedApplication::modHasGroup(int mod_id)
@@ -1678,10 +1738,14 @@ void ModdedApplication::updateSettings(bool write)
   json_settings_["name"] = name_;
   json_settings_["command"] = command_;
   json_settings_["icon_path"] = icon_path_.string();
-  for(int group = 0; group < groups_.size(); group++)
+  for(int group = 0; group < (int)groups_.size(); group++)
   {
     json_settings_["groups"][group]["active_member"] = active_group_members_[group];
-    for(int i = 0; i < groups_[group].size(); i++)
+    json_settings_["groups"][group]["name"] =
+      group < (int)group_names_.size() ? group_names_[group] : "";
+    json_settings_["groups"][group]["notes"] =
+      group < (int)group_notes_.size() ? group_notes_[group] : "";
+    for(int i = 0; i < (int)groups_[group].size(); i++)
     {
       json_settings_["groups"][group]["members"][i] = groups_[group][i];
     }
@@ -1783,6 +1847,8 @@ void ModdedApplication::updateState(bool read)
   groups_.clear();
   group_map_.clear();
   active_group_members_.clear();
+  group_names_.clear();
+  group_notes_.clear();
   profile_names_.clear();
   bak_man_.reset();
   tools_.clear();
@@ -1864,6 +1930,8 @@ void ModdedApplication::updateState(bool read)
       throw ParseError("Invalid active group member: " + std::to_string(active_member) + " in \"" +
                        (staging_dir_ / CONFIG_FILE_NAME).string() + "\"");
     active_group_members_.push_back(groups[group]["active_member"].asInt());
+    group_names_.push_back(groups[group].get("name", "").asString());
+    group_notes_.push_back(groups[group].get("notes", "").asString());
   }
   Json::Value deployers = json_settings_["deployers"];
   for(int depl = 0; depl < deployers.size(); depl++)

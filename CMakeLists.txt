@@ -342,6 +342,9 @@ set(PROJECT_SOURCES
         src/ui/mainwindow.cpp
         src/ui/mainwindow.h
         src/ui/mainwindow.ui
+        src/ui/managegroupsdialog.cpp
+        src/ui/managegroupsdialog.h
+        src/ui/managegroupsdialog.ui
         src/ui/managemodtagsdialog.cpp
         src/ui/managemodtagsdialog.h
         src/ui/managemodtagsdialog.ui

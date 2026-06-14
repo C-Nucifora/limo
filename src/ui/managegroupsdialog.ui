@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ManageGroupsDialog</class>
+ <widget class="QDialog" name="ManageGroupsDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>600</width>
+    <height>480</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Manage Groups</string>
+  </property>
+  <layout class="QHBoxLayout" name="horizontalLayout">
+   <!-- Left: group list -->
+   <item>
+    <layout class="QVBoxLayout" name="leftLayout">
+     <item>
+      <widget class="QLabel" name="groups_label">
+       <property name="text">
+        <string>Groups</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QListWidget" name="group_list">
+       <property name="minimumWidth">
+        <number>180</number>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <!-- Right: detail panel -->
+   <item>
+    <layout class="QVBoxLayout" name="rightLayout">
+     <!-- Name row -->
+     <item>
+      <layout class="QHBoxLayout" name="nameLayout">
+       <item>
+        <widget class="QLabel" name="name_label">
+         <property name="text">
+          <string>Name:</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QLineEdit" name="name_edit"/>
+       </item>
+       <item>
+        <widget class="QPushButton" name="rename_button">
+         <property name="text">
+          <string>Rename</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <!-- Notes area -->
+     <item>
+      <widget class="QLabel" name="notes_label">
+       <property name="text">
+        <string>Notes:</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPlainTextEdit" name="notes_edit"/>
+     </item>
+     <item>
+      <widget class="QPushButton" name="save_notes_button">
+       <property name="text">
+        <string>Save Notes</string>
+       </property>
+      </widget>
+     </item>
+     <!-- Members area -->
+     <item>
+      <widget class="QLabel" name="members_label">
+       <property name="text">
+        <string>Members:</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QListWidget" name="member_list"/>
+     </item>
+     <!-- Member action buttons -->
+     <item>
+      <layout class="QHBoxLayout" name="memberButtonLayout">
+       <item>
+        <widget class="QPushButton" name="set_active_button">
+         <property name="text">
+          <string>Set Active</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <spacer>
+         <property name="orientation">
+          <enum>Qt::Horizontal</enum>
+         </property>
+        </spacer>
+       </item>
+       <item>
+        <widget class="QPushButton" name="dissolve_button">
+         <property name="text">
+          <string>Dissolve Group</string>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </item>
+     <!-- Close button -->
+     <item>
+      <widget class="QDialogButtonBox" name="buttonBox">
+       <property name="orientation">
+        <enum>Qt::Horizontal</enum>
+       </property>
+       <property name="standardButtons">
+        <set>QDialogButtonBox::Close</set>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>buttonBox</sender>
+   <signal>rejected()</signal>
+   <receiver>ManageGroupsDialog</receiver>
+   <slot>reject()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>300</x>
+     <y>440</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>300</x>
+     <y>460</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>

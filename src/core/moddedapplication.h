@@ -328,6 +328,48 @@ public:
    */
   int getNumGroups();
   /*!
+   * \brief Returns the user-visible name for the given group.
+   * \param group Target group index.
+   * \return The name, or an empty string if out of range.
+   */
+  std::string getGroupName(int group) const;
+  /*!
+   * \brief Sets the user-visible name for the given group and persists the change.
+   * \param group Target group index.
+   * \param name The new name.
+   */
+  void setGroupName(int group, const std::string& name);
+  /*!
+   * \brief Returns the notes for the given group.
+   * \param group Target group index.
+   * \return The notes, or an empty string if out of range.
+   */
+  std::string getGroupNotes(int group) const;
+  /*!
+   * \brief Sets the notes for the given group and persists the change.
+   * \param group Target group index.
+   * \param notes The new notes.
+   */
+  void setGroupNotes(int group, const std::string& notes);
+  /*!
+   * \brief Returns names and notes for every group, indexed parallel to groups_.
+   * Each element is a pair of (name, notes).
+   * \return The vector of (name, notes) pairs.
+   */
+  std::vector<std::pair<std::string, std::string>> getGroupMetadata() const;
+  /*!
+   * \brief Returns the members (mod ids) of the given group.
+   * \param group Target group index.
+   * \return The mod id vector, or empty if out of range.
+   */
+  std::vector<int> getGroupMembers(int group) const;
+  /*!
+   * \brief Returns the active member mod id of the given group.
+   * \param group Target group index.
+   * \return The active member mod id, or -1 if out of range.
+   */
+  int getActiveGroupMember(int group) const;
+  /*!
    * \brief Checks if given mod belongs to any group.
    * \param mod_id Target mod.
    * \return True if mod belongs to a group, else: False.
@@ -694,6 +736,10 @@ private:
   std::map<int, int> group_map_;
   /*! \brief Contains the active member of every group. */
   std::vector<int> active_group_members_;
+  /*! \brief User-visible name for each group, parallel to groups_. */
+  std::vector<std::string> group_names_;
+  /*! \brief Free-form notes for each group, parallel to groups_. */
+  std::vector<std::string> group_notes_;
   /*! \brief Maps mods to the installer used during their installation. */
   std::map<int, std::string> installer_map_;
   /*! \brief Path to this applications icon. */
