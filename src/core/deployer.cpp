@@ -434,9 +434,11 @@ void Deployer::sortModsByConflicts(std::optional<ProgressNode*> progress_node)
   {
     for(int mod_id : group)
     {
-      auto entry = str::find_if(*loadorders_[current_profile_],
-                                [mod_id](auto entry) { return entry.lock()->id == mod_id; })->lock();
-      new_loadorder->emplace_back(entry);
+      auto iter = str::find_if(*loadorders_[current_profile_],
+                               [mod_id](auto entry) { return entry.lock()->id == mod_id; });
+      if(iter == loadorders_[current_profile_]->end())
+        continue; // conflict group references a mod no longer in the load order (desync)
+      new_loadorder->emplace_back(iter->lock());
     }
     i++;
   }
