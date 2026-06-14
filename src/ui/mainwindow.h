@@ -17,8 +17,11 @@
 #include "applicationmanager.h"
 #include "backuplistmodel.h"
 #include "backupnamedelegate.h"
+#include "conflictdetaildialog.h"
 #include "conflictsmodel.h"
 #include "core/importmodinfo.h"
+#include "managegroupsdialog.h"
+#include "managemodrulesdialog.h"
 #include "deployerlistmodel.h"
 #include "deployerlistproxymodel.h"
 #include "editmodsourcesdialog.h"
@@ -169,6 +172,18 @@ private:
   QAction* remove_profile_action_;
   /*! \brief Action used to edit the current profile. */
   QAction* edit_profile_action_;
+  /*! \brief Mod context action: edit the note attached to the selected mod. */
+  QAction* edit_note_action_;
+  /*! \brief Mod context action: pin the selected mod to its current version. */
+  QAction* pin_version_action_;
+  /*! \brief Mod context action: remove the version pin from the selected mod. */
+  QAction* unpin_version_action_;
+  /*! \brief Mod context action: edit the dependency/conflict rules of the selected mod. */
+  QAction* mod_rules_action_;
+  /*! \brief Mod context action: open the manage-groups dialog. */
+  QAction* manage_groups_action_;
+  /*! \brief Deployer context action: show per-file win/loss conflict detail for the selected mod. */
+  QAction* conflict_detail_action_;
   /*! \brief If true: changes to ui->info_tool_list will not trigger table updates. */
   bool ignore_tool_changes_ = false;
   /*! \brief If true: Show confirmation box before removing a Deployer. */
@@ -211,6 +226,10 @@ private:
   std::unique_ptr<EditManualTagsDialog> edit_manual_tags_dialog_;
   /*! \brief Reusable dialog for managing the manual tags assigned to a set of mods. */
   std::unique_ptr<ManageModTagsDialog> manage_mod_tags_dialog_;
+  /*! \brief Reusable dialog for editing the dependency/conflict rules of a mod. */
+  std::unique_ptr<ManageModRulesDialog> manage_mod_rules_dialog_;
+  /*! \brief Reusable dialog for viewing and editing all version groups. */
+  std::unique_ptr<ManageGroupsDialog> manage_groups_dialog_;
   /*! \brief Reusable dialog for editing auto tags. */
   std::unique_ptr<EditAutoTagsDialog> edit_auto_tags_dialog_;
   /*! \brief Reusable dialog for editing local and remote mod source paths. */
@@ -225,6 +244,13 @@ private:
   std::unique_ptr<ChangelogDialog> changelog_dialog_;
   /*! \brief Stores the index in ui->mod_list of a mod before being added to a group. */
   int last_mod_list_index_ = -1;
+  /*!
+   *  \brief When >= 0: the next received file-conflict result should be shown in a
+   *  ConflictDetailDialog for this mod id rather than in the conflicts window.
+   */
+  int conflict_detail_mod_id_ = -1;
+  /*! \brief Display name of the mod for the pending ConflictDetailDialog. */
+  QString conflict_detail_mod_name_;
   /*! \brief Contains all queued mods to be downloaded or extracted. */
   std::priority_queue<ImportModInfo> mod_import_queue_;
   /*! \brief Last position of the scroll bar for ui->deployer_list */
@@ -1113,6 +1139,51 @@ private slots:
    * \param action Action to be applied to the current mod.
    */
   void onModActionTriggered(int action);
+  /*! \brief Edits the note attached to the currently selected mod. */
+  void onEditModNote();
+  /*! \brief Pins the currently selected mod to its current version. */
+  void onPinModVersion();
+  /*! \brief Removes the version pin from the currently selected mod. */
+  void onUnpinModVersion();
+  /*! \brief Opens the ManageModRulesDialog for the currently selected mod. */
+  void onEditModRules();
+  /*!
+   * \brief Forwards an edited rule list for one mod to the ApplicationManager.
+   * \param app_id Target app.
+   * \param source_mod_id Mod whose rules changed.
+   * \param rules The complete new rule list.
+   */
+  void onModRulesChanged(int app_id, int source_mod_id, std::vector<ModRule> rules);
+  /*! \brief Opens a ConflictDetailDialog for the mod selected in the deployer list. */
+  void onConflictDetails();
+  /*!
+   * \brief Receives the rules for one mod and opens the ManageModRulesDialog.
+   * \param app_id Target app.
+   * \param mod_id The mod whose rules were fetched.
+   * \param rules The current rules for that mod.
+   */
+  void onGetModRules(int app_id, int mod_id, std::vector<ModRule> rules);
+  /*! \brief Opens the ManageGroupsDialog populated with the current app's groups. */
+  void onManageGroups();
+  /*!
+   * \brief Receives all group data for one app and opens the ManageGroupsDialog.
+   * \param app_id Target app.
+   * \param group_names User-visible name for each group.
+   * \param group_notes Notes for each group.
+   * \param group_members Mod ids belonging to each group.
+   * \param active_members Active member mod id for each group.
+   */
+  void onGetGroupData(int app_id,
+                      std::vector<std::string> group_names,
+                      std::vector<std::string> group_notes,
+                      std::vector<std::vector<int>> group_members,
+                      std::vector<int> active_members);
+  /*! \brief Forwards a group rename to the ApplicationManager. */
+  void onGroupRenamed(int app_id, int group, QString name);
+  /*! \brief Forwards a group notes change to the ApplicationManager. */
+  void onGroupNotesChanged(int app_id, int group, QString notes);
+  /*! \brief Forwards a group dissolve request to the ApplicationManager. */
+  void onGroupDissolved(int app_id, int group);
 
 signals:
   /*!
@@ -1606,4 +1677,56 @@ signals:
    * \param mod_id Target mod.
    */
   void applyModAction(int app_id, int deployer, int action, int mod_id);
+  /*!
+   * \brief Sets the note attached to a mod.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   * \param note The new note text.
+   */
+  void setModNote(int app_id, int mod_id, QString note);
+  /*!
+   * \brief Pins or unpins the version of a mod.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   * \param pinned If true: pin the mod to its current version, else remove the pin.
+   */
+  void setModPinned(int app_id, int mod_id, bool pinned);
+  /*!
+   * \brief Requests the dependency/conflict rules for one mod. Answered by sendModRules.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   */
+  void getModRulesFor(int app_id, int mod_id);
+  /*!
+   * \brief Replaces the complete rule list for one mod.
+   * \param app_id Target app.
+   * \param source_mod_id Mod whose rules are set.
+   * \param rules The new rule list.
+   */
+  void setModRulesFor(int app_id, int source_mod_id, std::vector<ModRule> rules);
+  /*!
+   * \brief Requests all version-group data for one app. Answered by sendGroupData.
+   * \param app_id Target app.
+   */
+  void getGroupData(int app_id);
+  /*!
+   * \brief Sets the user-visible name of a group.
+   * \param app_id Target app.
+   * \param group Target group.
+   * \param name The new name.
+   */
+  void setGroupName(int app_id, int group, QString name);
+  /*!
+   * \brief Sets the notes of a group.
+   * \param app_id Target app.
+   * \param group Target group.
+   * \param notes The new notes.
+   */
+  void setGroupNotes(int app_id, int group, QString notes);
+  /*!
+   * \brief Dissolves a group by removing every mod from it.
+   * \param app_id Target app.
+   * \param group Target group.
+   */
+  void dissolveGroup(int app_id, int group);
 };

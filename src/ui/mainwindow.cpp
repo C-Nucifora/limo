@@ -26,6 +26,7 @@
 #include "versionboxdelegate.h"
 #include <QCheckBox>
 #include <QDesktopServices>
+#include <QInputDialog>
 #include <QMessageBox>
 #include <QMetaType>
 #include <QPainter>
@@ -67,6 +68,9 @@ Q_DECLARE_METATYPE(ExternalChangesInfo);
 Q_DECLARE_METATYPE(FileChangeChoices);
 Q_DECLARE_METATYPE(Tool);
 Q_DECLARE_METATYPE(ImportModInfo);
+Q_DECLARE_METATYPE(std::vector<ModRule>);
+Q_DECLARE_METATYPE(std::vector<std::string>);
+Q_DECLARE_METATYPE(std::vector<std::vector<int>>);
 
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow)
@@ -188,6 +192,9 @@ void MainWindow::setupConnections()
   qRegisterMetaType<FileChangeChoices>();
   qRegisterMetaType<Tool>();
   qRegisterMetaType<ImportModInfo>();
+  qRegisterMetaType<std::vector<ModRule>>();
+  qRegisterMetaType<std::vector<std::string>>();
+  qRegisterMetaType<std::vector<std::vector<int>>>();
 
   connect(this, &MainWindow::getModInfo,
           app_manager_, &ApplicationManager::getModInfo);
@@ -279,6 +286,26 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::changeModVersion);
   connect(this, &MainWindow::sortModsByConflicts,
           app_manager_, &ApplicationManager::sortModsByConflicts);
+  connect(this, &MainWindow::setModNote,
+          app_manager_, &ApplicationManager::setModNote);
+  connect(this, &MainWindow::setModPinned,
+          app_manager_, &ApplicationManager::setModPinned);
+  connect(this, &MainWindow::getModRulesFor,
+          app_manager_, &ApplicationManager::getModRulesFor);
+  connect(app_manager_, &ApplicationManager::sendModRules,
+          this, &MainWindow::onGetModRules);
+  connect(this, &MainWindow::setModRulesFor,
+          app_manager_, &ApplicationManager::setModRulesFor);
+  connect(this, &MainWindow::getGroupData,
+          app_manager_, &ApplicationManager::getGroupData);
+  connect(app_manager_, &ApplicationManager::sendGroupData,
+          this, &MainWindow::onGetGroupData);
+  connect(this, &MainWindow::setGroupName,
+          app_manager_, &ApplicationManager::setGroupName);
+  connect(this, &MainWindow::setGroupNotes,
+          app_manager_, &ApplicationManager::setGroupNotes);
+  connect(this, &MainWindow::dissolveGroup,
+          app_manager_, &ApplicationManager::dissolveGroup);
   connect(ui->deployer_list, &DeployerListView::modMoved,
           this, &MainWindow::onModMoved);
   connect(this, &MainWindow::extractArchive,
@@ -517,13 +544,30 @@ void MainWindow::setupMenus()
           this,
           &MainWindow::onModListContextMenu);
   mod_list_menu_ = new QMenu(this);
+  edit_note_action_ = new QAction("Edit Note...", this);
+  edit_note_action_->setToolTip("Attach a free-text note to this mod");
+  connect(edit_note_action_, &QAction::triggered, this, &MainWindow::onEditModNote);
+  pin_version_action_ = new QAction("Pin Version", this);
+  pin_version_action_->setToolTip("Keep this mod at its current version and skip it in update checks");
+  connect(pin_version_action_, &QAction::triggered, this, &MainWindow::onPinModVersion);
+  unpin_version_action_ = new QAction("Unpin Version", this);
+  unpin_version_action_->setToolTip("Allow this mod to be updated again");
+  connect(unpin_version_action_, &QAction::triggered, this, &MainWindow::onUnpinModVersion);
+  mod_rules_action_ = new QAction("Mod Rules...", this);
+  mod_rules_action_->setToolTip("Edit dependency and conflict rules for this mod");
+  connect(mod_rules_action_, &QAction::triggered, this, &MainWindow::onEditModRules);
+  manage_groups_action_ = new QAction("Manage Groups...", this);
+  manage_groups_action_->setToolTip("View and edit all version groups for this app");
+  connect(manage_groups_action_, &QAction::triggered, this, &MainWindow::onManageGroups);
   QList<QAction*> mod_list_actions{ ui->actionadd_to_deployer,      ui->actionAdd_to_Group,
                                     ui->actionbrowse_mod_files,     ui->actionRemove_from_Group,
                                     ui->actionRemove_Mods,          ui->actionRemove_Other_Versions,
                                     ui->actionEdit_Tags_for_mods,   ui->actionUpdate_Tags,
                                     ui->actionEdit_Mod_Sources,     ui->actionShow_Nexus_Page,
                                     ui->actionReinstall_From_Local, ui->actionCheck_For_Updates,
-                                    ui->actionSuppress_Update };
+                                    ui->actionSuppress_Update,       edit_note_action_,
+                                    pin_version_action_,            unpin_version_action_,
+                                    mod_rules_action_,               manage_groups_action_ };
   std::sort(mod_list_actions.begin(), mod_list_actions.end(), sort_actions);
   mod_list_menu_->addActions(mod_list_actions);
 
@@ -533,11 +577,14 @@ void MainWindow::setupMenus()
           this,
           &MainWindow::onDeployerListContextMenu);
   deployer_list_menu_ = new QMenu(this);
+  conflict_detail_action_ = new QAction("Conflict Details...", this);
+  conflict_detail_action_->setToolTip("Show which files this mod wins and loses against other mods");
+  connect(conflict_detail_action_, &QAction::triggered, this, &MainWindow::onConflictDetails);
   QList<QAction*> deployer_list_actions{
     ui->actionremove_from_deployer, ui->actionget_file_conflicts,
     ui->actionget_mod_conflicts,    ui->actionmove_mod,
     ui->actionbrowse_mod_files,     ui->actionSort_Mods,
-    ui->actionAdd_to_Ignore_List
+    ui->actionAdd_to_Ignore_List,   conflict_detail_action_
   };
   std::sort(deployer_list_actions.begin(), deployer_list_actions.end(), sort_actions);
   deployer_list_menu_->addActions(deployer_list_actions);
@@ -658,6 +705,35 @@ void MainWindow::setupDialogs()
           &ManageModTagsDialog::dialogClosed,
           this,
           &MainWindow::onBusyDialogAborted);
+
+  manage_mod_rules_dialog_ = std::make_unique<ManageModRulesDialog>();
+  connect(manage_mod_rules_dialog_.get(),
+          &ManageModRulesDialog::rulesChanged,
+          this,
+          &MainWindow::onModRulesChanged);
+
+  manage_groups_dialog_ = std::make_unique<ManageGroupsDialog>();
+  connect(manage_groups_dialog_.get(),
+          &ManageGroupsDialog::groupRenamed,
+          this,
+          &MainWindow::onGroupRenamed);
+  connect(manage_groups_dialog_.get(),
+          &ManageGroupsDialog::groupNotesChanged,
+          this,
+          &MainWindow::onGroupNotesChanged);
+  connect(manage_groups_dialog_.get(),
+          &ManageGroupsDialog::groupDissolved,
+          this,
+          &MainWindow::onGroupDissolved);
+  connect(manage_groups_dialog_.get(),
+          &ManageGroupsDialog::activeGroupMemberChanged,
+          this,
+          [this](int app_id, int group, int mod_id)
+          {
+            emit changeActiveGroupMember(app_id, group, mod_id);
+            if(app_id == currentApp())
+              emit getModInfo(app_id);
+          });
 
   edit_auto_tags_dialog_ = std::make_unique<EditAutoTagsDialog>();
   connect(edit_auto_tags_dialog_.get(),
@@ -1689,6 +1765,10 @@ void MainWindow::onModListContextMenu(QPoint pos)
     ui->actionReinstall_From_Local->setVisible(false);
     ui->actionCheck_For_Updates->setVisible(true);
     ui->actionSuppress_Update->setVisible(true);
+    edit_note_action_->setVisible(false);
+    pin_version_action_->setVisible(false);
+    unpin_version_action_->setVisible(false);
+    mod_rules_action_->setVisible(false);
   }
   else
   {
@@ -1716,6 +1796,11 @@ void MainWindow::onModListContextMenu(QPoint pos)
     ui->actionReinstall_From_Local->setVisible(!local_path.empty() &&
                                                std::filesystem::exists(local_path));
     ui->actionSuppress_Update->setVisible(idx.data(ModListModel::has_update_role).toBool());
+    edit_note_action_->setVisible(true);
+    mod_rules_action_->setVisible(true);
+    const bool is_pinned = idx.data(ModListModel::mod_pinned_role).toBool();
+    pin_version_action_->setVisible(!is_pinned);
+    unpin_version_action_->setVisible(is_pinned);
   }
   mod_list_menu_->exec(ui->mod_list->mapToGlobal(pos));
 }
@@ -1771,6 +1856,15 @@ void MainWindow::onCompletedOperations(QString message)
 
 void MainWindow::onGetFileConflicts(std::vector<ConflictInfo> conflicts)
 {
+  if(conflict_detail_mod_id_ >= 0)
+  {
+    const int mod_id = conflict_detail_mod_id_;
+    const QString mod_name = conflict_detail_mod_name_;
+    conflict_detail_mod_id_ = -1;
+    ConflictDetailDialog dialog(mod_id, mod_name, conflicts, this);
+    dialog.exec();
+    return;
+  }
   if(deployer_model_->rowCount() == 0)
     return;
   auto index = deployer_list_proxy_->mapToSource(ui->deployer_list->currentIndex());
@@ -3196,6 +3290,131 @@ void MainWindow::onModSourcesEdited(int app_id,
 {
   setBusyStatus(false);
   emit editModSources(app_id, mod_id, local_source, remote_source);
+  if(app_id == currentApp())
+    emit getModInfo(app_id);
+}
+
+void MainWindow::onEditModNote()
+{
+  const auto index = mod_list_proxy_->mapToSource(ui->mod_list->selectionModel()->currentIndex());
+  if(!index.isValid())
+    return;
+  const int mod_id = mod_list_model_->data(index, ModListModel::mod_id_role).toInt();
+  const QString mod_name = index.data(ModListModel::mod_name_role).toString();
+  const QString current_note = index.data(ModListModel::mod_note_role).toString();
+  bool ok = false;
+  const QString note = QInputDialog::getMultiLineText(
+    this, "Edit note for \"" + mod_name + "\"", "Note:", current_note, &ok);
+  if(!ok)
+    return;
+  emit setModNote(currentApp(), mod_id, note);
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onPinModVersion()
+{
+  const auto index = mod_list_proxy_->mapToSource(ui->mod_list->selectionModel()->currentIndex());
+  if(!index.isValid())
+    return;
+  const int mod_id = mod_list_model_->data(index, ModListModel::mod_id_role).toInt();
+  emit setModPinned(currentApp(), mod_id, true);
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onUnpinModVersion()
+{
+  const auto index = mod_list_proxy_->mapToSource(ui->mod_list->selectionModel()->currentIndex());
+  if(!index.isValid())
+    return;
+  const int mod_id = mod_list_model_->data(index, ModListModel::mod_id_role).toInt();
+  emit setModPinned(currentApp(), mod_id, false);
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onEditModRules()
+{
+  const auto index = mod_list_proxy_->mapToSource(ui->mod_list->selectionModel()->currentIndex());
+  if(!index.isValid())
+    return;
+  const int mod_id = mod_list_model_->data(index, ModListModel::mod_id_role).toInt();
+  emit getModRulesFor(currentApp(), mod_id);
+}
+
+void MainWindow::onGetModRules(int app_id, int mod_id, std::vector<ModRule> rules)
+{
+  if(app_id != currentApp())
+    return;
+  QString source_name;
+  std::vector<std::pair<int, QString>> all_mods;
+  for(const auto& mod_info : mod_list_model_->getModInfo())
+  {
+    if(mod_info.mod.id == mod_id)
+      source_name = QString::fromStdString(mod_info.mod.name);
+    else
+      all_mods.emplace_back(mod_info.mod.id, QString::fromStdString(mod_info.mod.name));
+  }
+  manage_mod_rules_dialog_->setupDialog(app_id, mod_id, source_name, all_mods, rules);
+  manage_mod_rules_dialog_->show();
+}
+
+void MainWindow::onModRulesChanged(int app_id, int source_mod_id, std::vector<ModRule> rules)
+{
+  emit setModRulesFor(app_id, source_mod_id, rules);
+}
+
+void MainWindow::onConflictDetails()
+{
+  if(deployer_model_->rowCount() == 0)
+    return;
+  const auto index = deployer_list_proxy_->mapToSource(ui->deployer_list->currentIndex());
+  conflict_detail_mod_id_ = deployer_model_->data(index, ModListModel::mod_id_role).toInt();
+  conflict_detail_mod_name_ = deployer_model_->data(index, ModListModel::mod_name_role).toString();
+  setStatusMessage("Finding file conflicts");
+  setBusyStatus(true);
+  emit getFileConflicts(currentApp(), currentDeployer(), conflict_detail_mod_id_, false);
+}
+
+void MainWindow::onManageGroups()
+{
+  emit getGroupData(currentApp());
+}
+
+void MainWindow::onGetGroupData(int app_id,
+                                std::vector<std::string> group_names,
+                                std::vector<std::string> group_notes,
+                                std::vector<std::vector<int>> group_members,
+                                std::vector<int> active_members)
+{
+  if(app_id != currentApp())
+    return;
+  std::map<int, std::string> mod_names;
+  for(const auto& mod_info : mod_list_model_->getModInfo())
+    mod_names[mod_info.mod.id] = mod_info.mod.name;
+  manage_groups_dialog_->setupDialog(app_id,
+                                     static_cast<int>(group_names.size()),
+                                     group_names,
+                                     group_notes,
+                                     group_members,
+                                     active_members,
+                                     mod_names);
+  manage_groups_dialog_->show();
+}
+
+void MainWindow::onGroupRenamed(int app_id, int group, QString name)
+{
+  emit setGroupName(app_id, group, name);
+  if(app_id == currentApp())
+    emit getModInfo(app_id);
+}
+
+void MainWindow::onGroupNotesChanged(int app_id, int group, QString notes)
+{
+  emit setGroupNotes(app_id, group, notes);
+}
+
+void MainWindow::onGroupDissolved(int app_id, int group)
+{
+  emit dissolveGroup(app_id, group);
   if(app_id == currentApp())
     emit getModInfo(app_id);
 }

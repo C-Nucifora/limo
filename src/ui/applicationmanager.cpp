@@ -724,6 +724,81 @@ void ApplicationManager::changeModVersion(int app_id, int mod_id, QString new_ve
       app_id, mod_id, new_version.toStdString());
 }
 
+void ApplicationManager::setModNote(int app_id, int mod_id, QString note)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::setModNote>(app_id, mod_id, note.toStdString());
+}
+
+void ApplicationManager::setModPinned(int app_id, int mod_id, bool pinned)
+{
+  if(!appIndexIsValid(app_id))
+    return;
+  if(pinned)
+    handleExceptions<&ModdedApplication::pinModVersion>(app_id, mod_id);
+  else
+    handleExceptions<&ModdedApplication::unpinModVersion>(app_id, mod_id);
+}
+
+void ApplicationManager::getModRulesFor(int app_id, int mod_id)
+{
+  if(!appIndexIsValid(app_id))
+    return;
+  auto rules = handleExceptions(&ModdedApplication::getModRulesFor, apps_[app_id], mod_id);
+  if(rules)
+    emit sendModRules(app_id, mod_id, *rules);
+}
+
+void ApplicationManager::setModRulesFor(int app_id, int source_mod_id, std::vector<ModRule> rules)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::setModRulesFor>(app_id, source_mod_id, rules);
+  emit completedOperations("Mod rules updated");
+}
+
+void ApplicationManager::getGroupData(int app_id)
+{
+  if(!appIndexIsValid(app_id))
+    return;
+  std::vector<std::string> names;
+  std::vector<std::string> notes;
+  std::vector<std::vector<int>> members;
+  std::vector<int> active;
+  const auto metadata = apps_[app_id].getGroupMetadata();
+  for(int g = 0; g < static_cast<int>(metadata.size()); g++)
+  {
+    names.push_back(metadata[g].first);
+    notes.push_back(metadata[g].second);
+    members.push_back(apps_[app_id].getGroupMembers(g));
+    active.push_back(apps_[app_id].getActiveGroupMember(g));
+  }
+  emit sendGroupData(app_id, names, notes, members, active);
+}
+
+void ApplicationManager::setGroupName(int app_id, int group, QString name)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::setGroupName>(app_id, group, name.toStdString());
+}
+
+void ApplicationManager::setGroupNotes(int app_id, int group, QString notes)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::setGroupNotes>(app_id, group, notes.toStdString());
+}
+
+void ApplicationManager::dissolveGroup(int app_id, int group)
+{
+  if(appIndexIsValid(app_id))
+  {
+    const auto members = apps_[app_id].getGroupMembers(group);
+    for(int mod_id : members)
+      handleExceptions<&ModdedApplication::removeModFromGroup>(
+        app_id, mod_id, true, std::optional<ProgressNode*>{});
+  }
+  emit completedOperations("Group dissolved");
+}
+
 void ApplicationManager::sortModsByConflicts(int app_id, int deployer)
 {
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))

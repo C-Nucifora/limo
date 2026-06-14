@@ -522,6 +522,26 @@ signals:
    * \param deploy If True: Deploy mods after checking, else: Undeploy mods.
    */
   void externalChangesHandled(int app_id, int deployer, int num_deployers, bool deploy);
+  /*!
+   * \brief Sends the dependency/conflict rules for one mod.
+   * \param app_id Target app.
+   * \param mod_id The mod whose rules these are.
+   * \param rules The rules for that mod.
+   */
+  void sendModRules(int app_id, int mod_id, std::vector<ModRule> rules);
+  /*!
+   * \brief Sends all version-group data for one app.
+   * \param app_id Target app.
+   * \param group_names User-visible name for each group.
+   * \param group_notes Notes for each group.
+   * \param group_members Mod ids belonging to each group.
+   * \param active_members Active member mod id for each group.
+   */
+  void sendGroupData(int app_id,
+                     std::vector<std::string> group_names,
+                     std::vector<std::string> group_notes,
+                     std::vector<std::vector<int>> group_members,
+                     std::vector<int> active_members);
 
 public slots:
   /*!
@@ -1039,4 +1059,56 @@ public slots:
    * \param mod_id Target mod.
    */
   void applyModAction(int app_id, int deployer, int action, int mod_id);
+  /*!
+   * \brief Sets the note attached to a mod.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   * \param note The new note text.
+   */
+  void setModNote(int app_id, int mod_id, QString note);
+  /*!
+   * \brief Pins or unpins the version of a mod.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   * \param pinned If true: pin to the current version, else remove the pin.
+   */
+  void setModPinned(int app_id, int mod_id, bool pinned);
+  /*!
+   * \brief Emits sendModRules with the current rules for the given mod.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   */
+  void getModRulesFor(int app_id, int mod_id);
+  /*!
+   * \brief Replaces the complete rule list for one mod.
+   * \param app_id Target app.
+   * \param source_mod_id Mod whose rules are set.
+   * \param rules The new rule list.
+   */
+  void setModRulesFor(int app_id, int source_mod_id, std::vector<ModRule> rules);
+  /*!
+   * \brief Emits sendGroupData with all version-group data for the given app.
+   * \param app_id Target app.
+   */
+  void getGroupData(int app_id);
+  /*!
+   * \brief Sets the user-visible name of a group.
+   * \param app_id Target app.
+   * \param group Target group.
+   * \param name The new name.
+   */
+  void setGroupName(int app_id, int group, QString name);
+  /*!
+   * \brief Sets the notes of a group.
+   * \param app_id Target app.
+   * \param group Target group.
+   * \param notes The new notes.
+   */
+  void setGroupNotes(int app_id, int group, QString notes);
+  /*!
+   * \brief Dissolves a group by removing every mod from it.
+   * \param app_id Target app.
+   * \param group Target group.
+   */
+  void dissolveGroup(int app_id, int group);
 };
