@@ -2805,8 +2805,17 @@ void MainWindow::on_actionbrowse_mod_files_triggered()
   }
   else
     return;
-  QDesktopServices::openUrl(
-    QUrl::fromLocalFile(ui->info_sdir_label->text() + "/" + QString::number(mod_id)));
+  const QString path = ui->info_sdir_label->text() + "/" + QString::number(mod_id);
+  if(!sfs::exists(path.toStdString()))
+  {
+    Log::error(("Could not browse files: '" + path + "' does not exist").toStdString());
+    return;
+  }
+  if(!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+    Log::error(("Could not open '" + path +
+                "' in a file manager. Check that a file manager is installed and (on Flatpak) that "
+                "Limo is allowed to open files.")
+                 .toStdString());
 }
 
 void MainWindow::on_actionbrowse_deployer_files_triggered()

@@ -228,6 +228,16 @@ bool AddModDialog::setupDialog(const QStringList& deployers,
     ui->name_text->setText(mod_infos[mod_index].mod.name.c_str());
     ui->version_text->setText(mod_infos[mod_index].mod.version.c_str());
   }
+  else if(!info.remote_file_version.empty())
+  {
+    // The version segment of a Nexus filename is often truncated (e.g. SkyUI -> "5", FNV MCM ->
+    // "1"); prefer the authoritative file version reported by the Nexus API when available.
+    ui->version_text->setText(info.remote_file_version.c_str());
+    if(std::regex_search(name_str, match, name_regex))
+      ui->name_text->setText(match.prefix().str().c_str());
+    else
+      ui->name_text->setText(name_str.c_str());
+  }
   else if(std::regex_search(name_str, match, name_regex))
   {
     ui->name_text->setText(match.prefix().str().c_str());
