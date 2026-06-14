@@ -8,9 +8,7 @@ set(TEST_SOURCES
         test_deployer.cpp
         test_fomodinstaller.cpp
         test_installer.cpp
-        test_lootdeployer.cpp
         test_moddedapplication.cpp
-        test_openmwdeployer.cpp
         test_reversedeployer.cpp
         test_tagconditionnode.cpp
         test_tool.cpp
@@ -20,6 +18,17 @@ set(TEST_SOURCES
         matcher.h
         tests.cpp
 )
+
+# The LOOT and OpenMW deployer tests include headers and link symbols that only
+# exist in `core` when LIMO_WITH_LOOT=ON (see the top-level CMakeLists.txt).
+# Only compile them when that support is built, so the test target links cleanly
+# with LOOT off.
+if(LIMO_WITH_LOOT)
+    list(APPEND TEST_SOURCES
+            test_lootdeployer.cpp
+            test_openmwdeployer.cpp
+    )
+endif()
 
 configure_file(test_utils.h.in test_utils.h)
 

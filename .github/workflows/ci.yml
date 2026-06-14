@@ -6,9 +6,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Cancel superseded runs on the same ref (e.g. rapid pushes / PR updates).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Pin cpr to a tagged release for reproducible, cacheable builds.
+  CPR_REF: "1.14.2"
+  CPR_PREFIX: "/tmp/cpr-prefix"
+
 jobs:
   build:
-    name: Build (Qt5, LOOT/UNRAR off)
+    name: Build (Qt6, LOOT/UNRAR off)
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -22,12 +32,23 @@ jobs:
             libjsoncpp-dev libarchive-dev libpugixml-dev libssl-dev \
             liblz4-dev libzstd-dev zlib1g-dev libcurl4-openssl-dev
 
+      # Cache the built+installed cpr prefix, keyed on the pinned ref and runner
+      # image. A cache hit skips the clone/configure/build/install below.
+      - name: Cache cpr prefix
+        id: cache-cpr
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPR_PREFIX }}
+          key: cpr-${{ runner.os }}-ubuntu-24.04-${{ env.CPR_REF }}
+
       - name: Build and install cpr from source
+        if: steps.cache-cpr.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 https://github.com/libcpr/cpr /tmp/cpr
+          git clone --depth 1 --branch "$CPR_REF" https://github.com/libcpr/cpr /tmp/cpr
           cmake -S /tmp/cpr -B /tmp/cpr/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCPR_USE_SYSTEM_CURL=ON -DCPR_BUILD_TESTS=OFF \
-            -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=/tmp/cpr-prefix
+            -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX="$CPR_PREFIX"
           cmake --build /tmp/cpr/build --target install
 
       - name: Configure
@@ -37,7 +58,62 @@ jobs:
             -DCMAKE_CXX_COMPILER=g++-14 \
             -DLIMO_WITH_LOOT=OFF \
             -DLIMO_WITH_UNRAR=OFF \
-            -DCMAKE_PREFIX_PATH=/tmp/cpr-prefix
+            -DBUILD_TESTING=OFF \
+            -DCMAKE_PREFIX_PATH="$CPR_PREFIX"
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
+
+  # Build the test suite (LOOT off, so no libloot dependency) and run ctest.
+  # Non-blocking: some tree-loadorder tests are known to be mid-refactor, and we
+  # don't want that to gate merges yet. The `build` job above is the gate.
+  test:
+    name: Tests (ctest, LOOT off, best-effort)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++-14 pkg-config git \
+            qt6-base-dev qt6-base-dev-tools libqt6svg6-dev \
+            libjsoncpp-dev libarchive-dev libpugixml-dev libssl-dev \
+            liblz4-dev libzstd-dev zlib1g-dev libcurl4-openssl-dev \
+            catch2
+
+      - name: Cache cpr prefix
+        id: cache-cpr
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CPR_PREFIX }}
+          key: cpr-${{ runner.os }}-ubuntu-24.04-${{ env.CPR_REF }}
+
+      - name: Build and install cpr from source
+        if: steps.cache-cpr.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$CPR_REF" https://github.com/libcpr/cpr /tmp/cpr
+          cmake -S /tmp/cpr -B /tmp/cpr/build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCPR_USE_SYSTEM_CURL=ON -DCPR_BUILD_TESTS=OFF \
+            -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX="$CPR_PREFIX"
+          cmake --build /tmp/cpr/build --target install
+
+      - name: Configure (tests on, LOOT off)
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++-14 \
+            -DLIMO_WITH_LOOT=OFF \
+            -DLIMO_WITH_UNRAR=OFF \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_PREFIX_PATH="$CPR_PREFIX"
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Run tests
+        working-directory: build
+        run: ctest --output-on-failure
