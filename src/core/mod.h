@@ -40,6 +40,10 @@ struct Mod
   long remote_file_id = -1;
   /*! \brief Type of remote this mod was retreived from. */
   ImportModInfo::RemoteType remote_type = ImportModInfo::RemoteType::local;
+  /*! \brief Optional user note for this mod. Empty string means no note. Not profile-scoped. */
+  std::string note;
+  /*! \brief Version string this mod is pinned to. Empty string means not pinned. */
+  std::string pinned_version;
 
   /*!
    * \brief Constructor. Simply initializes members.

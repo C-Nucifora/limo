@@ -32,6 +32,8 @@ Mod::Mod(const Mod& other)
   remote_mod_id = other.remote_mod_id;
   remote_file_id = other.remote_file_id;
   remote_type = other.remote_type;
+  note = other.note;
+  pinned_version = other.pinned_version;
 }
 
 Mod::Mod(const Json::Value& json)
@@ -54,6 +56,12 @@ Mod::Mod(const Json::Value& json)
   remote_update_time = json["remote_update_time"].asInt64();
   size_on_disk = json["size_on_disk"].asInt64();
   suppress_update_time = json["suppress_update_time"].asInt64();
+  note = "";
+  if(json.isMember("note"))
+    note = json["note"].asString();
+  pinned_version = "";
+  if(json.isMember("pinned_version"))
+    pinned_version = json["pinned_version"].asString();
 }
 
 Json::Value Mod::toJson() const
@@ -71,6 +79,10 @@ Json::Value Mod::toJson() const
   json["remote_mod_id"] = remote_mod_id;
   json["remote_file_id"] = remote_file_id;
   json["remote_type"] = static_cast<int>(remote_type);
+  if(!note.empty())
+    json["note"] = note;
+  if(!pinned_version.empty())
+    json["pinned_version"] = pinned_version;
   return json;
 }
 

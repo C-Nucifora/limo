@@ -65,12 +65,23 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
   if(role == icon_role && col == action_col)
     return QIcon::fromTheme("user-trash");
 
+  if(role == icon_role && col == name_col && !active_mods_[row].mod.note.empty())
+    return QIcon::fromTheme("text-x-generic");
+
+  if(role == Qt::ToolTipRole && col == name_col && !active_mods_[row].mod.note.empty())
+    return QString::fromStdString(active_mods_[row].mod.note);
+
   if(role == Qt::DisplayRole || role == sort_role)
   {
     if(col == name_col)
       return QString::fromStdString(active_mods_[row].mod.name);
     if(col == version_col)
-      return QString::fromStdString(active_mods_[row].mod.version);
+    {
+      const auto& mod = active_mods_[row].mod;
+      if(role == Qt::DisplayRole && !mod.pinned_version.empty())
+        return QString("[Pinned] ") + QString::fromStdString(mod.version);
+      return QString::fromStdString(mod.version);
+    }
     if(col == id_col && role == Qt::DisplayRole)
       return QString::number(active_mods_[row].mod.id);
     if(col == id_col && role == sort_role)
@@ -173,6 +184,12 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
   }
   if(role == mod_version_role)
     return active_mods_[row].mod.version.c_str();
+  if(role == mod_note_role)
+    return active_mods_[row].mod.note.c_str();
+  if(role == mod_pinned_role)
+    return !active_mods_[row].mod.pinned_version.empty();
+  if(role == mod_pinned_version_role)
+    return active_mods_[row].mod.pinned_version.c_str();
   return QVariant();
 }
 
@@ -276,7 +293,9 @@ void ModListModel::setIsEditable(bool is_editable)
 
 bool ModListModel::modHasUpdate(int row) const
 {
-  return active_mods_.at(row).mod.remote_update_time > active_mods_.at(row).mod.install_time &&
-         active_mods_.at(row).mod.remote_update_time >
-           active_mods_.at(row).mod.suppress_update_time;
+  const auto& mod = active_mods_.at(row).mod;
+  if(!mod.pinned_version.empty())
+    return false;
+  return mod.remote_update_time > mod.install_time &&
+         mod.remote_update_time > mod.suppress_update_time;
 }

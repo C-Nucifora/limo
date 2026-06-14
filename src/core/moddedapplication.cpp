@@ -1485,7 +1485,8 @@ void ModdedApplication::checkForModUpdates()
   std::vector<int> target_mod_indices;
   for(const auto& [i, mod] : str::enumerate_view(installed_mods_))
   {
-    if(nexus::Api::modUrlIsValid(mod.remote_source) && mod.remote_update_time <= mod.install_time)
+    if(nexus::Api::modUrlIsValid(mod.remote_source) && mod.remote_update_time <= mod.install_time &&
+       mod.pinned_version.empty())
       target_mod_indices.push_back(i);
   }
   performUpdateCheck(target_mod_indices);
@@ -1497,7 +1498,8 @@ void ModdedApplication::checkModsForUpdates(const std::vector<int>& mod_ids)
   for(const auto& [i, mod] : str::enumerate_view(installed_mods_))
   {
     if(str::find(mod_ids, mod.id) != mod_ids.end() &&
-       nexus::Api::modUrlIsValid(mod.remote_source) && mod.remote_update_time <= mod.install_time)
+       nexus::Api::modUrlIsValid(mod.remote_source) && mod.remote_update_time <= mod.install_time &&
+       mod.pinned_version.empty())
       target_mod_indices.push_back(i);
   }
   performUpdateCheck(target_mod_indices);
@@ -1627,6 +1629,36 @@ void ModdedApplication::applyModAction(int deployer, int action, int mod_id)
 std::filesystem::path ModdedApplication::getDownloadDir() const
 {
   return staging_dir_ / DOWNLOAD_DIR;
+}
+
+void ModdedApplication::setModNote(int mod_id, const std::string& note)
+{
+  auto iter = std::find_if(
+    installed_mods_.begin(), installed_mods_.end(), [mod_id](const Mod& m) { return m.id == mod_id; });
+  if(iter == installed_mods_.end())
+    return;
+  iter->note = note;
+  updateSettings(true);
+}
+
+void ModdedApplication::pinModVersion(int mod_id)
+{
+  auto iter = std::find_if(
+    installed_mods_.begin(), installed_mods_.end(), [mod_id](const Mod& m) { return m.id == mod_id; });
+  if(iter == installed_mods_.end())
+    return;
+  iter->pinned_version = iter->version;
+  updateSettings(true);
+}
+
+void ModdedApplication::unpinModVersion(int mod_id)
+{
+  auto iter = std::find_if(
+    installed_mods_.begin(), installed_mods_.end(), [mod_id](const Mod& m) { return m.id == mod_id; });
+  if(iter == installed_mods_.end())
+    return;
+  iter->pinned_version = "";
+  updateSettings(true);
 }
 
 sfs::path ModdedApplication::iconPath() const

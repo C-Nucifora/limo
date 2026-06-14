@@ -79,6 +79,12 @@ public:
   /*! \brief Role representing the version of a mod. */
   static constexpr int mod_version_role = 275;
   static constexpr int expansion_role = 276;
+  /*! \brief Role representing the note text for a mod. */
+  static constexpr int mod_note_role = 277;
+  /*! \brief Role representing whether a mod has a pinned version. */
+  static constexpr int mod_pinned_role = 278;
+  /*! \brief Role representing the pinned version string of a mod. */
+  static constexpr int mod_pinned_version_role = 279;
 
   /*!
    * \brief Returns the horizontal header section names.

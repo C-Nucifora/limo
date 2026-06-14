@@ -645,6 +645,26 @@ public:
    * \return The download path.
    */
   std::filesystem::path getDownloadDir() const;
+  /*!
+   * \brief Sets the user note for the given mod. An empty string clears the note.
+   * Notes are not profile-scoped and are persisted in lmm_mods.json.
+   * \param mod_id Target mod id.
+   * \param note The new note text.
+   */
+  void setModNote(int mod_id, const std::string& note);
+  /*!
+   * \brief Pins the given mod to its current installed version, suppressing update
+   * notifications unless the remote version is strictly newer than the pinned version.
+   * Has no effect if the mod id is unknown.
+   * \param mod_id Target mod id.
+   */
+  void pinModVersion(int mod_id);
+  /*!
+   * \brief Unpins the given mod, re-enabling normal update notification behavior.
+   * Has no effect if the mod id is unknown or unpinned.
+   * \param mod_id Target mod id.
+   */
+  void unpinModVersion(int mod_id);
 
 private:
   /*! \brief The subdirectory used to store downloads. */
