@@ -2777,6 +2777,11 @@ void MainWindow::onLaunchAppButtonClicked()
   if(command.isEmpty())
   {
     Log::error(("Command for application '" + name + "' is empty").toStdString());
+    QMessageBox::warning(
+      this,
+      "No launch command configured",
+      "No launch command is configured for application '" + name +
+        "'.\n\nUse the edit button to set a command before launching.");
     return;
   }
   runConcurrent(command, name, "Application");
@@ -3989,6 +3994,11 @@ void MainWindow::onLaunchToolButtonPressed(int row, int col)
   if(command.isEmpty())
   {
     Log::error(("Command for tool '" + name + "' is empty").toStdString());
+    QMessageBox::warning(
+      this,
+      "No command configured",
+      "No command is configured for tool '" + name +
+        "'.\n\nEdit the tool to set a command before running it.");
     return;
   }
   runConcurrent(command, name, "Tool", true);
