@@ -30,10 +30,12 @@ void ManageModRulesDialog::setupDialog(int app_id,
 
   ui->target_mod_box->clear();
   target_ids_.clear();
+  id_to_name_.clear();
   for(const auto& [id, name] : all_mods)
   {
     ui->target_mod_box->addItem(name);
     target_ids_.push_back(id);
+    id_to_name_[id] = name;
   }
 
   refreshTable();
@@ -48,8 +50,11 @@ void ManageModRulesDialog::refreshTable()
     ui->rules_table->insertRow(row);
     ui->rules_table->setItem(row, 0,
       new QTableWidgetItem(QString::fromStdString(ModRule::typeLabel(rule.type))));
-    ui->rules_table->setItem(row, 1,
-      new QTableWidgetItem(QString::number(rule.target_mod_id)));
+    auto it = id_to_name_.find(rule.target_mod_id);
+    const QString target_name = (it != id_to_name_.end())
+                                  ? it->second
+                                  : QString("(id %1)").arg(rule.target_mod_id);
+    ui->rules_table->setItem(row, 1, new QTableWidgetItem(target_name));
   }
 }
 
