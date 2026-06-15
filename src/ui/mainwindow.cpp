@@ -483,6 +483,8 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::setModNote);
   connect(this, &MainWindow::setModColor, // fork #199
           app_manager_, &ApplicationManager::setModColor);
+  connect(this, &MainWindow::setModCategory, // fork #198
+          app_manager_, &ApplicationManager::setModCategory);
   connect(this, &MainWindow::setModPinned,
           app_manager_, &ApplicationManager::setModPinned);
   connect(this, &MainWindow::getModRulesFor,
@@ -801,6 +803,9 @@ void MainWindow::setupMenus()
   edit_config_action_ = new QAction("Edit Config...", this); // fork #200
   edit_config_action_->setToolTip("Edit configuration files shipped by this mod");
   connect(edit_config_action_, &QAction::triggered, this, &MainWindow::onEditModConfig);
+  set_category_action_ = new QAction("Set Category...", this); // fork #198
+  set_category_action_->setToolTip("Assign an organisational category to the selected mod(s)");
+  connect(set_category_action_, &QAction::triggered, this, &MainWindow::onSetModCategory);
   QList<QAction*> mod_list_actions{ ui->actionadd_to_deployer,      ui->actionAdd_to_Group,
                                     ui->actionbrowse_mod_files,     ui->actionRemove_from_Group,
                                     ui->actionRemove_Mods,          ui->actionRemove_Other_Versions,
@@ -811,7 +816,7 @@ void MainWindow::setupMenus()
                                     pin_version_action_,            unpin_version_action_,
                                     mod_rules_action_,               manage_groups_action_,
                                     set_color_action_,               clear_color_action_,
-                                    edit_config_action_ };
+                                    edit_config_action_,             set_category_action_ };
   std::sort(mod_list_actions.begin(), mod_list_actions.end(), sort_actions);
   mod_list_menu_->addActions(mod_list_actions);
 
@@ -903,6 +908,9 @@ void MainWindow::setupMenus()
   // fork #145: bulk-remove outdated downloaded archive versions.
   QAction* prune_action = tools_menu->addAction(tr("Remove Old Archive Versions"));
   connect(prune_action, &QAction::triggered, this, &MainWindow::onPruneArchives);
+  // fork #201: BSA/BA2 archive browser & extractor.
+  QAction* bsa_action = tools_menu->addAction(tr("BSA/BA2 Archive Browser"));
+  connect(bsa_action, &QAction::triggered, this, &MainWindow::onOpenBsaBrowser);
   // fork #78: a "View" menu with a checkable toggle for the Tools pane.
   QMenu* view_menu = menuBar()->addMenu(tr("View"));
   show_tools_pane_action_ = view_menu->addAction(tr("Show Tools Pane"));
@@ -4322,6 +4330,38 @@ void MainWindow::onToggleToolsPane(bool visible)
   ui->info_tool_list->setVisible(visible);
   QSettings settings = QSettings(QCoreApplication::applicationName());
   settings.setValue("show_tools_pane", visible);
+}
+
+void MainWindow::onSetModCategory()
+{
+  // fork #198: assign a free-text category to every selected mod (falls back to current row).
+  auto mod_ids = ui->mod_list->getSelectedModIds();
+  const auto index = mod_list_proxy_->mapToSource(ui->mod_list->selectionModel()->currentIndex());
+  if(mod_ids.empty())
+  {
+    if(!index.isValid())
+      return;
+    mod_ids.push_back(mod_list_model_->data(index, ModListModel::mod_id_role).toInt());
+  }
+  // Pre-fill with the current category of the focused row, if any.
+  const QString current =
+    index.isValid() ? index.data(ModListModel::category_role).toString() : QString();
+  bool ok = false;
+  const QString category = QInputDialog::getText(
+    this, "Set category", "Category (leave empty to clear):", QLineEdit::Normal, current, &ok);
+  if(!ok)
+    return;
+  for(int mod_id : mod_ids)
+    emit setModCategory(currentApp(), mod_id, category);
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onOpenBsaBrowser()
+{
+  // fork #201: open the read-only BSA/BA2 archive browser (self-contained dialog).
+  auto* dialog = new BsaBrowserDialog(this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->show();
 }
 
 void MainWindow::onForceRedeploy()
