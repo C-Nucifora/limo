@@ -6,7 +6,12 @@
 #pragma once
 
 #include "lootdeployer.h"
+#include <array>
+#include <optional>
 #include <set>
+#include <string>
+#include <string_view>
+#include <vector>
 
 
 /*!
@@ -97,6 +102,14 @@ private:
   static constexpr std::string ES_PLUGIN_TAG = "ES-Plugin";
   /*! \brief Name of the es plugin tag. */
   static constexpr std::string SCRIPTS_PLUGIN_TAG = "Scripts";
+  /*!
+   * \brief Candidate file names (relative to the destination directory) for a PLOX/mlox
+   * rules file. The first one that exists is used. PLOX is the maintained successor to
+   * mlox and uses the same rules-file format.
+   */
+  static constexpr std::array<std::string_view, 4> PLOX_RULES_FILE_NAMES = {
+    "plox_rules.txt", "mlox_user.txt", "mlox_base.txt", "mlox_rules.txt"
+  };
 
   /*! \brief Number of plugins with groundcover tag. */
   int num_groundcover_plugins_ = 0;
@@ -160,4 +173,40 @@ private:
                                   std::function<bool(int)> plugin_filter) const;
   /*! \brief Writes the plugins to disk. */
   void writePluginsPrivate() const;
+
+  /*!
+   * \brief Locates a PLOX/mlox rules file in the destination directory.
+   * \return Path to the first existing candidate rules file, or an empty optional
+   * if none is present.
+   */
+  std::optional<std::filesystem::path> findPloxRulesFile() const;
+  /*!
+   * \brief Parses an "A must load before B" ordering constraint out of a PLOX/mlox
+   * rules file.
+   *
+   * Best-effort PLOX/mlox parser. The handled directives are:
+   *  - [Order] blocks: every consecutive pair of plugin lines becomes an
+   *    "earlier line loads before later line" constraint.
+   *  - [Near] blocks: treated like [Order] (the listed plugins are ordered as written).
+   * All other directives ([Conflict], [Requires], [Note], [Patch], expression
+   * operators, etc.) are ignored. Comments (lines starting with ';') and rule
+   * messages are skipped. Constraints that reference plugins not currently present
+   * in \ref plugins_ are dropped.
+   *
+   * \param rules_path Path to the rules file.
+   * \return Ordered pairs (a, b) meaning plugin a must load before plugin b.
+   */
+  std::vector<std::pair<std::string, std::string>> parsePloxOrderRules(
+    const std::filesystem::path& rules_path) const;
+  /*!
+   * \brief Applies PLOX/mlox ordering rules to \ref plugins_ if a rules file exists.
+   *
+   * Performs a stable topological sort of the current plugin order subject to the
+   * parsed "before" constraints. The existing order is used as the tie-breaker so the
+   * result stays as close as possible to the input (and to LOOT's sort) while still
+   * satisfying the rules. If no rules file is present this is a no-op and the existing
+   * behavior is preserved. Cyclic constraints are skipped conservatively.
+   * \return True if a rules file was found and applied, false otherwise.
+   */
+  bool applyPloxRules();
 };
