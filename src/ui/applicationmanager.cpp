@@ -9,6 +9,7 @@
 #include <QUrl>
 #include <algorithm>
 #include <chrono>
+#include <limits>
 #include <fstream>
 #include <regex>
 
@@ -160,7 +161,105 @@ void ApplicationManager::init()
   // fork #8: restore the persistent download queue from disk so queued/incomplete
   // downloads survive a restart.
   loadDownloadQueue();
+  // fork #47: configure the scheduled / startup automatic update check. init() runs on the
+  // creating (UI) thread before this object is moved to the worker thread, so defer the timer
+  // setup with a queued invocation: it then executes on the worker thread's event loop, where
+  // the QTimer fires and the (synchronous) update check runs off the UI thread.
+  QMetaObject::invokeMethod(this, [this] { initAutoUpdateCheck(); }, Qt::QueuedConnection);
 }
+
+// ---- fork #47: scheduled / startup automatic mod-update checks ----------------
+void ApplicationManager::initAutoUpdateCheck()
+{
+  QSettings settings(QCoreApplication::applicationName());
+  auto_update_check_enabled_ = settings.value(AUTO_UPDATE_ENABLED_KEY, false).toBool();
+  auto_update_check_interval_hours_ =
+    std::max(1, settings.value(AUTO_UPDATE_INTERVAL_KEY, 24).toInt());
+  applyAutoUpdateCheckConfig();
+  if(auto_update_check_enabled_)
+  {
+    // Startup auto-check: kick off one check shortly after launch (deferred so it does not
+    // block init), reusing the regular update-check path for the active app.
+    QMetaObject::invokeMethod(this, [this] { runScheduledUpdateCheck(); }, Qt::QueuedConnection);
+  }
+}
+
+void ApplicationManager::applyAutoUpdateCheckConfig()
+{
+  if(!auto_update_timer_)
+  {
+    auto_update_timer_ = new QTimer(this);
+    auto_update_timer_->setSingleShot(false);
+    connect(auto_update_timer_, &QTimer::timeout, this,
+            [this] { runScheduledUpdateCheck(); });
+  }
+  if(auto_update_check_enabled_)
+  {
+    const int interval_hours = std::max(1, auto_update_check_interval_hours_);
+    // milliseconds; clamp the interval into QTimer's int range to avoid overflow.
+    const qint64 interval_ms = static_cast<qint64>(interval_hours) * 60 * 60 * 1000;
+    auto_update_timer_->setInterval(
+      static_cast<int>(std::min<qint64>(interval_ms, std::numeric_limits<int>::max())));
+    auto_update_timer_->start();
+  }
+  else
+    auto_update_timer_->stop();
+}
+
+void ApplicationManager::runScheduledUpdateCheck()
+{
+  if(!auto_update_check_enabled_)
+    return;
+  // Avoid hammering the API: skip if a previous scheduled check is still running.
+  if(auto_update_check_in_progress_)
+    return;
+  if(!appIndexIsValid(auto_update_check_app_id_, false))
+    return;
+  auto_update_check_in_progress_ = true;
+  sendLogMessage(Log::LOG_DEBUG,
+                 std::string("fork #47: running scheduled mod-update check"));
+  // Reuse the existing update-check path; this emits the usual update-available signalling
+  // (via completedOperations / ModdedApplication state) so the UI's normal "updates
+  // available" indication fires. Runs on this (worker) thread, not the UI thread.
+  checkForModUpdates(auto_update_check_app_id_);
+  auto_update_check_in_progress_ = false;
+}
+
+void ApplicationManager::setAutoUpdateCheck(bool enabled, int interval_hours)
+{
+  // Marshal onto the owning thread so timer (re)configuration is thread-safe regardless of
+  // which thread the caller (e.g. a settings dialog on the UI thread) invokes this from.
+  const int hours = std::max(1, interval_hours);
+  QMetaObject::invokeMethod(
+    this,
+    [this, enabled, hours]
+    {
+      auto_update_check_enabled_ = enabled;
+      auto_update_check_interval_hours_ = hours;
+      QSettings settings(QCoreApplication::applicationName());
+      settings.setValue(AUTO_UPDATE_ENABLED_KEY, enabled);
+      settings.setValue(AUTO_UPDATE_INTERVAL_KEY, hours);
+      applyAutoUpdateCheckConfig();
+    },
+    Qt::QueuedConnection);
+}
+
+bool ApplicationManager::autoUpdateCheckEnabled() const
+{
+  return auto_update_check_enabled_;
+}
+
+int ApplicationManager::autoUpdateCheckIntervalHours() const
+{
+  return auto_update_check_interval_hours_;
+}
+
+void ApplicationManager::setAutoUpdateCheckApp(int app_id)
+{
+  QMetaObject::invokeMethod(
+    this, [this, app_id] { auto_update_check_app_id_ = app_id; }, Qt::QueuedConnection);
+}
+// ---- End fork #47 ------------------------------------------------------------
 
 void ApplicationManager::sendLogMessage(Log::LogLevel log_level, const std::string& message)
 {
