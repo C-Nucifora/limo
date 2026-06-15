@@ -316,6 +316,9 @@ set(PROJECT_SOURCES
         src/ui/changelogdialog.cpp
         src/ui/changelogdialog.h
         src/ui/changelogdialog.ui
+        src/ui/modconfigeditordialog.cpp
+        src/ui/modconfigeditordialog.h
+        src/ui/modconfigeditordialog.ui
         src/ui/collectiondialog.cpp
         src/ui/collectiondialog.h
         src/ui/collectiondialog.ui
