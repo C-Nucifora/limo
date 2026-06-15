@@ -189,9 +189,11 @@ private:
   QAction* verify_deployer_action_;
   // fork #50: action used to run a health check for the current deployer.
   QAction* health_check_deployer_action_;
+#ifdef LIMO_WITH_LOOT
   // fork #31: action opening the LOOT user-metadata (userlist.yaml) editor.
   /*! \brief Action used to edit LOOT user metadata for the current LOOT deployer. */
   QAction* edit_loot_userlist_action_;
+#endif
   /*! \brief Action used to add a new profile. */
   QAction* add_profile_action_;
   /*! \brief Action used to remove a profile. */
@@ -882,9 +884,11 @@ private slots:
   void onVerifyDeployerMenuClicked();
   // fork #50: runs a health check for the current deployer and shows the aggregated problems.
   void onHealthCheckDeployerMenuClicked();
+#ifdef LIMO_WITH_LOOT
   // fork #31: opens the LOOT user-metadata editor for the current LOOT deployer.
   /*! \brief Shows a dialog to edit LOOT user metadata (userlist.yaml). */
   void onEditLootUserlistMenuClicked();
+#endif
   /*! \brief Updates the currently active profile. */
   void on_profile_selection_box_currentIndexChanged(int index);
   /*! \brief Shows a dialog to add a new profile. */
