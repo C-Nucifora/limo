@@ -67,6 +67,13 @@ private slots:
    * \param file_id_copy Id of the NexusMods file to download.
    */
   void onDownloadClicked(int file_id, int file_id_copy);
+  /*!
+   * \brief Lets the user pick a local archive and verifies it against the NexusMods
+   * MD5 / file size for the given file.
+   * \param file_id Id of the NexusMods file to verify against.
+   * \param file_id_copy Id of the NexusMods file to verify against.
+   */
+  void onVerifyClicked(int file_id, int file_id_copy);
 
 signals:
   /*!

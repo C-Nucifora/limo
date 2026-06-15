@@ -188,6 +188,8 @@ set(CORE_SOURCES
         src/core/nexus/collection.h
         src/core/nexus/file.cpp
         src/core/nexus/file.h
+        src/core/nexus/integrityverifier.cpp
+        src/core/nexus/integrityverifier.h
         src/core/nexus/mod.cpp
         src/core/nexus/mod.h
         src/core/parseerror.h
