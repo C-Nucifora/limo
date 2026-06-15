@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <format>
 #include <ranges>
+#include <string_view>
+#include <utility>
 
 namespace sfs = std::filesystem;
 namespace str = std::ranges;
@@ -55,7 +57,21 @@ std::map<int, unsigned long> CyberpunkDeployer::deploy(const std::vector<int>& l
                        deploy_node ? &(*deploy_node)->child(1) : std::optional<ProgressNode*>{});
   saveDeployedFiles(source_files,
                     deploy_node ? &(*deploy_node)->child(2) : std::optional<ProgressNode*>{});
+  // The deployed set just changed, so re-check that every framework an enabled mod relies on is
+  // actually installed and warn about any that are missing. The load order passed here is exactly
+  // the set of enabled mods being deployed.
+  warnAboutMissingFrameworks(loadorder);
   return mod_sizes;
+}
+
+bool CyberpunkDeployer::addMod(int mod_id, bool enabled, bool update_conflicts)
+{
+  const bool added = CaseMatchingDeployer::addMod(mod_id, enabled, update_conflicts);
+  // Only the addition of an enabled mod can introduce a new (possibly unsatisfied) framework
+  // dependency, so re-running the check on a no-op or a disabled add would be wasted work.
+  if(added && enabled)
+    warnAboutMissingFrameworks(getEnabledModIds());
+  return added;
 }
 
 bool CyberpunkDeployer::isOrderedArchive(const sfs::path& relative_path) const
@@ -174,5 +190,127 @@ void CyberpunkDeployer::deployFilesWithRemap(
 
     if(progress_node)
       (*progress_node)->advance();
+  }
+}
+
+void CyberpunkDeployer::scanFile(const sfs::path& relative_path,
+                                 std::array<bool, NUM_FRAMEWORKS>& required,
+                                 std::array<bool, NUM_FRAMEWORKS>& installed) const
+{
+  // Match everything case insensitively against the generic (forward slash) form of the path, which
+  // is how Cyberpunk's own directory layout is written and how mods are packaged.
+  const std::string path = pu::toLowerCase(relative_path.generic_string());
+  const auto starts_with = [&path](std::string_view prefix)
+  { return path.rfind(prefix, 0) == 0; };
+  const auto ends_with = [&path](std::string_view suffix)
+  { return path.size() >= suffix.size() && path.compare(path.size() - suffix.size(),
+                                                        suffix.size(),
+                                                        suffix) == 0; };
+
+  // --- Installed: signature files shipped by each framework. Checked first because some signature
+  // files would otherwise also look like a generic dependency-implying file (e.g. a RED4ext plugin
+  // dll). ---
+  if(path == "bin/x64/plugins/cyber_engine_tweaks.asi")
+    installed[CET] = true;
+  else if(path == "red4ext/red4ext.dll")
+    installed[RED4EXT] = true;
+  else if(path == "engine/tools/scc.exe")
+    installed[REDSCRIPT] = true;
+  else if(starts_with("red4ext/plugins/archivexl/"))
+  {
+    // ArchiveXL and TweakXL are themselves RED4ext plugins, so their presence also satisfies
+    // RED4ext (additionally normalised in warnAboutMissingFrameworks for robustness).
+    installed[ARCHIVEXL] = true;
+    installed[RED4EXT] = true;
+  }
+  else if(starts_with("red4ext/plugins/tweakxl/"))
+  {
+    installed[TWEAKXL] = true;
+    installed[RED4EXT] = true;
+  }
+
+  // --- Required: kinds of files that imply a dependency on a framework. ---
+  if(starts_with("r6/scripts/") && ends_with(".reds"))
+    required[REDSCRIPT] = true;
+  else if(starts_with("r6/tweaks/") &&
+          (ends_with(".yaml") || ends_with(".yml") || ends_with(".tweak")))
+    required[TWEAKXL] = true;
+  else if(ends_with(".xl"))
+    required[ARCHIVEXL] = true;
+  else if(starts_with("red4ext/plugins/"))
+    required[RED4EXT] = true;
+  else if(starts_with("bin/x64/plugins/cyber_engine_tweaks/mods/"))
+    required[CET] = true;
+}
+
+std::pair<std::array<bool, CyberpunkDeployer::NUM_FRAMEWORKS>,
+          std::array<bool, CyberpunkDeployer::NUM_FRAMEWORKS>>
+CyberpunkDeployer::scanFrameworks(const std::vector<int>& mod_ids) const
+{
+  std::array<bool, NUM_FRAMEWORKS> required{};
+  std::array<bool, NUM_FRAMEWORKS> installed{};
+  // Inspect the source files of every given mod. Source enumeration mirrors getDeploymentMaps so
+  // the result reflects exactly what would be deployed, independent of any actual deployment.
+  for(int id : mod_ids)
+  {
+    if(!checkModPathExistsAndMaybeLogError(id))
+      continue;
+    const sfs::path mod_base_path = source_path_ / std::to_string(id);
+    for(const auto& dir_entry : sfs::recursive_directory_iterator(mod_base_path))
+    {
+      if(dir_entry.is_symlink() || !dir_entry.is_regular_file())
+        continue;
+      scanFile(pu::getRelativePath(dir_entry.path(), mod_base_path), required, installed);
+    }
+  }
+  return { required, installed };
+}
+
+std::vector<int> CyberpunkDeployer::getEnabledModIds()
+{
+  std::vector<int> mod_ids{};
+  for(const auto& entry_weak : getLoadorder()->getTraversalItems())
+  {
+    const auto entry = std::static_pointer_cast<DeployerModInfo>(entry_weak.lock());
+    if(entry && !entry->isSeparator && entry->enabled)
+      mod_ids.push_back(entry->id);
+  }
+  return mod_ids;
+}
+
+std::vector<std::string> CyberpunkDeployer::getMissingFrameworks() const
+{
+  // Reading the load order tree only refreshes an internal cache, so gathering the enabled mods is
+  // logically const; the const_cast keeps the public query const as its documented contract.
+  const std::vector<int> mod_ids = const_cast<CyberpunkDeployer*>(this)->getEnabledModIds();
+  auto [required, installed] = scanFrameworks(mod_ids);
+  // ArchiveXL and TweakXL both ship as RED4ext plugins, so either one being installed means RED4ext
+  // is present too, even if red4ext/red4ext.dll is not managed through Limo.
+  if(installed[ARCHIVEXL] || installed[TWEAKXL])
+    installed[RED4EXT] = true;
+
+  std::vector<std::string> missing{};
+  for(int i = 0; i < NUM_FRAMEWORKS; i++)
+  {
+    if(required[i] && !installed[i])
+      missing.push_back(FRAMEWORK_NAMES[i]);
+  }
+  return missing;
+}
+
+void CyberpunkDeployer::warnAboutMissingFrameworks(const std::vector<int>& mod_ids) const
+{
+  auto [required, installed] = scanFrameworks(mod_ids);
+  if(installed[ARCHIVEXL] || installed[TWEAKXL])
+    installed[RED4EXT] = true;
+
+  for(int i = 0; i < NUM_FRAMEWORKS; i++)
+  {
+    if(required[i] && !installed[i])
+      log_(Log::LOG_WARNING,
+           std::format("Deployer '{}': One or more enabled mods require the '{}' framework, but it "
+                       "does not appear to be installed. Such mods will not work until it is added.",
+                       name_,
+                       FRAMEWORK_NAMES[i]));
   }
 }
