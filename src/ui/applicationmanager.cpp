@@ -863,6 +863,33 @@ void ApplicationManager::setModNote(int app_id, int mod_id, QString note)
     handleExceptions<&ModdedApplication::setModNote>(app_id, mod_id, note.toStdString());
 }
 
+// fork #199: pass-throughs for per-mod highlight colour labels.
+void ApplicationManager::setModColor(int app_id, int mod_id, QString color)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::setModColor>(app_id, mod_id, color.toStdString());
+}
+
+QString ApplicationManager::getModColor(int app_id, int mod_id)
+{
+  if(!appIndexIsValid(app_id))
+    return {};
+  auto color = handleExceptions(&ModdedApplication::getModColor, apps_[app_id], mod_id);
+  if(color)
+    return QString::fromStdString(*color);
+  return {};
+}
+
+std::map<int, std::string> ApplicationManager::getModColors(int app_id)
+{
+  if(!appIndexIsValid(app_id))
+    return {};
+  auto colors = handleExceptions(&ModdedApplication::getModColors, apps_[app_id]);
+  if(colors)
+    return *colors;
+  return {};
+}
+
 void ApplicationManager::setModPinned(int app_id, int mod_id, bool pinned)
 {
   if(!appIndexIsValid(app_id))

@@ -768,6 +768,26 @@ public:
    * \param note The new note text.
    */
   void setModNote(int mod_id, const std::string& note);
+  // fork #199: per-mod highlight colour labels for organisation.
+  /*!
+   * \brief Sets the highlight colour for the given mod. An empty string clears the colour.
+   * Colours are stored as hex strings (e.g. "#ff0000"), are not profile-scoped and are
+   * persisted in lmm_mods.json.
+   * \param mod_id Target mod id.
+   * \param hex The new colour as a hex string, or empty to clear.
+   */
+  void setModColor(int mod_id, const std::string& hex);
+  /*!
+   * \brief Returns the highlight colour for the given mod.
+   * \param mod_id Target mod id.
+   * \return The colour as a hex string, or an empty string if none is set.
+   */
+  std::string getModColor(int mod_id) const;
+  /*!
+   * \brief Returns the highlight colours for all mods as a mod-id -> hex string map.
+   * \return The colour map. Mods without a colour are not present in the map.
+   */
+  std::map<int, std::string> getModColors() const;
   /*!
    * \brief Pins the given mod to its current installed version, suppressing update
    * notifications unless the remote version is strictly newer than the pinned version.
@@ -992,6 +1012,8 @@ private:
   std::vector<std::string> group_notes_;
   /*! \brief Maps mods to the installer used during their installation. */
   std::map<int, std::string> installer_map_;
+  // fork #199: maps mods to an optional highlight colour (hex string). Empty/absent = none.
+  std::map<int, std::string> mod_color_map_;
   /*! \brief Ids of mods for which update checks are permanently ignored. */
   std::set<int> update_ignore_list_;
   /*! \brief Path to this applications icon. */
