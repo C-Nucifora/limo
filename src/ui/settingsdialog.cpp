@@ -90,6 +90,7 @@ void SettingsDialog::init()
   ui->show_error_cb->setCheckState(settings.value("log_on_error", true).toBool() ? Qt::Checked
                                                                                  : Qt::Unchecked);
   ui->deploy_for_box->setCurrentIndex(settings.value("deploy_for_all", true).toBool() ? 0 : 1);
+  ui->theme_box->setCurrentIndex(settings.value("theme", 0).toInt());
 
   settings.beginGroup("nexus");
   ui->premium_user_label->setText(
@@ -152,6 +153,8 @@ void SettingsDialog::on_buttonBox_accepted()
 
   deploy_all_ = ui->deploy_for_box->currentIndex() == 0;
   settings.setValue("deploy_for_all", deploy_all_);
+
+  settings.setValue("theme", ui->theme_box->currentIndex());
 
   log_on_error_ = ui->show_error_cb->isChecked();
   settings.setValue("log_on_error", log_on_error_);

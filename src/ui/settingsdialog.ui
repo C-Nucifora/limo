@@ -308,6 +308,41 @@
         </layout>
        </item>
        <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_theme">
+         <item>
+          <widget class="QLabel" name="theme_label">
+           <property name="text">
+            <string>Theme:</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QComboBox" name="theme_box">
+           <item>
+            <property name="text">
+             <string>System</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>Light</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>Dark</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>High-contrast</string>
+            </property>
+           </item>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
         <widget class="QCheckBox" name="show_warning_cb">
          <property name="text">
           <string>Show log on warning</string>
