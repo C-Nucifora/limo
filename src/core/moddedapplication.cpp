@@ -17,9 +17,11 @@
 #include <cstdlib>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <memory>
 #include <ranges>
 #include <regex>
+#include <sstream>
 #include <sys/wait.h>
 
 namespace sfs = std::filesystem;
@@ -1946,6 +1948,293 @@ void ModdedApplication::importInstanceInto(const sfs::path& bundle, const sfs::p
   // A ModdedApplication constructed on staging_dir will now load this config. Steam/home
   // path tokens and STAGING_TOKEN are resolved lazily during that load, so the imported
   // instance is immediately usable on the new machine.
+}
+
+void ModdedApplication::exportProfile(int profile, const sfs::path& target) const
+{
+  if(profile < 0 || profile >= (int)profile_names_.size())
+    throw std::runtime_error("Error: Invalid profile index: " + std::to_string(profile));
+
+  // Build the JSON document describing the profile. The load order is stored as the full
+  // TREE, serialized exactly as in the on-disk settings (TreeItem::toJson -> { children: [...] }),
+  // so it round-trips through Deployer::setLoadorder(Json::Value) on import.
+  Json::Value bundle;
+  bundle["format"] = "limo_profile";
+  bundle["version"] = PROFILE_BUNDLE_VERSION;
+  bundle["exported_instance"] = name_;
+  bundle["name"] = profile_names_[profile];
+  bundle["app_version"] = app_versions_[profile];
+
+  for(int depl = 0; depl < (int)deployers_.size(); depl++)
+  {
+    // Autonomous deployers manage their own load order independently of Limo profiles and have
+    // no per-profile data to export.
+    if(deployers_[depl]->isAutonomous())
+      continue;
+
+    // Temporarily switch the deployer to the requested profile to read its load order and
+    // conflict groups, then restore the previously active profile.
+    const int previous_profile = deployers_[depl]->getProfile();
+    deployers_[depl]->setProfile(profile);
+
+    Json::Value depl_json;
+    depl_json["name"] = deployers_[depl]->getName();
+    depl_json["type"] = deployers_[depl]->getType();
+    // Full load-order tree: { children: [ {id,status}|{name,expanded,children:[...]} , ... ] }.
+    depl_json["loadorder"] = deployers_[depl]->getLoadorder()->toJson();
+
+    const auto conflict_groups = deployers_[depl]->getConflictGroups();
+    for(int group = 0; group < (int)conflict_groups.size(); group++)
+    {
+      for(int i = 0; i < (int)conflict_groups[group].size(); i++)
+        depl_json["conflict_groups"][group][i] = conflict_groups[group][i];
+    }
+
+    deployers_[depl]->setProfile(previous_profile);
+    bundle["deployers"].append(depl_json);
+  }
+
+  // Instance level group / active-member info, included for reference (import does not re-apply
+  // it, but it documents which mod of each conflict group was active when the profile was saved).
+  for(int group = 0; group < (int)groups_.size(); group++)
+  {
+    Json::Value group_json;
+    group_json["name"] = group < (int)group_names_.size() ? group_names_[group] : std::string();
+    group_json["active_member"] =
+      group < (int)active_group_members_.size() ? active_group_members_[group] : -1;
+    for(int i = 0; i < (int)groups_[group].size(); i++)
+      group_json["members"][i] = groups_[group][i];
+    bundle["groups"].append(group_json);
+  }
+
+  sfs::path out_path = target;
+  if(sfs::is_directory(target))
+    out_path = target / (profile_names_[profile] + ".zip");
+
+  log_(Log::LOG_INFO,
+       std::format(
+         "Exporting profile '{}' to '{}'", profile_names_[profile], out_path.string()));
+
+  // Serialize the JSON to a string so it can be written as a single archive entry. This reuses
+  // the same libarchive zip-write pattern as exportModArchive.
+  std::ostringstream oss;
+  oss << bundle;
+  const std::string json_data = oss.str();
+
+  struct archive* dest = archive_write_new();
+  if(dest == nullptr)
+    throw std::runtime_error("Error: Could not allocate archive for export.");
+  struct ArchiveGuard
+  {
+    struct archive* a;
+    ~ArchiveGuard() { archive_write_free(a); }
+  } guard{ dest };
+
+  archive_write_set_format_zip(dest);
+  if(archive_write_open_filename(dest, out_path.string().c_str()) != ARCHIVE_OK)
+    throw std::runtime_error("Error: Could not open archive '" + out_path.string() +
+                             "' for writing: " + archive_error_string(dest));
+
+  struct archive_entry* entry = archive_entry_new();
+  struct EntryGuard
+  {
+    struct archive_entry* e;
+    ~EntryGuard() { archive_entry_free(e); }
+  } entry_guard{ entry };
+
+  archive_entry_set_pathname(entry, PROFILE_BUNDLE_FILE_NAME.c_str());
+  archive_entry_set_size(entry, static_cast<la_int64_t>(json_data.size()));
+  archive_entry_set_filetype(entry, AE_IFREG);
+  archive_entry_set_perm(entry, 0644);
+
+  if(archive_write_header(dest, entry) != ARCHIVE_OK)
+    throw std::runtime_error("Error: Could not write archive header for '" +
+                             PROFILE_BUNDLE_FILE_NAME + "': " + archive_error_string(dest));
+  if(archive_write_data(dest, json_data.data(), json_data.size()) < 0)
+    throw std::runtime_error("Error: Could not write data for '" + PROFILE_BUNDLE_FILE_NAME +
+                             "': " + archive_error_string(dest));
+
+  if(archive_write_close(dest) != ARCHIVE_OK)
+    throw std::runtime_error("Error: Could not finalize archive '" + out_path.string() +
+                             "': " + archive_error_string(dest));
+}
+
+void ModdedApplication::importProfile(const sfs::path& bundle)
+{
+  // Resolve the input: either a directory containing the extracted JSON, or a zip archive.
+  std::string json_data;
+  sfs::path direct = bundle;
+  if(sfs::is_directory(bundle))
+    direct = bundle / PROFILE_BUNDLE_FILE_NAME;
+
+  if(direct.filename() == PROFILE_BUNDLE_FILE_NAME && sfs::exists(direct))
+  {
+    std::ifstream file(direct, std::fstream::binary);
+    if(!file.is_open())
+      throw std::runtime_error("Error: Could not read from \"" + direct.string() + "\".");
+    std::ostringstream oss;
+    oss << file.rdbuf();
+    json_data = oss.str();
+  }
+  else
+  {
+    // Read PROFILE_BUNDLE_FILE_NAME out of the zip using the same libarchive read pattern as
+    // the installer.
+    struct archive* source = archive_read_new();
+    if(source == nullptr)
+      throw std::runtime_error("Error: Could not allocate archive for import.");
+    struct ReadGuard
+    {
+      struct archive* a;
+      ~ReadGuard() { archive_read_free(a); }
+    } guard{ source };
+
+    archive_read_support_filter_all(source);
+    archive_read_support_format_all(source);
+    if(archive_read_open_filename(source, bundle.string().c_str(), 10240) != ARCHIVE_OK)
+      throw std::runtime_error("Error: Could not open archive '" + bundle.string() +
+                               "' for reading: " + archive_error_string(source));
+
+    struct archive_entry* entry = nullptr;
+    bool found = false;
+    while(archive_read_next_header(source, &entry) == ARCHIVE_OK)
+    {
+      if(std::string(archive_entry_pathname(entry)) != PROFILE_BUNDLE_FILE_NAME)
+        continue;
+      const void* buff = nullptr;
+      size_t size = 0;
+      la_int64_t offset = 0;
+      int return_code = ARCHIVE_OK;
+      while((return_code = archive_read_data_block(source, &buff, &size, &offset)) == ARCHIVE_OK)
+        json_data.append(static_cast<const char*>(buff), size);
+      if(return_code != ARCHIVE_EOF)
+        throw std::runtime_error("Error: Could not read '" + PROFILE_BUNDLE_FILE_NAME +
+                                 "' from archive: " + archive_error_string(source));
+      found = true;
+      break;
+    }
+    if(!found)
+      throw ParseError("\"" + bundle.string() + "\" does not contain a '" +
+                       PROFILE_BUNDLE_FILE_NAME + "' entry.");
+  }
+
+  Json::Value root;
+  {
+    std::istringstream iss(json_data);
+    iss >> root;
+  }
+
+  if(!root.isMember("format") || root["format"].asString() != "limo_profile")
+    throw ParseError("\"" + bundle.string() + "\" is not a valid Limo profile bundle.");
+  if(root.isMember("version") && root["version"].asInt() > PROFILE_BUNDLE_VERSION)
+    throw ParseError(std::format(
+      "Profile bundle \"{}\" was created by a newer version of Limo (bundle version {}).",
+      bundle.string(),
+      root["version"].asInt()));
+
+  EditProfileInfo info;
+  info.name = root.get("name", "Imported profile").asString();
+  info.app_version = root.get("app_version", "").asString();
+  info.source = -1;
+  log_(Log::LOG_INFO, std::format("Importing profile '{}'", info.name));
+
+  // Append the new profile. This adds an empty load order for every (non-autonomous) deployer.
+  addProfile(info);
+  const int new_profile = (int)profile_names_.size() - 1;
+
+  // Index the saved per-deployer data by deployer name so we can match it against this instance's
+  // deployers regardless of ordering / count differences.
+  std::map<std::string, const Json::Value*> saved_by_name;
+  for(const Json::Value& depl_json : root["deployers"])
+    saved_by_name[depl_json["name"].asString()] = &depl_json;
+
+  for(int depl = 0; depl < (int)deployers_.size(); depl++)
+  {
+    if(deployers_[depl]->isAutonomous())
+      continue;
+    auto iter = saved_by_name.find(deployers_[depl]->getName());
+    if(iter == saved_by_name.end())
+    {
+      log_(Log::LOG_DEBUG,
+           std::format("No saved load order for deployer '{}' in profile bundle; left empty.",
+                       deployers_[depl]->getName()));
+      continue;
+    }
+    const Json::Value& depl_json = *iter->second;
+
+    // Drop any saved load-order entries referencing mods that are not installed here, so
+    // setLoadorder never produces dangling ids. Separators (entries without an "id") are kept.
+    Json::Value loadorder = depl_json["loadorder"];
+    Json::Value filtered;
+    filtered["children"] = Json::Value(Json::arrayValue);
+    std::function<Json::Value(const Json::Value&)> filter_node = [&](const Json::Value& node)
+    {
+      Json::Value out = node;
+      out.removeMember("children");
+      if(node.isMember("children"))
+      {
+        out["children"] = Json::Value(Json::arrayValue);
+        for(const Json::Value& child : node["children"])
+        {
+          if(child.isMember("status"))
+          {
+            const int mod_id = child["id"].asInt();
+            if(std::find_if(installed_mods_.begin(),
+                            installed_mods_.end(),
+                            [mod_id](const Mod& m) { return m.id == mod_id; }) ==
+               installed_mods_.end())
+            {
+              log_(Log::LOG_WARNING,
+                   std::format("Skipping unknown mod id {} while importing profile.", mod_id));
+              continue;
+            }
+          }
+          out["children"].append(filter_node(child));
+        }
+      }
+      return out;
+    };
+    for(const Json::Value& child : loadorder["children"])
+    {
+      if(child.isMember("status"))
+      {
+        const int mod_id = child["id"].asInt();
+        if(std::find_if(installed_mods_.begin(),
+                        installed_mods_.end(),
+                        [mod_id](const Mod& m) { return m.id == mod_id; }) ==
+           installed_mods_.end())
+        {
+          log_(Log::LOG_WARNING,
+               std::format("Skipping unknown mod id {} while importing profile.", mod_id));
+          continue;
+        }
+      }
+      filtered["children"].append(filter_node(child));
+    }
+
+    deployers_[depl]->setProfile(new_profile);
+    deployers_[depl]->setLoadorder(filtered);
+
+    // Restore conflict groups, dropping any unknown mod ids.
+    std::vector<std::vector<int>> conflict_groups;
+    for(const Json::Value& group_json : depl_json["conflict_groups"])
+    {
+      std::vector<int> new_group;
+      for(const Json::Value& mod_json : group_json)
+      {
+        const int mod_id = mod_json.asInt();
+        if(std::find_if(installed_mods_.begin(),
+                        installed_mods_.end(),
+                        [mod_id](const Mod& m) { return m.id == mod_id; }) != installed_mods_.end())
+          new_group.push_back(mod_id);
+      }
+      conflict_groups.push_back(std::move(new_group));
+    }
+    deployers_[depl]->setConflictGroups(conflict_groups);
+    deployers_[depl]->setProfile(current_profile_);
+  }
+
+  updateSettings(true);
 }
 
 void ModdedApplication::updateIgnoredFiles(int deployer)
