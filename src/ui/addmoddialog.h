@@ -112,6 +112,12 @@ private:
   int directory_tree_depth_;
   /*! \brief Contains bools for every deployer indicating whether that deployer is autonomous. */
   std::vector<bool> autonomous_deployers_;
+  /*!
+   * \brief Expansion state saved before a content filter is applied, so restoring
+   * an empty filter brings back the original collapsed/expanded appearance.
+   * Maps each QTreeWidgetItem pointer to its pre-filter expanded state.
+   */
+  QHash<QTreeWidgetItem*, bool> pre_filter_expansion_;
 
   /*!
    * \brief Updates the enabled state of this dialog's OK button to only be enabled when
@@ -174,6 +180,27 @@ private:
    * \return Deployer index.
    */
   int computeDeployerFromFomodBoxIndex(int index) const;
+  /*!
+   * \brief Recursively saves the expanded state of every item under \p item into
+   * pre_filter_expansion_ so it can be restored when the filter is cleared.
+   * \param item Root of the subtree to snapshot (pass invisibleRootItem to snapshot all).
+   */
+  void saveExpansionState(QTreeWidgetItem* item);
+  /*!
+   * \brief Recursively restores each item's expanded state from pre_filter_expansion_.
+   * \param item Root of the subtree to restore.
+   */
+  void restoreExpansionState(QTreeWidgetItem* item);
+  /*!
+   * \brief Applies a case-insensitive substring filter to the content tree.
+   * Items whose text contains \p filter are shown; ancestors of matching items
+   * are kept visible and expanded. Visibility changes never affect which items
+   * are selected or the computed root level.
+   * \param item  Node to process (recurse from invisibleRootItem).
+   * \param filter Lower-case filter string.
+   * \return True if \p item or any of its descendants match the filter.
+   */
+  bool filterTreeItem(QTreeWidgetItem* item, const QString& filter);
 
 private slots:
   /*! \brief Closes the dialog and emits a signal for completion. */
@@ -214,6 +241,14 @@ private slots:
   void onFomodDialogComplete(int app_id, ImportModInfo info);
   /*! \brief Called when fomod dialog has been canceled. Emits addModAborted */
   void onFomodDialogAborted();
+  /*!
+   * \brief Filters the content tree as the user types. Shows only items
+   * whose name contains the filter text (case-insensitive) and their ancestors.
+   * Clearing the text restores the full tree and its original expansion state.
+   * Implements issue #146 / NexusMods.App#3815.
+   * \param text The current text of the content_filter line edit.
+   */
+  void on_content_filter_textChanged(const QString& text);
 
 signals:
   /*!

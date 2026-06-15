@@ -186,6 +186,9 @@ bool AddModDialog::setupDialog(const QStringList& deployers,
   }
 
   import_mod_info_ = info;
+  // Reset filter state for the new archive (issue #146 / NexusMods.App#3815).
+  ui->content_filter->clear();
+  pre_filter_expansion_.clear();
   ui->content_tree->clear();
   ui->root_level_box->setValue(0);
   ui->name_text->setFocus();
@@ -623,4 +626,77 @@ void AddModDialog::onFomodDialogComplete(int app_id, ImportModInfo info)
 void AddModDialog::onFomodDialogAborted()
 {
   emit addModAborted(import_mod_info_.current_path.c_str());
+}
+
+void AddModDialog::saveExpansionState(QTreeWidgetItem* item)
+{
+  for(int i = 0; i < item->childCount(); i++)
+  {
+    auto child = item->child(i);
+    pre_filter_expansion_[child] = child->isExpanded();
+    saveExpansionState(child);
+  }
+}
+
+void AddModDialog::restoreExpansionState(QTreeWidgetItem* item)
+{
+  for(int i = 0; i < item->childCount(); i++)
+  {
+    auto child = item->child(i);
+    child->setHidden(false);
+    if(pre_filter_expansion_.contains(child))
+      child->setExpanded(pre_filter_expansion_[child]);
+    restoreExpansionState(child);
+  }
+}
+
+bool AddModDialog::filterTreeItem(QTreeWidgetItem* item, const QString& filter)
+{
+  // A node matches if its own text contains the filter string.
+  bool self_matches = item->text(0).toLower().contains(filter);
+  // Recurse into children; collect whether any descendant matches.
+  bool any_child_matches = false;
+  for(int i = 0; i < item->childCount(); i++)
+    any_child_matches |= filterTreeItem(item->child(i), filter);
+
+  bool visible = self_matches || any_child_matches;
+  item->setHidden(!visible);
+  // Expand ancestors that are kept visible solely because a child matched.
+  if(any_child_matches)
+    item->setExpanded(true);
+  return visible;
+}
+
+/*!
+ * \brief Filters the content tree as the user types (issue #146 / NexusMods.App#3815).
+ *
+ * With a non-empty filter: snapshot expansion state on first keystroke (when
+ * pre_filter_expansion_ is still empty), then hide every item that neither
+ * matches the filter itself nor has a matching descendant. Ancestors of
+ * matches are kept visible and expanded so the user can see context.
+ *
+ * When the filter is cleared: restore visibility and the original expansion
+ * state from pre_filter_expansion_ and discard the snapshot.
+ *
+ * Neither selection nor the computed root level are touched — only
+ * setHidden()/setExpanded() are called on QTreeWidgetItems.
+ */
+void AddModDialog::on_content_filter_textChanged(const QString& text)
+{
+  auto* root = ui->content_tree->invisibleRootItem();
+  if(text.isEmpty())
+  {
+    // Restore full tree with pre-filter expansion state.
+    restoreExpansionState(root);
+    pre_filter_expansion_.clear();
+    return;
+  }
+
+  // Snapshot expansion state once, the first time a non-empty filter is applied.
+  if(pre_filter_expansion_.isEmpty())
+    saveExpansionState(root);
+
+  const QString lower_filter = text.toLower();
+  for(int i = 0; i < root->childCount(); i++)
+    filterTreeItem(root->child(i), lower_filter);
 }
