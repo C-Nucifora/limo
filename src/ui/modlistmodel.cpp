@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <QIcon>
 #include <QPainter>
+#include <QPalette>
 #include <QTableView>
 
 // Qt6 requires these container types to be registered metatypes for the QVariant values below.
@@ -118,6 +119,25 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
   {
     if(modHasUpdate(row))
       return QBrush(colors::GREEN);
+  }
+  if(role == Qt::BackgroundRole)
+  {
+    const int mod_id = active_mods_[row].mod.id;
+    // Highlight the selected mod and all mods conflicting with it. Colours are
+    // derived from the application palette and use alpha so they remain legible
+    // in both light and dark themes.
+    if(highlight_selected_mod_id_ >= 0 && mod_id == highlight_selected_mod_id_)
+    {
+      QColor color = QApplication::palette().color(QPalette::Highlight);
+      color.setAlpha(90);
+      return QBrush(color);
+    }
+    if(highlight_conflicting_mod_ids_.contains(mod_id))
+    {
+      QColor color = colors::RED;
+      color.setAlpha(70);
+      return QBrush(color);
+    }
   }
   if(role == version_list_role)
   {
@@ -289,6 +309,29 @@ bool ModListModel::isEditable() const
 void ModListModel::setIsEditable(bool is_editable)
 {
   is_editable_ = is_editable;
+}
+
+void ModListModel::setConflictHighlight(int selected_mod_id,
+                                        const std::set<int>& conflicting_mod_ids)
+{
+  highlight_selected_mod_id_ = selected_mod_id;
+  highlight_conflicting_mod_ids_ = conflicting_mod_ids;
+  if(active_mods_.empty())
+    return;
+  emit dataChanged(index(0, 0),
+                   index(active_mods_.size() - 1, columnCount() - 1),
+                   { Qt::BackgroundRole });
+}
+
+void ModListModel::clearConflictHighlight()
+{
+  highlight_selected_mod_id_ = -1;
+  highlight_conflicting_mod_ids_.clear();
+  if(active_mods_.empty())
+    return;
+  emit dataChanged(index(0, 0),
+                   index(active_mods_.size() - 1, columnCount() - 1),
+                   { Qt::BackgroundRole });
 }
 
 bool ModListModel::modHasUpdate(int row) const

@@ -9,6 +9,7 @@
 #include "modlistproxymodel.h"
 #include <QAbstractTableModel>
 #include <QComboBox>
+#include <set>
 
 
 /*!
@@ -155,6 +156,26 @@ public:
    * \param is_editable Model data will be editable if this is true.
    */
   void setIsEditable(bool is_editable);
+  /*!
+   * \brief Sets the currently selected mod and the set of mods which conflict with it.
+   *
+   * Rows whose mod id is contained in \p conflicting_mod_ids are highlighted in
+   * \ref data via \ref Qt::BackgroundRole. The selected mod itself receives a
+   * distinct highlight. Highlight colours are derived from the application palette
+   * so they remain legible in both light and dark themes.
+   *
+   * To wire this up to selection changes, mainwindow needs a single connection, e.g.:
+   * \code
+   * connect(mod_list_view->selectionModel(), &QItemSelectionModel::currentRowChanged,
+   *         this, [this](const QModelIndex& cur){ <compute conflicts>;
+   *               mod_list_model->setConflictHighlight(selected_id, conflicting_ids); });
+   * \endcode
+   * \param selected_mod_id Id of the currently selected mod, or -1 for none.
+   * \param conflicting_mod_ids Ids of all mods which conflict with the selected mod.
+   */
+  void setConflictHighlight(int selected_mod_id, const std::set<int>& conflicting_mod_ids);
+  /*! \brief Clears the conflict highlight set, causing the view to repaint without highlights. */
+  void clearConflictHighlight();
 
 private:
   /*! \brief The proxy model used to sort and filter this model. */
@@ -181,6 +202,10 @@ private:
   std::map<int, std::vector<std::string>> auto_tag_map_;
   /*! \brief Maps mod ids to a string representing their size on disk. */
   std::map<int, QString> mod_size_strings_;
+  /*! \brief Id of the currently selected mod for conflict highlighting, or -1 for none. */
+  int highlight_selected_mod_id_ = -1;
+  /*! \brief Ids of all mods which conflict with the currently selected mod. */
+  std::set<int> highlight_conflicting_mod_ids_;
 
   /*!
    * \brief Checks if the mod at the given mod has an update.
