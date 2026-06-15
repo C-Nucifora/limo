@@ -7,6 +7,9 @@
 #include <QMessageBox>
 #include <QSettings>
 #include <QUrl>
+#include <algorithm>
+#include <chrono>
+#include <fstream>
 #include <regex>
 
 namespace sfs = std::filesystem;
@@ -51,15 +54,20 @@ bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
   if(!fstream.is_open())
     throw std::runtime_error("Failed to write to disk.");
   bool message_sent = false;
+  // fork #8: track start time so the persistent download queue / DownloadsWidget can
+  // be updated with byte counts and an approximate speed, and so the active download
+  // can be aborted on cancellation.
+  const auto download_start = std::chrono::steady_clock::now();
   cpr::Response response = cpr::Download(
     fstream,
     cpr::Url(info.remote_download_url),
     cpr::ProgressCallback(
-      [app_mgr, &message_sent, &file_name, progress_callback](auto download_total,
-                                                              auto download_now,
-                                                              auto upload_total,
-                                                              auto upload_now,
-                                                              intptr_t user_data)
+      [app_mgr, &message_sent, &file_name, &download_start, progress_callback](
+        auto download_total,
+        auto download_now,
+        auto upload_total,
+        auto upload_now,
+        intptr_t user_data)
       {
         if(!message_sent && download_total > 0)
         {
@@ -92,8 +100,23 @@ bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
         }
         if(download_total != 0)
           progress_callback((float)download_now / (float)download_total);
-        return true;
+        // fork #8: report byte progress + speed to the persistent queue. Returning
+        // false here aborts the cpr transfer, which is how cancellation is honored.
+        double speed = 0.0;
+        const auto elapsed =
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - download_start).count();
+        if(elapsed > 0.0)
+          speed = (double)download_now / elapsed;
+        return app_mgr->reportDownloadProgress(download_now, download_total, speed);
       }));
+  // fork #8: a user-requested cancellation aborts the transfer; surface it as an error
+  // so downloadMod marks the item cancelled rather than complete.
+  if(app_mgr->downloadCancelRequested())
+  {
+    fstream.close();
+    sfs::remove(download_path / file_name);
+    throw std::runtime_error("Download cancelled.");
+  }
   if(response.status_code != 200)
   {
     sfs::remove(download_path / file_name);
@@ -134,6 +157,9 @@ ApplicationManager::~ApplicationManager()
 void ApplicationManager::init()
 {
   updateState();
+  // fork #8: restore the persistent download queue from disk so queued/incomplete
+  // downloads survive a restart.
+  loadDownloadQueue();
 }
 
 void ApplicationManager::sendLogMessage(Log::LogLevel log_level, const std::string& message)
@@ -1062,8 +1088,59 @@ void ApplicationManager::getNexusPage(int app_id, int mod_id)
 void ApplicationManager::downloadMod(ImportModInfo info)
 {
   info.last_action_was_successful = false;
+
+  // fork #8: register (or reuse) a persistent queue item for this download and mark it
+  // active. active_download_id_ may have been pre-set by retryDownload(); otherwise we
+  // create a fresh queued item here.
+  int queue_id = -1;
+  {
+    std::lock_guard<std::mutex> lock(download_queue_mutex_);
+    cancel_active_download_ = false;
+    if(active_download_id_ != -1)
+    {
+      queue_id = active_download_id_;
+    }
+    else
+    {
+      DownloadQueueItem item;
+      item.id = next_download_id_++;
+      item.app_id = info.app_id;
+      item.remote_source = info.remote_source;
+      item.remote_request_url = info.remote_request_url;
+      item.remote_mod_id = info.remote_mod_id;
+      item.remote_file_id = info.remote_file_id;
+      item.version_overwrite = info.version_overwrite;
+      item.target_group_id = info.target_group_id;
+      item.name = info.remote_file_name.empty()
+                    ? (info.remote_mod_name.empty() ? info.remote_source : info.remote_mod_name)
+                    : info.remote_file_name;
+      item.status = DownloadQueueItem::active;
+      download_queue_.push_back(item);
+      queue_id = item.id;
+      active_download_id_ = queue_id;
+    }
+    for(auto& it : download_queue_)
+      if(it.id == queue_id)
+        it.status = DownloadQueueItem::active;
+    saveDownloadQueueLocked();
+    emitDownloadQueueLocked();
+  }
+
+  auto fail = [&](DownloadQueueItem::Status status)
+  {
+    std::lock_guard<std::mutex> lock(download_queue_mutex_);
+    for(auto& it : download_queue_)
+      if(it.id == queue_id)
+        it.status = status;
+    active_download_id_ = -1;
+    cancel_active_download_ = false;
+    saveDownloadQueueLocked();
+    emitDownloadQueueLocked();
+  };
+
   if(!appIndexIsValid(info.app_id))
   {
+    fail(DownloadQueueItem::failed);
     emit downloadFailed();
     return;
   }
@@ -1076,6 +1153,7 @@ void ApplicationManager::downloadMod(ImportModInfo info)
       info.remote_file_id);
     if(!download_url)
     {
+      fail(DownloadQueueItem::failed);
       emit downloadFailed();
       return;
     }
@@ -1088,6 +1166,7 @@ void ApplicationManager::downloadMod(ImportModInfo info)
       info.remote_request_url);
     if(!download_url)
     {
+      fail(DownloadQueueItem::failed);
       emit downloadFailed();
       return;
     }
@@ -1098,20 +1177,267 @@ void ApplicationManager::downloadMod(ImportModInfo info)
   auto init_successful = handleExceptionsForFunction(nexus::Api::initModInfo, info);
   if(!init_successful || !(*init_successful))
   {
+    fail(DownloadQueueItem::failed);
     emit downloadFailed();
     return;
+  }
+
+  // fork #8: now that the remote file name is known, refresh the queue item's name.
+  {
+    std::lock_guard<std::mutex> lock(download_queue_mutex_);
+    for(auto& it : download_queue_)
+      if(it.id == queue_id && !info.remote_file_name.empty())
+        it.name = info.remote_file_name;
+    saveDownloadQueueLocked();
+    emitDownloadQueueLocked();
   }
 
   info.target_path = apps_[info.app_id].getDownloadDir();
   auto download_successful = handleExceptionsForFunction(performDownload, info, this);
   if(!download_successful)
   {
+    // fork #8: distinguish a user cancellation from a genuine failure.
+    fail(cancel_active_download_ ? DownloadQueueItem::cancelled : DownloadQueueItem::failed);
     emit downloadFailed();
     return;
   }
 
+  {
+    std::lock_guard<std::mutex> lock(download_queue_mutex_);
+    for(auto& it : download_queue_)
+      if(it.id == queue_id)
+      {
+        it.status = DownloadQueueItem::done;
+        it.bytes_done = it.bytes_total;
+        it.speed = 0.0;
+      }
+    active_download_id_ = -1;
+    saveDownloadQueueLocked();
+    emitDownloadQueueLocked();
+  }
+
   info.last_action_was_successful = true;
   emit downloadComplete(info);
+}
+
+// ---- fork #8: persistent download queue implementation -----------------------
+
+sfs::path ApplicationManager::getDownloadQueuePath() const
+{
+  sfs::path dir;
+  if(!apps_.empty())
+    dir = apps_.front().getDownloadDir();
+  else
+  {
+    dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString();
+    dir /= DOWNLOAD_DIR_NAME;
+  }
+  return dir / DOWNLOAD_QUEUE_FILE_NAME;
+}
+
+void ApplicationManager::saveDownloadQueueLocked()
+{
+  try
+  {
+    const sfs::path path = getDownloadQueuePath();
+    if(!sfs::exists(path.parent_path()))
+      sfs::create_directories(path.parent_path());
+    Json::Value json;
+    json["next_id"] = next_download_id_;
+    int i = 0;
+    for(const auto& item : download_queue_)
+    {
+      Json::Value entry;
+      entry["id"] = item.id;
+      entry["app_id"] = item.app_id;
+      entry["remote_source"] = item.remote_source;
+      entry["remote_request_url"] = item.remote_request_url;
+      entry["remote_mod_id"] = (Json::Int64)item.remote_mod_id;
+      entry["remote_file_id"] = (Json::Int64)item.remote_file_id;
+      entry["target_path"] = item.target_path;
+      entry["name"] = item.name;
+      entry["version_overwrite"] = item.version_overwrite;
+      entry["target_group_id"] = item.target_group_id;
+      entry["status"] = (int)item.status;
+      entry["bytes_done"] = (Json::Int64)item.bytes_done;
+      entry["bytes_total"] = (Json::Int64)item.bytes_total;
+      entry["retry_count"] = item.retry_count;
+      json["items"][i++] = entry;
+    }
+    std::ofstream file(path, std::fstream::binary);
+    file << json;
+  }
+  catch(const std::exception& error)
+  {
+    sendLogMessage(Log::LOG_WARNING,
+                   std::string("Could not save download queue: ") + error.what());
+  }
+}
+
+void ApplicationManager::loadDownloadQueue()
+{
+  std::lock_guard<std::mutex> lock(download_queue_mutex_);
+  download_queue_.clear();
+  try
+  {
+    const sfs::path path = getDownloadQueuePath();
+    if(!pu::exists(path))
+    {
+      emitDownloadQueueLocked();
+      return;
+    }
+    Json::Value json;
+    std::ifstream file(path, std::fstream::binary);
+    if(file.is_open())
+      file >> json;
+    file.close();
+    next_download_id_ = json.get("next_id", 0).asInt();
+    for(const auto& entry : json["items"])
+    {
+      DownloadQueueItem item;
+      item.id = entry.get("id", -1).asInt();
+      item.app_id = entry.get("app_id", -1).asInt();
+      item.remote_source = entry.get("remote_source", "").asString();
+      item.remote_request_url = entry.get("remote_request_url", "").asString();
+      item.remote_mod_id = entry.get("remote_mod_id", -1).asInt64();
+      item.remote_file_id = entry.get("remote_file_id", -1).asInt64();
+      item.target_path = entry.get("target_path", "").asString();
+      item.name = entry.get("name", "").asString();
+      item.version_overwrite = entry.get("version_overwrite", "").asString();
+      item.target_group_id = entry.get("target_group_id", -1).asInt();
+      item.status = (DownloadQueueItem::Status)entry.get("status", 0).asInt();
+      item.bytes_done = entry.get("bytes_done", 0).asInt64();
+      item.bytes_total = entry.get("bytes_total", 0).asInt64();
+      item.retry_count = entry.get("retry_count", 0).asInt();
+      // fork #8: an item that was active/queued when we last exited never finished.
+      // True byte-resume is not available (cpr restarts the transfer), so we mark these
+      // as failed; the user can retry them, which re-queues the whole download.
+      if(item.status == DownloadQueueItem::active || item.status == DownloadQueueItem::queued)
+      {
+        item.status = DownloadQueueItem::failed;
+        item.bytes_done = 0;
+        item.speed = 0.0;
+      }
+      if(item.id >= next_download_id_)
+        next_download_id_ = item.id + 1;
+      download_queue_.push_back(item);
+    }
+  }
+  catch(const std::exception& error)
+  {
+    sendLogMessage(Log::LOG_WARNING,
+                   std::string("Could not load download queue: ") + error.what());
+  }
+  emitDownloadQueueLocked();
+}
+
+void ApplicationManager::emitDownloadQueueLocked()
+{
+  emit downloadQueueChanged(download_queue_);
+}
+
+bool ApplicationManager::reportDownloadProgress(long long bytes_done,
+                                                long long bytes_total,
+                                                double speed)
+{
+  std::lock_guard<std::mutex> lock(download_queue_mutex_);
+  for(auto& it : download_queue_)
+  {
+    if(it.id == active_download_id_)
+    {
+      it.bytes_done = bytes_done;
+      it.bytes_total = bytes_total;
+      it.speed = speed;
+      it.status = DownloadQueueItem::active;
+    }
+  }
+  emitDownloadQueueLocked();
+  // returning false aborts the cpr transfer
+  return !cancel_active_download_;
+}
+
+bool ApplicationManager::downloadCancelRequested()
+{
+  std::lock_guard<std::mutex> lock(download_queue_mutex_);
+  return cancel_active_download_;
+}
+
+void ApplicationManager::requestDownloadQueue()
+{
+  std::lock_guard<std::mutex> lock(download_queue_mutex_);
+  emitDownloadQueueLocked();
+}
+
+void ApplicationManager::cancelDownload(int id)
+{
+  std::lock_guard<std::mutex> lock(download_queue_mutex_);
+  if(id == active_download_id_)
+  {
+    // the running transfer will abort at the next progress callback
+    cancel_active_download_ = true;
+    return;
+  }
+  for(auto& it : download_queue_)
+    if(it.id == id &&
+       (it.status == DownloadQueueItem::queued || it.status == DownloadQueueItem::failed))
+      it.status = DownloadQueueItem::cancelled;
+  saveDownloadQueueLocked();
+  emitDownloadQueueLocked();
+}
+
+void ApplicationManager::removeDownload(int id)
+{
+  std::lock_guard<std::mutex> lock(download_queue_mutex_);
+  if(id == active_download_id_)
+    return;
+  std::erase_if(download_queue_, [id](const DownloadQueueItem& it) { return it.id == id; });
+  saveDownloadQueueLocked();
+  emitDownloadQueueLocked();
+}
+
+ImportModInfo ApplicationManager::importInfoForItem(const DownloadQueueItem& item) const
+{
+  ImportModInfo info;
+  info.app_id = item.app_id;
+  info.action_type = ImportModInfo::download;
+  info.remote_source = item.remote_source;
+  info.remote_request_url = item.remote_request_url;
+  info.remote_mod_id = item.remote_mod_id;
+  info.remote_file_id = item.remote_file_id;
+  info.version_overwrite = item.version_overwrite;
+  info.target_group_id = item.target_group_id;
+  info.remote_type = ImportModInfo::nexus;
+  return info;
+}
+
+void ApplicationManager::retryDownload(int id)
+{
+  ImportModInfo info;
+  {
+    std::lock_guard<std::mutex> lock(download_queue_mutex_);
+    if(active_download_id_ != -1)
+    {
+      sendLogMessage(Log::LOG_WARNING,
+                     std::string("Cannot retry while another download is active."));
+      return;
+    }
+    auto iter = std::find_if(download_queue_.begin(),
+                             download_queue_.end(),
+                             [id](const DownloadQueueItem& it) { return it.id == id; });
+    if(iter == download_queue_.end())
+      return;
+    iter->retry_count++;
+    iter->status = DownloadQueueItem::active;
+    iter->bytes_done = 0;
+    iter->speed = 0.0;
+    active_download_id_ = id;
+    cancel_active_download_ = false;
+    info = importInfoForItem(*iter);
+    saveDownloadQueueLocked();
+    emitDownloadQueueLocked();
+  }
+  // active_download_id_ is set, so downloadMod will reuse this queue item.
+  downloadMod(info);
 }
 
 void ApplicationManager::checkForModUpdates(int app_id)
