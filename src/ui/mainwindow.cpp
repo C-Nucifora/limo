@@ -133,6 +133,9 @@ void MainWindow::closeEvent(QCloseEvent* event)
   settings.setValue("mod_list_sort_column", ui->mod_list->header()->sortIndicatorSection());
   settings.setValue("mod_list_sort_order", ui->mod_list->header()->sortIndicatorOrder());
   settings.setValue("sort_apps_alphabetically", sort_apps_alphabetically_);
+  // Persist column widths and sort indicator for both lists (fork #142 / Vortex#23247).
+  settings.setValue("mod_list_header_state", ui->mod_list->header()->saveState());
+  settings.setValue("deployer_list_header_state", ui->deployer_list->header()->saveState());
   ipc_server_->shutdown();
   event->accept();
 }
@@ -490,6 +493,11 @@ void MainWindow::setupLists()
   mod_list_proxy_->setSortRole(ModListModel::sort_role);
   mod_list_proxy_->setSortCaseSensitivity(Qt::CaseInsensitive);
   ui->mod_list->sortByColumn(ModListModel::time_col, Qt::SortOrder::DescendingOrder);
+  // Make all mod list columns interactively resizable (fork #142 / Vortex#23247).
+  // The name column keeps its natural width from resizeColumnToContents; the user
+  // can drag any header border to override it.  Column widths are persisted via
+  // QHeaderView::saveState / restoreState in closeEvent / loadSettings.
+  ui->mod_list->header()->setSectionResizeMode(QHeaderView::Interactive);
 
   // deployer list
   deployer_model_ = new DeployerListModel(this);
@@ -510,6 +518,8 @@ void MainWindow::setupLists()
   ui->deployer_list->setDragEnabled(true);
   ui->deployer_list->setDropIndicatorShown(true);
   ui->deployer_list->setEnableDragReorder(true);
+  // Make deployer list columns interactively resizable (fork #142 / Vortex#23247).
+  ui->deployer_list->header()->setSectionResizeMode(QHeaderView::Interactive);
 
   // backup list
   ui->backup_list->setStyleSheet("QTableView{margin-top:6}");
@@ -1239,17 +1249,35 @@ void MainWindow::loadSettings()
   const bool has_nexus_account = settings.value("info_is_valid", false).toBool();
   ui->check_mod_updates_button->setVisible(has_nexus_account);
   settings.endGroup();
-  const int mod_list_sort_column =
-    settings.value("mod_list_sort_column", ModListModel::time_col).toInt();
-  const int mod_list_sort_order =
-    settings.value("mod_list_sort_order", Qt::SortOrder::DescendingOrder).toInt();
-  if(mod_list_sort_column >= 0 && mod_list_sort_column < mod_list_model_->columnCount() &&
-     (mod_list_sort_order == Qt::SortOrder::DescendingOrder ||
-      mod_list_sort_order == Qt::SortOrder::AscendingOrder))
+  // Restore column widths for both lists (fork #142 / Vortex#23247).
+  // saveState / restoreState also encodes the sort indicator, so prefer it;
+  // fall back to the legacy mod_list_sort_column/order keys only when no
+  // header state has been saved yet.
+  const QByteArray mod_list_header_state =
+    settings.value("mod_list_header_state").toByteArray();
+  if(!mod_list_header_state.isEmpty())
   {
-    ui->mod_list->sortByColumn(mod_list_sort_column,
-                               static_cast<Qt::SortOrder>(mod_list_sort_order));
+    ui->mod_list->header()->restoreState(mod_list_header_state);
   }
+  else
+  {
+    // Legacy fallback: explicit sort column / order (pre-#142 settings).
+    const int mod_list_sort_column =
+      settings.value("mod_list_sort_column", ModListModel::time_col).toInt();
+    const int mod_list_sort_order =
+      settings.value("mod_list_sort_order", Qt::SortOrder::DescendingOrder).toInt();
+    if(mod_list_sort_column >= 0 && mod_list_sort_column < mod_list_model_->columnCount() &&
+       (mod_list_sort_order == Qt::SortOrder::DescendingOrder ||
+        mod_list_sort_order == Qt::SortOrder::AscendingOrder))
+    {
+      ui->mod_list->sortByColumn(mod_list_sort_column,
+                                 static_cast<Qt::SortOrder>(mod_list_sort_order));
+    }
+  }
+  const QByteArray deployer_list_header_state =
+    settings.value("deployer_list_header_state").toByteArray();
+  if(!deployer_list_header_state.isEmpty())
+    ui->deployer_list->header()->restoreState(deployer_list_header_state);
   sort_apps_alphabetically_ = settings.value("sort_apps_alphabetically", false).toBool();
   sort_apps_alpha_action_->setChecked(sort_apps_alphabetically_);
 }
