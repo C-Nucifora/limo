@@ -1274,6 +1274,13 @@ private slots:
    * \param parse_result Parsed mod list from the MO2 instance.
    */
   void onImportMo2DialogAccepted(EditApplicationInfo app_info, Mo2ParseResult parse_result);
+  /*!
+   * \brief Exports the current deployer's ordered mod list to a CSV or Markdown file.
+   * Opens a save dialog and writes load order index, mod name, version, enabled state,
+   * tags, and Nexus URL for every mod in the active deployer's load order.
+   * Implements fork issue #7.
+   */
+  void on_actionExport_Mod_List_triggered();
 
 signals:
   /*!

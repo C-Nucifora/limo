@@ -1,18 +1,67 @@
 {
-	"deployers" :
-	[
+	"deployers": [
 		{
-			"deploy_mode" : "hard_link",
-			"name" : "Mods",
-			"target_dir" : "$STEAM_INSTALL_PATH$/Mods",
-			"type" : "Witcher 3 Deployer"
+			"deploy_mode": "hard_link",
+			"name": "Mods",
+			"target_dir": "$STEAM_INSTALL_PATH$/Mods",
+			"type": "Witcher 3 Deployer"
 		},
 		{
-			"deploy_mode" : "hard_link",
-			"name" : "DLC",
-			"target_dir" : "$STEAM_INSTALL_PATH$/dlc",
-			"type" : "Case Matching Deployer"
+			"deploy_mode": "hard_link",
+			"name": "DLC",
+			"target_dir": "$STEAM_INSTALL_PATH$/dlc",
+			"type": "Case Matching Deployer"
 		}
 	],
-	"name" : "The Witcher 3: Wild Hunt"
+	"name": "The Witcher 3: Wild Hunt",
+	"auto_tags": [
+		{
+			"name": "Script",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "\\.ws$",
+					"use_regex": true
+				}
+			]
+		},
+		{
+			"name": "Bundle",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "\\.bundle$",
+					"use_regex": true
+				}
+			]
+		},
+		{
+			"name": "Menu/Config",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "\\.xml$",
+					"use_regex": true
+				}
+			]
+		},
+		{
+			"name": "DLC",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "(^|/)dlc/",
+					"use_regex": true
+				}
+			]
+		}
+	]
 }

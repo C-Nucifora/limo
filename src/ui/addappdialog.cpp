@@ -33,6 +33,9 @@ AddAppDialog::AddAppDialog(bool is_flatpak, QWidget* parent) :
           &ImportFromSteamDialog::applicationImported,
           this,
           &AddAppDialog::onApplicationImported);
+  // Populate GOG template combo at construction so it's ready when setAddMode() is called.
+  // (issue #74 / limo-app/limo#51)
+  populateGogTemplateCombo();
 }
 
 AddAppDialog::~AddAppDialog()
@@ -325,6 +328,7 @@ void AddAppDialog::setEditMode(const QString& name,
   ui->import_tags_checkbox->setVisible(false);
   ui->import_button->setEnabled(false);
   ui->import_button->setHidden(true);
+  ui->gog_group_box->setVisible(false);
   ui->move_dir_box->setCheckState(Qt::Unchecked);
   name_ = name;
   path_ = path;
@@ -357,6 +361,10 @@ void AddAppDialog::setAddMode()
   ui->import_tags_checkbox->setVisible(false);
   ui->import_button->setEnabled(true);
   ui->import_button->setHidden(false);
+  // Show the GOG template section only when adding (not editing) an application.
+  // (issue #74 / limo-app/limo#51)
+  ui->gog_group_box->setVisible(!gog_template_paths_.isEmpty());
+  ui->gog_prefix_field->setText("");
   setWindowTitle("New Application");
   ui->name_field->setText("");
   ui->version_field->setText("");
@@ -452,4 +460,305 @@ void AddAppDialog::onIconPathDialogComplete(const QString& path)
   }
   ui->icon_field->setText(path);
   ui->icon_picker_button->setIcon(QIcon(path));
+}
+
+// ---------------------------------------------------------------------------
+// GOG / non-Steam game template support (issue #74 / limo-app/limo#51)
+// ---------------------------------------------------------------------------
+
+void AddAppDialog::populateGogTemplateCombo()
+{
+  ui->gog_template_combo->clear();
+  gog_template_paths_.clear();
+
+  sfs::path config_dir =
+    sfs::path(is_flatpak_ ? "/app" : APP_INSTALL_PREFIX) / "share/limo/steam_app_configs";
+  if(!is_flatpak_ && sfs::exists("steam_app_configs"))
+    config_dir = "steam_app_configs";
+
+  if(!sfs::exists(config_dir))
+  {
+    Log::debug("GOG template: could not find steam_app_configs directory");
+    return;
+  }
+
+  // Collect (display_name, file_path) pairs then sort by name for a tidy combo.
+  std::vector<std::pair<QString, QString>> entries;
+  for(const auto& entry : sfs::directory_iterator(config_dir))
+  {
+    if(entry.path().extension() != ".json")
+      continue;
+    Json::Value json;
+    std::ifstream f(entry.path(), std::fstream::binary);
+    if(!f.is_open())
+      continue;
+    try
+    {
+      f >> json;
+    }
+    catch(...)
+    {
+      continue;
+    }
+    QString display_name;
+    if(!json[JSON_NAME].isNull())
+      display_name = json[JSON_NAME].asCString();
+    else
+      display_name = entry.path().stem().string().c_str();
+    entries.emplace_back(display_name, entry.path().string().c_str());
+  }
+  std::sort(entries.begin(), entries.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+  for(const auto& [name, path] : entries)
+  {
+    ui->gog_template_combo->addItem(name);
+    gog_template_paths_.append(path);
+  }
+  Log::debug(std::format("GOG template combo populated with {} entries", entries.size()));
+}
+
+void AddAppDialog::initConfigForGog(const QString& install_path,
+                                    const QString& prefix_path,
+                                    const QString& config_path)
+{
+  deployers_.clear();
+  auto_tags_.clear();
+
+  Json::Value json;
+  std::ifstream file(config_path.toStdString(), std::fstream::binary);
+  if(!file.is_open())
+  {
+    Log::debug("GOG template: failed to open config file: " + config_path.toStdString());
+    return;
+  }
+  try
+  {
+    file >> json;
+  }
+  catch(Json::Exception& e)
+  {
+    Log::debug("GOG template: JSON parse error in " + config_path.toStdString() +
+               ": " + e.what());
+    return;
+  }
+  catch(...)
+  {
+    Log::debug("GOG template: unknown error reading " + config_path.toStdString());
+    return;
+  }
+
+  const bool has_prefix = !prefix_path.isEmpty();
+  int skipped_deployers = 0;
+
+  for(int i = 0; i < json[JSON_DEPLOYERS_GROUP].size(); i++)
+  {
+    Json::Value deployer = json[JSON_DEPLOYERS_GROUP][i];
+    EditDeployerInfo info;
+
+    // Validate mandatory keys
+    bool keys_ok = true;
+    for(const auto& key : JSON_DEPLOYER_MANDATORY_KEYS)
+    {
+      if(deployer[key].isNull())
+      {
+        Log::debug(std::format(
+          "GOG template: deployer {} in {} is missing key {}", i, config_path.toStdString(), key));
+        keys_ok = false;
+        break;
+      }
+    }
+    if(!keys_ok)
+    {
+      skipped_deployers++;
+      continue;
+    }
+
+    const std::string type = deployer[JSON_DEPLOYERS_TYPE].asString();
+    if(str::find(DeployerFactory::DEPLOYER_TYPES, type) == DeployerFactory::DEPLOYER_TYPES.end())
+    {
+      Log::debug(std::format(
+        "GOG template: deployer {} in {} has unknown type {}", i, config_path.toStdString(), type));
+      skipped_deployers++;
+      continue;
+    }
+    info.type = type;
+    info.name = deployer[JSON_DEPLOYERS_NAME].asString();
+
+    // Resolve target directory placeholders.
+    // If the target contains $STEAM_PREFIX_PATH$ but no prefix was supplied, skip this deployer.
+    QString target_string = deployer[JSON_DEPLOYERS_TARGET].asString().c_str();
+    if(target_string.contains("$STEAM_PREFIX_PATH$"))
+    {
+      if(!has_prefix)
+      {
+        Log::debug(std::format(
+          "GOG template: skipping deployer {} ('{}') — uses $STEAM_PREFIX_PATH$ but no prefix "
+          "path was provided",
+          i,
+          info.name));
+        skipped_deployers++;
+        continue;
+      }
+      target_string.replace("$STEAM_PREFIX_PATH$", prefix_path);
+    }
+    target_string.replace("$STEAM_INSTALL_PATH$", install_path);
+    const std::string target_dir = target_string.toStdString();
+    if(!sfs::exists(target_dir))
+    {
+      Log::debug(std::format(
+        "GOG template: deployer {} target '{}' does not exist — skipping", i, target_dir));
+      skipped_deployers++;
+      continue;
+    }
+    info.target_dir = target_dir;
+
+    // Deploy mode
+    QString deploy_mode = deployer[JSON_DEPLOYERS_MODE].asString().c_str();
+    deploy_mode = deploy_mode.toLower().replace("_", " ");
+    if(deploy_mode == "hard link")
+      info.deploy_mode = Deployer::hard_link;
+    else if(deploy_mode == "sym link" || deploy_mode == "soft link")
+      info.deploy_mode = Deployer::sym_link;
+    else if(deploy_mode == "copy")
+      info.deploy_mode = Deployer::copy;
+    else
+    {
+      Log::debug(std::format(
+        "GOG template: deployer {} has invalid mode '{}' — skipping",
+        i,
+        deploy_mode.toStdString()));
+      skipped_deployers++;
+      continue;
+    }
+
+    // Optional source directory
+    if(!deployer[JSON_DEPLOYERS_SOURCE].isNull())
+    {
+      QString source_string = deployer[JSON_DEPLOYERS_SOURCE].asString().c_str();
+      if(source_string.contains("$STEAM_PREFIX_PATH$"))
+      {
+        if(!has_prefix)
+        {
+          Log::debug(std::format(
+            "GOG template: skipping deployer {} ('{}') — source uses $STEAM_PREFIX_PATH$ but no "
+            "prefix path was provided",
+            i,
+            info.name));
+          skipped_deployers++;
+          continue;
+        }
+        source_string.replace("$STEAM_PREFIX_PATH$", prefix_path);
+      }
+      source_string.replace("$STEAM_INSTALL_PATH$", install_path);
+      QString home_path = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+      source_string.replace("$HOME$", home_path);
+      const std::string source_dir = source_string.toStdString();
+      if(!sfs::exists(source_dir))
+      {
+        Log::debug(std::format(
+          "GOG template: deployer {} source '{}' does not exist — skipping", i, source_dir));
+        skipped_deployers++;
+        continue;
+      }
+      info.source_dir = source_dir;
+    }
+
+    if(!deployer[JSON_DEPLOYERS_SEPARATE_DIRS].isNull())
+      info.separate_profile_dirs = deployer[JSON_DEPLOYERS_SEPARATE_DIRS].asBool();
+    if(!deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].isNull())
+      info.separate_profile_dirs = deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].asBool();
+
+    deployers_.push_back(info);
+  }
+
+  // Auto tags do not reference path placeholders so all of them can be imported.
+  for(int i = 0; i < json[JSON_AUTO_TAGS_GROUP].size(); i++)
+  {
+    try
+    {
+      AutoTag _(json[JSON_AUTO_TAGS_GROUP][i]);
+    }
+    catch(const ParseError& e)
+    {
+      Log::debug(std::format(
+        "GOG template: failed to read auto tag {} from {}. Error: {}",
+        i,
+        config_path.toStdString(),
+        e.what()));
+      continue;
+    }
+    catch(...)
+    {
+      Log::debug(std::format(
+        "GOG template: failed to read auto tag {} from {}", i, config_path.toStdString()));
+      continue;
+    }
+    auto_tags_.push_back(json[JSON_AUTO_TAGS_GROUP][i]);
+  }
+
+  if(!json[JSON_NAME].isNull() && ui->name_field->text().isEmpty())
+    ui->name_field->setText(json[JSON_NAME].asCString());
+
+  Log::debug(std::format(
+    "GOG template: loaded {} deployers ({} skipped) and {} auto tags from {}",
+    deployers_.size(),
+    skipped_deployers,
+    auto_tags_.size(),
+    config_path.toStdString()));
+
+  ui->import_checkbox->setToolTip(
+    std::format("Import {} recommended deployers ({} skipped — path not found or missing prefix)",
+                deployers_.size(),
+                skipped_deployers)
+      .c_str());
+  ui->import_tags_checkbox->setToolTip(
+    std::format("Import {} recommended auto tags", auto_tags_.size()).c_str());
+}
+
+void AddAppDialog::on_gog_apply_button_clicked()
+{
+  if(!pathIsValid())
+  {
+    QMessageBox* error_box = new QMessageBox(QMessageBox::Warning,
+                                             "No staging directory",
+                                             "Please enter a valid staging directory first.",
+                                             QMessageBox::Ok);
+    error_box->exec();
+    return;
+  }
+
+  const int idx = ui->gog_template_combo->currentIndex();
+  if(idx < 0 || idx >= gog_template_paths_.size())
+    return;
+
+  const QString install_path = ui->path_field->text();
+  const QString prefix_path = ui->gog_prefix_field->text().trimmed();
+  const QString config_path = gog_template_paths_.at(idx);
+
+  // steam_app_id_ remains -1 for GOG installs; that is intentional.
+  initConfigForGog(install_path, prefix_path, config_path);
+
+  ui->import_checkbox->setVisible(!deployers_.empty());
+  ui->import_tags_checkbox->setVisible(!auto_tags_.empty());
+}
+
+void AddAppDialog::on_gog_prefix_picker_button_clicked()
+{
+  QString starting_dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+  const QString current = ui->gog_prefix_field->text().trimmed();
+  if(!current.isEmpty() && sfs::exists(current.toStdString()))
+    starting_dir = current;
+  auto dialog = new QFileDialog;
+  dialog->setWindowTitle("Select Prefix Directory");
+  dialog->setFilter(QDir::AllDirs | QDir::Hidden);
+  dialog->setFileMode(QFileDialog::Directory);
+  dialog->setDirectory(starting_dir);
+  connect(dialog, &QFileDialog::fileSelected, this, &AddAppDialog::onGogPrefixDialogAccepted);
+  dialog->exec();
+}
+
+void AddAppDialog::onGogPrefixDialogAccepted(const QString& path)
+{
+  if(!path.isEmpty())
+    ui->gog_prefix_field->setText(path);
 }

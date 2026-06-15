@@ -67,6 +67,41 @@ public:
    * \return The number.
    */
   int getNumProfiles(int app_id) const;
+
+  // ---- Headless CLI helpers (fork #44) ----------------------------------------
+  /*!
+   * \brief Returns the deployer names for the given application directly.
+   *  Used by the headless CLI so no signal/slot round-trip is needed.
+   * \param app_id Target application.
+   * \return Vector of deployer names, or empty vector if app_id is invalid.
+   */
+  std::vector<std::string> getCliDeployerNames(int app_id) const;
+  /*!
+   * \brief Returns ModInfo for every installed mod of the given application directly.
+   * \param app_id Target application.
+   * \return Vector of ModInfo, or empty vector if app_id is invalid.
+   */
+  std::vector<ModInfo> getCliModInfo(int app_id) const;
+  /*!
+   * \brief Returns the profile names for the given application directly.
+   * \param app_id Target application.
+   * \return Vector of profile names, or empty vector if app_id is invalid.
+   */
+  std::vector<std::string> getCliProfileNames(int app_id) const;
+  /*!
+   * \brief Returns AppInfo for the given application directly.
+   * \param app_id Target application.
+   * \return AppInfo, or default-constructed AppInfo if app_id is invalid.
+   */
+  AppInfo getCliAppInfo(int app_id) const;
+  /*!
+   * \brief Returns the load order (mod-id, enabled) for the given deployer directly.
+   * \param app_id Target application.
+   * \param deployer Target deployer.
+   * \return Vector of (mod_id, enabled) tuples.
+   */
+  std::vector<std::tuple<int, bool>> getCliLoadorder(int app_id, int deployer) const;
+  // ---- End headless CLI helpers ------------------------------------------------
   /*!
    * \brief Enable or disable throwing exceptions.
    * \param enabled New status.

@@ -129,6 +129,14 @@ set(CORE_SOURCES
         src/core/conflictinfo.h
         src/core/consts.h
         src/core/cryptography.cpp
+        src/core/remote/remotesource.h
+        src/core/remote/remotesourceregistry.h
+        src/core/remote/thunderstoreprovider.cpp
+        src/core/remote/thunderstoreprovider.h
+        src/core/remote/gamebanana_provider.cpp
+        src/core/remote/gamebanana_provider.h
+        src/core/remote/modio_provider.cpp
+        src/core/remote/modio_provider.h
         src/core/cryptography.h
         src/core/importers/mo2importer.cpp
         src/core/importers/mo2importer.h
@@ -136,6 +144,8 @@ set(CORE_SOURCES
         src/core/deployer.h
         src/core/deployerfactory.cpp
         src/core/deployerfactory.h
+        src/core/overlaydeployer.cpp
+        src/core/overlaydeployer.h
         src/core/deployerinfo.h
         src/core/editapplicationinfo.h
         src/core/editautotagaction.cpp

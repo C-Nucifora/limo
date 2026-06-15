@@ -8,8 +8,10 @@
 #include "installstep.h"
 #include <algorithm>
 #include <filesystem>
+#include <map>
 #include <pugixml.hpp>
 #include <ranges>
+#include <set>
 #include <vector>
 
 
@@ -78,6 +80,27 @@ public:
    * \return Mod name and version.
    */
   static std::pair<std::string, std::string> getMetaData(const std::filesystem::path& path);
+
+  /*!
+   * \brief Returns a map describing which plugins were selected at the current step, keyed by
+   * a composite "stepName\x1fgroupName" string and containing the set of selected plugin names.
+   * Used for persisting choices across reinstalls (fork #135 / limo-app/limo#256).
+   * \param selection For every group: for every plugin: True if selected.
+   * \return The named choice map for this step.
+   */
+  std::map<std::string, std::set<std::string>> getStepChoiceNames(
+    const std::vector<std::vector<bool>>& selection) const;
+
+  /*!
+   * \brief Converts a named choice map (as produced by getStepChoiceNames) back to a bool
+   * selection vector for the current step.  Any saved name that no longer appears in the step
+   * is silently ignored; groups with no saved choices keep their default (all false).
+   * Used for pre-selecting choices on reinstall (fork #135 / limo-app/limo#256).
+   * \param saved Named choices keyed by "stepName\x1fgroupName".
+   * \return Bool selection suitable for passing to step() / updateInstallStep().
+   */
+  std::vector<std::vector<bool>> applyNamedChoices(
+    const std::map<std::string, std::set<std::string>>& saved) const;
 
 private:
   /*! \brief Source fomod config file. */

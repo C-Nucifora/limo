@@ -10,6 +10,7 @@
 #include <QButtonGroup>
 #include <QDialog>
 #include <filesystem>
+#include <map>
 #include <set>
 
 
@@ -44,13 +45,16 @@ public:
    * \param info Contains necessary data to install the mod upon dialog completion.
    * \param app_id Application for which the new mod is to be installed.
    * \param paths_are_case_invariant Indicates whether paths are treated as case invariant.
+   * \param choices_path Directory in which to persist/load .fomod_choices.json.
+   * Pass an empty path to disable persistence (fork #135 / limo-app/limo#256).
    */
   void setupDialog(const std::filesystem::path& config_file,
                    const std::filesystem::path& target_path,
                    const QString& app_version,
                    const ImportModInfo& info,
                    int app_id,
-                   bool paths_are_case_invariant);
+                   bool paths_are_case_invariant,
+                   const std::filesystem::path& choices_path = {});
   /*!
    * \brief Returns pairs of source and destinations for every selected file during
    * the installation process.
@@ -93,6 +97,23 @@ private:
   bool dialog_completed_ = false;
   /*! \brief Indicates whether or not paths should be treated as case invariant. */
   bool paths_are_case_invariant_ = false;
+  /*!
+   * \brief Path to the .fomod_choices.json sidecar file, or empty if persistence is disabled.
+   * Fork #135 / limo-app/limo#256.
+   */
+  std::filesystem::path choices_file_;
+  /*!
+   * \brief Previously saved choices, keyed by "stepName\x1fgroupName".
+   * Loaded from choices_file_ at setup time; applied to each step as the dialog advances.
+   * Fork #135 / limo-app/limo#256.
+   */
+  std::map<std::string, std::set<std::string>> saved_choices_;
+  /*!
+   * \brief Accumulates named choices for every step visited during the current session.
+   * Flushed to choices_file_ when the user hits Finish.
+   * Fork #135 / limo-app/limo#256.
+   */
+  std::map<std::string, std::set<std::string>> current_choices_;
 
   /*!
    * \brief Creates a new FomodCheckBox or FomodRatioButton for selection of a plugin.
@@ -126,6 +147,18 @@ private:
   std::vector<std::vector<bool>> getSelection();
   /*! \brief Updates text and enabled status of next_button_, depending on the step. */
   void updateNextButton();
+  /*!
+   * \brief Loads previously saved FOMOD choices from choices_file_ into saved_choices_.
+   * Silently does nothing if the file does not exist or cannot be parsed.
+   * Fork #135 / limo-app/limo#256.
+   */
+  void loadChoices();
+  /*!
+   * \brief Writes current_choices_ to choices_file_ as JSON.
+   * Silently does nothing if choices_file_ is empty.
+   * Fork #135 / limo-app/limo#256.
+   */
+  void saveChoices();
   /*!
    * \brief Closes the dialog and emits a signal indicating installation has been canceled.
    * \param event The close event sent upon closing the dialog.

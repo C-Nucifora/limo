@@ -29,6 +29,8 @@
 #include <QCheckBox>
 #include <QDesktopServices>
 #include <QInputDialog>
+#include <QFile>
+#include <QFileDialog>
 #include <QMessageBox>
 #include <QMetaType>
 #include <QPainter>
@@ -36,12 +38,14 @@
 #include <QPushButton>
 #include <QScrollBar>
 #include <QSettings>
+#include <QTextStream>
 #include <QToolButton>
 #include <QtConcurrent/QtConcurrent>
 #include <algorithm>
 #include <numeric>
 #include <ranges>
 #include <regex>
+#include <unordered_map>
 
 #include <iostream>
 
@@ -632,7 +636,8 @@ void MainWindow::setupMenus()
     ui->actionbrowse_mod_files,     ui->actionSort_Mods,
     ui->actionAdd_to_Ignore_List,   conflict_detail_action_,
     merge_tw3_scripts_action_,      merge_tw3_config_action_,
-    cyberpunk_setup_action_,        deploy_redmods_action_
+    cyberpunk_setup_action_,        deploy_redmods_action_,
+    ui->actionExport_Mod_List
   };
   std::sort(deployer_list_actions.begin(), deployer_list_actions.end(), sort_actions);
   deployer_list_menu_->addActions(deployer_list_actions);
@@ -2029,7 +2034,9 @@ void MainWindow::onDeployerListContextMenu(QPoint pos)
   if(!has_visible_actions)
     return;
   auto idx = ui->deployer_list->indexAt(pos);
-  if(idx.row() >= 0)
+  // Show the context menu if a row is selected, or if the deployer list has at least one entry
+  // (so "Export Mod List" is still accessible when clicking empty space) (fork #7).
+  if(idx.row() >= 0 || deployer_model_->rowCount() > 0)
     deployer_list_menu_->exec(ui->deployer_list->mapToGlobal(pos));
 }
 
@@ -4154,4 +4161,150 @@ void MainWindow::onImportMo2DialogAccepted(EditApplicationInfo app_info,
   setStatusMessage("Creating MO2 application");
   emit addApplication(app_info);
   emit getApplicationNames(true);
+}
+
+// Fork issue #7: Export the current deployer's ordered mod list to CSV or Markdown.
+void MainWindow::on_actionExport_Mod_List_triggered()
+{
+  if(deployer_model_->rowCount() == 0)
+  {
+    message_box_->setText("No mods in the current deployer's load order to export.");
+    message_box_->setWindowTitle("Export Mod List");
+    message_box_->exec();
+    return;
+  }
+
+  const QString filter =
+    "CSV files (*.csv);;Markdown files (*.md);;All files (*)";
+  QString selected_filter;
+  const QString path = QFileDialog::getSaveFileName(
+    this, "Export Mod List", QDir::homePath(), filter, &selected_filter);
+  if(path.isEmpty())
+    return;
+
+  // Build a lookup map from mod id -> ModInfo for version and remote_source.
+  const std::vector<ModInfo>& all_mods = mod_list_model_->getModInfo();
+  std::unordered_map<int, const ModInfo*> mod_by_id;
+  mod_by_id.reserve(all_mods.size());
+  for(const auto& info : all_mods)
+    mod_by_id[info.mod.id] = &info;
+
+  const QString deployer_name =
+    ui->deployer_selection_box->currentText();
+
+  const bool is_csv =
+    path.endsWith(".csv", Qt::CaseInsensitive) ||
+    (!path.endsWith(".md", Qt::CaseInsensitive) && selected_filter.startsWith("CSV"));
+
+  QFile file(path);
+  if(!file.open(QIODevice::WriteOnly | QIODevice::Text))
+  {
+    message_box_->setText(
+      QString("Could not open file for writing:\n%1").arg(file.errorString()));
+    message_box_->setWindowTitle("Export Mod List");
+    message_box_->exec();
+    return;
+  }
+  QTextStream out(&file);
+
+  const int row_count = deployer_model_->rowCount();
+
+  if(is_csv)
+  {
+    // Helper lambda: quote a CSV field, escaping embedded double-quotes.
+    auto csv_field = [](const QString& s) -> QString
+    {
+      QString escaped = s;
+      escaped.replace("\"", "\"\"");
+      return "\"" + escaped + "\"";
+    };
+
+    out << "Load Order,Mod Name,Version,Enabled,Tags,Nexus URL\n";
+    for(int row = 0; row < row_count; ++row)
+    {
+      const QModelIndex idx = deployer_model_->index(row, 0, {});
+      const int mod_id = idx.data(ModListModel::mod_id_role).toInt();
+      const QString mod_name =
+        QString::fromStdString(deployer_model_->index(row, 0, {})
+                                 .data(ModListModel::mod_name_role)
+                                 .toString()
+                                 .toStdString());
+      const bool enabled =
+        idx.data(DeployerListModel::mod_status_role).toBool();
+
+      // Collect tags from the deployer model.
+      const QStringList tags =
+        idx.data(DeployerListModel::mod_tags_role).toStringList();
+
+      QString version;
+      QString remote_source;
+      if(mod_by_id.count(mod_id))
+      {
+        const ModInfo* info = mod_by_id.at(mod_id);
+        version = QString::fromStdString(info->mod.version);
+        remote_source = QString::fromStdString(info->mod.remote_source);
+      }
+
+      out << QString::number(row + 1) << ","
+          << csv_field(mod_name) << ","
+          << csv_field(version) << ","
+          << (enabled ? "yes" : "no") << ","
+          << csv_field(tags.join("; ")) << ","
+          << csv_field(remote_source) << "\n";
+    }
+  }
+  else
+  {
+    // Markdown table.
+    out << "# Mod List: " << deployer_name << "\n\n";
+    out << "| # | Mod Name | Version | Enabled | Tags | Nexus URL |\n";
+    out << "|---|----------|---------|---------|------|-----------|\n";
+
+    // Helper lambda: escape pipe characters inside a Markdown table cell.
+    auto md_cell = [](const QString& s) -> QString
+    {
+      QString escaped = s;
+      escaped.replace("|", "\\|");
+      return escaped;
+    };
+
+    for(int row = 0; row < row_count; ++row)
+    {
+      const QModelIndex idx = deployer_model_->index(row, 0, {});
+      const int mod_id = idx.data(ModListModel::mod_id_role).toInt();
+      const QString mod_name =
+        idx.data(ModListModel::mod_name_role).toString();
+      const bool enabled =
+        idx.data(DeployerListModel::mod_status_role).toBool();
+      const QStringList tags =
+        idx.data(DeployerListModel::mod_tags_role).toStringList();
+
+      QString version;
+      QString remote_source;
+      if(mod_by_id.count(mod_id))
+      {
+        const ModInfo* info = mod_by_id.at(mod_id);
+        version = QString::fromStdString(info->mod.version);
+        remote_source = QString::fromStdString(info->mod.remote_source);
+      }
+
+      // Render Nexus URL as a Markdown link when present.
+      QString url_cell;
+      if(!remote_source.isEmpty())
+        url_cell = "[link](" + md_cell(remote_source) + ")";
+
+      out << "| " << (row + 1)
+          << " | " << md_cell(mod_name)
+          << " | " << md_cell(version)
+          << " | " << (enabled ? "yes" : "no")
+          << " | " << md_cell(tags.join(", "))
+          << " | " << url_cell
+          << " |\n";
+    }
+  }
+
+  file.close();
+  Log::info("Exported mod list for deployer '" + deployer_name.toStdString() +
+            "' to '" + path.toStdString() + "'");
+  setStatusMessage(QString("Mod list exported to %1").arg(path), 4000);
 }
