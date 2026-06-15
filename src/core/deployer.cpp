@@ -956,6 +956,115 @@ std::vector<std::pair<sfs::path, int>> Deployer::getExternallyModifiedFiles(
   return modified_files;
 }
 
+// fork #53: deployment integrity verification
+Deployer::VerificationResult Deployer::verifyDeployment(
+  bool checksum,
+  std::optional<ProgressNode*> progress_node) const
+{
+  log_(Log::LOG_INFO,
+       std::format("Deployer '{}': Verifying deployment integrity{}...",
+                   name_,
+                   checksum ? " (with checksums)" : ""));
+
+  VerificationResult result;
+  result.used_checksums = checksum && deploy_mode_ == copy;
+
+  const auto deployed_files = loadDeployedFiles();
+
+  if(progress_node)
+    (*progress_node)->setTotalSteps(deployed_files.size());
+
+  for(const auto& [path, mod_id] : deployed_files)
+  {
+    if(progress_node)
+      (*progress_node)->advance();
+
+    const auto target_path = dest_path_ / path;
+    const auto source_path = source_path_ / std::to_string(mod_id) / path;
+
+    // Directories are recorded but are not deployed as links/copies; nothing to verify.
+    if(sfs::exists(source_path) && sfs::is_directory(source_path))
+      continue;
+
+    result.total_checked++;
+
+    // The deployed file must still be present in the target.
+    if(!pu::exists(target_path))
+    {
+      result.missing.push_back(path);
+      continue;
+    }
+
+    // Without a staged source we cannot confirm the link/contents are still correct.
+    if(!modPathExists(mod_id) || !sfs::exists(source_path))
+    {
+      result.source_missing.push_back(path);
+      continue;
+    }
+
+    if(deploy_mode_ == hard_link)
+    {
+      // A symlink where a hard link is expected is the wrong link type.
+      if(sfs::is_symlink(target_path))
+        result.not_a_link.push_back(path);
+      // Hard links must still share an inode with the staged source.
+      else if(!sfs::equivalent(source_path, target_path))
+        result.modified.push_back(path);
+    }
+    else if(deploy_mode_ == sym_link)
+    {
+      // A real file where a symlink is expected is the wrong link type.
+      if(!sfs::is_symlink(target_path))
+        result.not_a_link.push_back(path);
+      // Symlinks must still point at the staged source.
+      else if(sfs::read_symlink(target_path) != source_path)
+        result.modified.push_back(path);
+    }
+    else // copy
+    {
+      // For copies, existence (checked above) is enough unless checksums are requested.
+      if(checksum)
+      {
+        bool differs = false;
+        std::error_code ec;
+        const auto target_size = sfs::file_size(target_path, ec);
+        const auto source_size = sfs::file_size(source_path, ec);
+        if(ec || target_size != source_size)
+          differs = true;
+        else
+        {
+          // Size matches: compare contents byte-by-byte (simple content hash equivalent).
+          std::ifstream target_file(target_path, std::ios::binary);
+          std::ifstream source_file(source_path, std::ios::binary);
+          if(!target_file.is_open() || !source_file.is_open())
+            differs = true;
+          else
+            differs = !std::equal(std::istreambuf_iterator<char>(target_file),
+                                  std::istreambuf_iterator<char>(),
+                                  std::istreambuf_iterator<char>(source_file));
+        }
+        if(differs)
+          result.modified.push_back(path);
+      }
+    }
+  }
+
+  if(result.isClean())
+    log_(Log::LOG_INFO,
+         std::format("Verified {} files: deployment is intact", result.total_checked));
+  else
+    log_(Log::LOG_WARNING,
+         std::format("Verification of {} files found drift: {} missing, {} modified, "
+                     "{} wrong link type, {} with missing source",
+                     result.total_checked,
+                     result.missing.size(),
+                     result.modified.size(),
+                     result.not_a_link.size(),
+                     result.source_missing.size()));
+
+  return result;
+}
+
 void Deployer::keepOrRevertFileModifications(const FileChangeChoices& changes_to_keep)
 {
   if(deploy_mode_ == copy)

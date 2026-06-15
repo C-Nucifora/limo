@@ -180,6 +180,8 @@ private:
   QAction* remove_deployer_action_;
   /*! \brief Action used to edit the current \ref Deployer "deployer". */
   QAction* edit_deployer_action_;
+  // fork #53: action used to verify deployment integrity for the current deployer.
+  QAction* verify_deployer_action_;
   /*! \brief Action used to add a new profile. */
   QAction* add_profile_action_;
   /*! \brief Action used to remove a profile. */
@@ -850,6 +852,8 @@ private slots:
   void on_actionmove_mod_triggered();
   /*! \brief Shows a dialog to edit the currently active Deployer. */
   void onEditDeployerMenuClicked();
+  // fork #53: runs deployment integrity verification for the current deployer and shows the result.
+  void onVerifyDeployerMenuClicked();
   /*! \brief Updates the currently active profile. */
   void on_profile_selection_box_currentIndexChanged(int index);
   /*! \brief Shows a dialog to add a new profile. */

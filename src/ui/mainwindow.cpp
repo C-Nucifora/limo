@@ -20,6 +20,7 @@
 #include "core/installer.h"
 #include "deployerlistview.h"
 #include "deploypreviewdialog.h" // fork feature #49: deploy dry-run / preview
+#include "deployverifydialog.h" // fork #53
 #include "editmanualtagsdialog.h"
 #include "enterapipwdialog.h"
 #include "modlistproxymodel.h"
@@ -1046,10 +1047,18 @@ void MainWindow::setupButtons()
   edit_deployer_action_->setText("Edit");
   edit_deployer_action_->setIcon(QIcon::fromTheme("editor"));
   connect(edit_deployer_action_, &QAction::triggered, this, &MainWindow::onEditDeployerMenuClicked);
+  // fork #53: deployment integrity verification action.
+  verify_deployer_action_ = new QAction(this);
+  verify_deployer_action_->setToolTip("Verify deployed files against staging");
+  verify_deployer_action_->setText("Verify Deployment");
+  verify_deployer_action_->setIcon(QIcon::fromTheme("emblem-checked"));
+  connect(
+    verify_deployer_action_, &QAction::triggered, this, &MainWindow::onVerifyDeployerMenuClicked);
   QMenu* deployer_menu = new QMenu(this);
   deployer_menu->addActions(QList<QAction*>{ add_deployer_action_,
                                              remove_deployer_action_,
                                              edit_deployer_action_,
+                                             verify_deployer_action_,
                                              ui->actionbrowse_deployer_files });
   ui->deployer_tool_button->setDefaultAction(add_deployer_action_);
   ui->deployer_tool_button->setMenu(deployer_menu);
@@ -2962,6 +2971,42 @@ void MainWindow::on_actionmove_mod_triggered()
 void MainWindow::onEditDeployerMenuClicked()
 {
   showEditDeployerDialog(currentDeployer());
+}
+
+// fork #53: run deployment integrity verification for the current deployer and show the result.
+void MainWindow::onVerifyDeployerMenuClicked()
+{
+  const int deployer = currentDeployer();
+  if(deployer < 0 || deployer >= static_cast<int>(deployer_source_paths_.size()) ||
+     deployer >= static_cast<int>(deployer_target_paths_.size()))
+    return;
+
+  const QString name =
+    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Name"))->text();
+  const QString deploy_mode_string =
+    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Mode"))->text();
+  Deployer::DeployMode deploy_mode = Deployer::hard_link;
+  if(deploy_mode_string == deploy_mode_sym_link)
+    deploy_mode = Deployer::sym_link;
+  else if(deploy_mode_string == deploy_mode_copy)
+    deploy_mode = Deployer::copy;
+
+  // verifyDeployment is read-only (no disk writes), so it is safe to run on a transient Deployer
+  // built from the displayed source/target paths and deploy mode.
+  try
+  {
+    Deployer verifier(deployer_source_paths_[deployer].toStdString(),
+                      deployer_target_paths_[deployer].toStdString(),
+                      name.toStdString(),
+                      deploy_mode);
+    const Deployer::VerificationResult result = verifier.verifyDeployment();
+    DeployVerifyDialog dialog(name, result, this);
+    dialog.exec();
+  }
+  catch(const std::exception& error)
+  {
+    onReceiveError("Error", QString("Could not verify deployment: ") + error.what());
+  }
 }
 
 void MainWindow::on_profile_selection_box_currentIndexChanged(int index)

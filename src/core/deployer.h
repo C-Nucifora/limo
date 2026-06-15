@@ -84,6 +84,36 @@ public:
     copy = 2
   };
 
+  // fork #53: deployment integrity verification
+  /*!
+   * \brief Holds the result of \ref verifyDeployment: lists of deployed files which have
+   * drifted from their staged source. All paths are relative to the deployment target.
+   */
+  struct VerificationResult
+  {
+    /*! \brief Files recorded as deployed which no longer exist in the target directory. */
+    std::vector<std::filesystem::path> missing;
+    /*! \brief Files whose contents/link no longer match the staged source. For hard_link mode:
+     *  no longer share an inode; for sym_link mode: point elsewhere; for copy mode (with
+     *  checksum enabled): size/mtime/hash mismatch. */
+    std::vector<std::filesystem::path> modified;
+    /*! \brief Files which exist but are of the wrong link type (e.g. a real file where a
+     *  symlink is expected, or a symlink where a hard link is expected). */
+    std::vector<std::filesystem::path> not_a_link;
+    /*! \brief Files whose staged source no longer exists, so they cannot be verified. */
+    std::vector<std::filesystem::path> source_missing;
+    /*! \brief Total number of recorded deployed files that were checked. */
+    int total_checked = 0;
+    /*! \brief Whether content checksums were used during verification. */
+    bool used_checksums = false;
+
+    /*! \brief Returns true iff no drift of any kind was detected. */
+    bool isClean() const
+    {
+      return missing.empty() && modified.empty() && not_a_link.empty() && source_missing.empty();
+    }
+  };
+
   /*!
    * \brief Constructor.
    * \param source_path Path to directory containing mods installed using the Installer class.
@@ -390,6 +420,24 @@ public:
                                          std::optional<ProgressNode*> progress_node = {}) const;
   /*! \brief If using hard_link deploy mode and links cannot be created: Switch to sym links. */
   virtual void fixInvalidLinkDeployMode();
+  // fork #53: deployment integrity verification
+  /*!
+   * \brief Audits every file recorded as deployed in the .lmmfiles record against the staging
+   * source, collecting any drift. Performs no disk writes.
+   *
+   * For each recorded file the check depends on the current DeployMode:
+   * - hard_link: target must exist, not be a symlink, and share an inode with the staged source
+   *   (std::filesystem::equivalent).
+   * - sym_link: target must exist, be a symlink, and resolve to the staged source path.
+   * - copy: target must exist; if \p checksum is true its size, mtime and a simple content hash
+   *   must match the staged source.
+   * \param checksum If true (copy mode only): compare file contents in addition to existence.
+   *  Off by default as it can be slow for large deployments.
+   * \param progress_node Used to inform about the current progress.
+   * \return A \ref VerificationResult describing all detected drift.
+   */
+  virtual VerificationResult verifyDeployment(bool checksum = false,
+                                              std::optional<ProgressNode*> progress_node = {}) const;
   /*!
    * \brief Returns the order in which the deploy function of different
    *  deployers should be called.
