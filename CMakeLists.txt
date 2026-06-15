@@ -138,6 +138,8 @@ set(CORE_SOURCES
         src/core/remote/modio_provider.cpp
         src/core/remote/modio_provider.h
         src/core/cryptography.h
+        src/core/importers/mo2importer.cpp
+        src/core/importers/mo2importer.h
         src/core/deployer.cpp
         src/core/deployer.h
         src/core/deployerfactory.cpp
@@ -346,6 +348,9 @@ set(PROJECT_SOURCES
         src/ui/importfromsteamdialog.cpp
         src/ui/importfromsteamdialog.h
         src/ui/importfromsteamdialog.ui
+        src/ui/importmo2dialog.cpp
+        src/ui/importmo2dialog.h
+        src/ui/importmo2dialog.ui
         src/ui/ipcclient.cpp
         src/ui/ipcclient.h
         src/ui/ipcserver.cpp

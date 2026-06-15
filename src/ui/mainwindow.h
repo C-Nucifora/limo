@@ -38,6 +38,8 @@
 #include "ui/editmanualtagsdialog.h"
 #include "ui/exportappconfigdialog.h"
 #include "ui/externalchangesdialog.h"
+#include "core/importers/mo2importer.h"
+#include "ui/importmo2dialog.h"
 #include "ui/ipcserver.h"
 #include "ui/listaction.h"
 #include "ui/rootlevelcondition.h"
@@ -250,6 +252,10 @@ private:
   std::unique_ptr<ExportAppConfigDialog> export_app_config_dialog_;
   /*! \brief Reusable dialog for showing changelogs. */
   std::unique_ptr<ChangelogDialog> changelog_dialog_;
+  /*! \brief Reusable dialog for importing a Mod Organizer 2 setup (fork #45). */
+  std::unique_ptr<ImportMo2Dialog> import_mo2_dialog_;
+  /*! \brief Menu action that opens import_mo2_dialog_. */
+  QAction* import_mo2_action_;
   /*! \brief Stores the index in ui->mod_list of a mod before being added to a group. */
   int last_mod_list_index_ = -1;
   /*!
@@ -331,6 +337,29 @@ private:
   bool show_log_on_warning_ = false;
   /*! \brief QLocalServer wrapper used for communication with other instances of Limo. */
   std::unique_ptr<IpcServer> ipc_server_;
+  /*!
+   * \brief Mods waiting to be registered after an MO2 import (fork #45).
+   * Each entry is one mod parsed from modlist.txt; entries are consumed front-to-back
+   * after the new Limo application has been created by addApplication.
+   */
+  std::vector<Mo2ModEntry> mo2_pending_mods_;
+  /*! \brief App id assigned to the newly created Limo application during MO2 import. */
+  int mo2_pending_app_id_ = -1;
+  /*!
+   * \brief Maps mod names to their disabled state for the in-progress MO2 import.
+   * Populated as mods are installed; consumed after all installs are done to apply
+   * setModStatus for each disabled mod.
+   */
+  std::map<std::string, bool> mo2_mod_enabled_map_;
+  /*!
+   * \brief Enabled state of the mod most recently submitted via installMod during an
+   * MO2 import.  Read by onModInstallationComplete to apply setModStatus if needed.
+   */
+  bool mo2_next_mod_enabled_ = true;
+  /*! \brief True while the MO2 import is in the final enabled-state pass. */
+  bool mo2_finalising_ = false;
+  /*! \brief App id being finalised during the MO2 import second pass. */
+  int mo2_app_id_finalising_ = -1;
   /*! \brief Timestamp representing the last time the progress bar has been updated. */
   std::chrono::time_point<std::chrono::high_resolution_clock> last_progress_update_time_;
   /*! \brief The last progress state. */
@@ -1228,6 +1257,23 @@ private slots:
    * \param command The shell command to run.
    */
   void onRunGameCommand(QString name, QString command);
+  /*!
+   * \brief Installs the next mod from mo2_pending_mods_ into mo2_pending_app_id_.
+   * Called from onGetModInfo and onMo2ModInstallationComplete during an import.
+   * Does nothing if mo2_pending_mods_ is empty.
+   */
+  void installNextMo2Mod();
+  /*! \brief Opens the MO2 import dialog (fork #45). */
+  void onImportMo2ActionTriggered();
+  /*!
+   * \brief Handles completion of the MO2 import dialog.
+   *
+   * Creates the Limo application and registers all parsed mods in load-order.
+   *
+   * \param app_info    Application configuration built by the dialog.
+   * \param parse_result Parsed mod list from the MO2 instance.
+   */
+  void onImportMo2DialogAccepted(EditApplicationInfo app_info, Mo2ParseResult parse_result);
   /*!
    * \brief Exports the current deployer's ordered mod list to a CSV or Markdown file.
    * Opens a save dialog and writes load order index, mod name, version, enabled state,

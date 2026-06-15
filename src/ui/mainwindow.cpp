@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "../core/deployerfactory.h"
+#include "../core/importers/mo2importer.h"
 #include "../core/log.h"
 #ifdef LIMO_WITH_LOOT
 #include "../core/lootdeployer.h"
@@ -832,6 +833,13 @@ void MainWindow::setupDialogs()
           &ExportAppConfigDialog::dialogClosed,
           this,
           &MainWindow::onBusyDialogAborted);
+
+  // fork #45: MO2 import dialog
+  import_mo2_dialog_ = std::make_unique<ImportMo2Dialog>(this);
+  connect(import_mo2_dialog_.get(),
+          &ImportMo2Dialog::importAccepted,
+          this,
+          &MainWindow::onImportMo2DialogAccepted);
 }
 
 void MainWindow::updateModList(const std::vector<ModInfo>& mod_info)
@@ -907,16 +915,20 @@ void MainWindow::setupButtons()
   sort_apps_alpha_action_->setText("Sort alphabetically");
   sort_apps_alpha_action_->setCheckable(true);
   sort_apps_alpha_action_->setIcon(QIcon::fromTheme("view-sort-ascending"));
-  connect(sort_apps_alpha_action_,
-          &QAction::toggled,
-          this,
-          &MainWindow::onSortAppsAlphaToggled);
+  connect(sort_apps_alpha_action_, &QAction::toggled, this, &MainWindow::onSortAppsAlphaToggled);
+  // fork #45: Import Mod Organizer 2 setup action
+  import_mo2_action_ = new QAction(this);
+  import_mo2_action_->setToolTip("Import a Mod Organizer 2 setup into Limo");
+  import_mo2_action_->setText("Import MO2");
+  import_mo2_action_->setIcon(QIcon::fromTheme("document-import"));
+  connect(import_mo2_action_, &QAction::triggered, this, &MainWindow::onImportMo2ActionTriggered);
   QMenu* app_menu = new QMenu(this);
   app_menu->addActions(QList<QAction*>{ run_app_action_,
                                         add_app_action_,
                                         remove_app_action_,
                                         edit_app_action_,
-                                        sort_apps_alpha_action_ });
+                                        sort_apps_alpha_action_,
+                                        import_mo2_action_ });
   ui->app_tool_button->setDefaultAction(run_app_action_);
   ui->app_tool_button->setMenu(app_menu);
 
@@ -1636,6 +1648,16 @@ void MainWindow::onGetModInfo(std::vector<ModInfo> mod_info)
 {
   updateModList(mod_info);
   mod_list_proxy_->updateRowCountLabel();
+
+  // fork #45: if we have a pending MO2 import and the new app is now selected,
+  // kick off the first mod installation.
+  if(!mo2_pending_mods_.empty() && mo2_pending_app_id_ >= 0 &&
+     currentApp() == mo2_pending_app_id_)
+  {
+    installNextMo2Mod();
+    return;
+  }
+
   if(!is_initialized_ && !mod_import_queue_.empty())
   {
     ImportModInfo info = mod_import_queue_.top();
@@ -1650,6 +1672,29 @@ void MainWindow::onGetModInfo(std::vector<ModInfo> mod_info)
 
 void MainWindow::onGetDeployerInfo(DeployerInfo depl_info)
 {
+  // fork #45: second pass — apply enabled/disabled states after MO2 import
+  if(mo2_finalising_ && mo2_app_id_finalising_ >= 0)
+  {
+    mo2_finalising_ = false;
+    const int app_id = mo2_app_id_finalising_;
+    mo2_app_id_finalising_ = -1;
+    // Map each imported mod's name to its id via the (now populated) mod list, then disable any
+    // mod that was disabled in the source MO2 profile. The simple deployer's traversal items don't
+    // carry mod names, so the mod list is the reliable name->id source.
+    for(const auto& info : mod_list_model_->getModInfo())
+    {
+      auto it = mo2_mod_enabled_map_.find(info.mod.name);
+      if(it != mo2_mod_enabled_map_.end() && !it->second)
+        emit setModStatus(app_id, 0, info.mod.id, false);
+    }
+    mo2_mod_enabled_map_.clear();
+    onCompletedOperations("MO2 import complete");
+    emit getModInfo(app_id);
+    emit getDeployerInfo(app_id, 0);
+    setBusyStatus(false);
+    return;
+  }
+
   setWindowTitle(ui->app_selection_box->currentText() + " - Limo");
   ui->actionremove_from_deployer->setVisible(!depl_info.is_autonomous);
   ui->actionget_file_conflicts->setVisible(depl_info.supports_file_conflicts);
@@ -3803,6 +3848,20 @@ void MainWindow::on_actionSuppress_Update_triggered()
 
 void MainWindow::onModInstallationComplete(bool success)
 {
+  // fork #45: continue MO2 import chain if active
+  if(!mo2_pending_mods_.empty() && mo2_pending_app_id_ >= 0)
+  {
+    if(!success)
+    {
+      Log::error("MO2 import: mod installation failed — aborting remaining imports");
+      mo2_pending_mods_.clear();
+      mo2_pending_app_id_ = -1;
+    }
+    else
+      installNextMo2Mod();
+    return;
+  }
+
   onCompletedOperations(success ? "Installation complete" : "Installation failed");
   if(!mod_import_queue_.empty())
     importMod();
@@ -3991,6 +4050,117 @@ void MainWindow::onSortAppsAlphaToggled(bool checked)
     .setValue("sort_apps_alphabetically", sort_apps_alphabetically_);
   // Rebuild the combo box in sorted or original order.
   emit getApplicationNames(false);
+}
+
+// ---------------------------------------------------------------------------
+// MO2 import  (fork #45 / limo-app/limo#92)
+// ---------------------------------------------------------------------------
+
+void MainWindow::installNextMo2Mod()
+{
+  if(mo2_pending_mods_.empty())
+  {
+    // All mods installed — apply disabled states in a second pass.
+    // Use getDeployerInfo to retrieve the load order with mod_ids, then
+    // call setModStatus for any mod that should be disabled.
+    // We re-use onGetDeployerInfo to do this, but mark the import finished first
+    // so that the normal UI refresh path takes over.
+    const int app_id = mo2_pending_app_id_;
+    mo2_pending_app_id_ = -1;
+
+    // Apply enabled/disabled states for each mod.
+    // After installMod, mods are always added as enabled.  We now iterate
+    // through mo2_mod_enabled_map_ and call setModStatus(false) for those
+    // that should be disabled.  We emit getModInfo to get the current mod_ids.
+    //
+    // Since setModStatus / getModInfo are async, we emit everything now.
+    // The ApplicationManager processes them sequentially in the worker thread.
+    // After all setModStatus calls, the UI is refreshed by the final
+    // getModInfo / getDeployerInfo pair.
+    emit getModInfo(app_id); // triggers onGetModInfo -> updates list
+    // Actual setModStatus calls are emitted from onGetModInfoForMo2Finalise,
+    // which is connected below when pending is cleared.
+    Log::info("MO2 import: all mods installed; applying enabled/disabled states");
+
+    // Quick path: emit setModStatus directly — we look up mod_ids from the
+    // deployer list.  The load order (deployer 0) maps index -> mod_id.
+    // We saved (name -> enabled) in mo2_mod_enabled_map_ during install.
+    // We cannot do this here because we don't yet have the mod_ids; defer to
+    // the next onGetDeployerInfo call by storing a pending flag.
+    mo2_finalising_ = true;
+    mo2_app_id_finalising_ = app_id;
+    emit getDeployerInfo(app_id, 0);
+    return;
+  }
+
+  const Mo2ModEntry entry = mo2_pending_mods_.front();
+  mo2_pending_mods_.erase(mo2_pending_mods_.begin());
+
+  const int remaining = static_cast<int>(mo2_pending_mods_.size());
+  setStatusMessage(
+    QString("Importing mod '%1' (%2 remaining)")
+      .arg(QString::fromStdString(entry.name))
+      .arg(remaining));
+  Log::info(std::format("MO2 import: installing '{}' ({} remaining)",
+                        entry.name, remaining));
+
+  ImportModInfo info;
+  info.app_id = mo2_pending_app_id_;
+  info.action_type = ImportModInfo::ActionType::install;
+  info.current_path = entry.source_path;
+  info.local_source = entry.source_path;
+  info.name = entry.name;
+  info.version = "";
+  info.installer = Installer::SIMPLEINSTALLER;
+  info.installer_flags = 0;
+  info.root_level = 0;
+  info.deployers = { 0 }; // deployer index 0 = the Simple Deployer created during import
+
+  // Track enabled state for final pass
+  mo2_mod_enabled_map_[entry.name] = entry.enabled;
+
+  setBusyStatus(true);
+  emit installMod(mo2_pending_app_id_, info);
+}
+
+void MainWindow::onImportMo2ActionTriggered()
+{
+  import_mo2_dialog_->init();
+  import_mo2_dialog_->show();
+}
+
+void MainWindow::onImportMo2DialogAccepted(EditApplicationInfo app_info,
+                                           Mo2ParseResult parse_result)
+{
+  if(parse_result.mods.empty())
+    Log::warning("MO2 import: no mods found — creating empty application");
+
+  // Create the staging directory if it doesn't exist yet
+  const sfs::path staging_dir(app_info.staging_dir);
+  std::error_code ec;
+  sfs::create_directories(staging_dir, ec);
+  if(ec)
+  {
+    Log::error(std::format("MO2 import: cannot create staging directory '{}': {}",
+                           staging_dir.string(), ec.message()));
+    return;
+  }
+
+  Log::info(std::format("MO2 import: importing {} mods from profile '{}'",
+                        parse_result.mods.size(), parse_result.profile_name));
+
+  // Store the mod list — consumed one entry at a time by installNextMo2Mod()
+  mo2_pending_mods_ = std::move(parse_result.mods);
+  mo2_mod_enabled_map_.clear();
+  mo2_finalising_ = false;
+
+  // The new app will occupy index == current count (0-based)
+  mo2_pending_app_id_ = ui->app_selection_box->count();
+
+  setBusyStatus(true);
+  setStatusMessage("Creating MO2 application");
+  emit addApplication(app_info);
+  emit getApplicationNames(true);
 }
 
 // Fork issue #7: Export the current deployer's ordered mod list to CSV or Markdown.
