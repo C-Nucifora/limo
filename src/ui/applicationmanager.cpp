@@ -1198,3 +1198,58 @@ void ApplicationManager::applyModAction(int app_id, int deployer, int action, in
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
     handleExceptions<&ModdedApplication::applyModAction>(app_id, deployer, action, mod_id);
 }
+
+// ---- Headless CLI helpers (fork #44) ----------------------------------------
+
+std::vector<std::string> ApplicationManager::getCliDeployerNames(int app_id) const
+{
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return {};
+  return apps_[app_id].getDeployerNames();
+}
+
+std::vector<ModInfo> ApplicationManager::getCliModInfo(int app_id) const
+{
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return {};
+  return apps_[app_id].getModInfo();
+}
+
+std::vector<std::string> ApplicationManager::getCliProfileNames(int app_id) const
+{
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return {};
+  return apps_[app_id].getProfileNames();
+}
+
+AppInfo ApplicationManager::getCliAppInfo(int app_id) const
+{
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return {};
+  return apps_[app_id].getAppInfo();
+}
+
+std::vector<std::tuple<int, bool>> ApplicationManager::getCliLoadorder(int app_id,
+                                                                        int deployer) const
+{
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return {};
+  if(deployer < 0 || deployer >= apps_[app_id].getNumDeployers())
+    return {};
+  // getLoadorder now returns a DeployerEntry tree; flatten it to (mod id, enabled) pairs,
+  // skipping separators/root (fork #44 CLI; adapted to the tree-based loadorder API).
+  std::vector<std::tuple<int, bool>> result;
+  auto root = apps_[app_id].getLoadorder(deployer);
+  for(const auto& weak : root->getTraversalItems())
+  {
+    auto entry = weak.lock();
+    if(!entry || entry->isSeparator)
+      continue;
+    // Non-separator entries are DeployerModInfo (DeployerEntry isn't polymorphic, so cast statically).
+    auto mod = std::static_pointer_cast<DeployerModInfo>(entry);
+    result.emplace_back(mod->id, mod->enabled != 0);
+  }
+  return result;
+}
+
+// ---- End headless CLI helpers ------------------------------------------------
