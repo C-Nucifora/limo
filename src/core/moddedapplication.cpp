@@ -503,6 +503,9 @@ std::vector<ModInfo> ModdedApplication::getModInfo() const
     // fork #199: carry the user-assigned highlight colour with the mod info.
     if(mod_color_map_.contains(mod.id))
       mod_info.back().color = mod_color_map_.at(mod.id);
+    // fork #198: carry the user-assigned category with the mod info.
+    if(mod_category_map_.contains(mod.id))
+      mod_info.back().category = mod_category_map_.at(mod.id);
   }
   return mod_info;
 }
@@ -2464,6 +2467,29 @@ std::map<int, std::string> ModdedApplication::getModColors() const
   return mod_color_map_;
 }
 
+// fork #198: assign/clear a free-text category for a mod and persist it.
+void ModdedApplication::setModCategory(int mod_id, const std::string& category)
+{
+  auto iter = std::find_if(
+    installed_mods_.begin(), installed_mods_.end(), [mod_id](const Mod& m) { return m.id == mod_id; });
+  if(iter == installed_mods_.end())
+    return;
+  if(category.empty())
+    mod_category_map_.erase(mod_id);
+  else
+    mod_category_map_[mod_id] = category;
+  updateSettings(true);
+}
+
+// fork #198: return the category for a mod, or empty string if none.
+std::string ModdedApplication::getModCategory(int mod_id) const
+{
+  auto iter = mod_category_map_.find(mod_id);
+  if(iter == mod_category_map_.end())
+    return "";
+  return iter->second;
+}
+
 void ModdedApplication::pinModVersion(int mod_id)
 {
   auto iter = std::find_if(
@@ -2528,6 +2554,10 @@ void ModdedApplication::updateSettings(bool write)
     auto color_iter = mod_color_map_.find(installed_mods_[i].id);
     if(color_iter != mod_color_map_.end() && !color_iter->second.empty())
       json_settings_["installed_mods"][i]["color"] = color_iter->second;
+    // fork #198: persist the optional category alongside the mod entry.
+    auto category_iter = mod_category_map_.find(installed_mods_[i].id);
+    if(category_iter != mod_category_map_.end() && !category_iter->second.empty())
+      json_settings_["installed_mods"][i]["category"] = category_iter->second;
   }
 
   for(int depl = 0; depl < deployers_.size(); depl++)
@@ -2693,6 +2723,7 @@ void ModdedApplication::updateState(bool read)
   auto_tag_map_.clear();
   installer_map_.clear();
   mod_color_map_.clear(); // fork #199
+  mod_category_map_.clear(); // fork #198
   mod_rules_.clear();
   update_ignore_list_.clear();
 
@@ -2756,6 +2787,13 @@ void ModdedApplication::updateState(bool read)
       std::string color = installed_mods[i]["color"].asString();
       if(!color.empty())
         mod_color_map_[installed_mods[i]["id"].asInt()] = color;
+    }
+    // fork #198: restore the optional category; missing field means no category.
+    if(installed_mods[i].isMember("category"))
+    {
+      std::string category = installed_mods[i]["category"].asString();
+      if(!category.empty())
+        mod_category_map_[installed_mods[i]["id"].asInt()] = category;
     }
   }
   Json::Value groups = json_settings_["groups"];

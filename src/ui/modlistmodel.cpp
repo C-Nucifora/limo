@@ -53,6 +53,8 @@ QVariant ModListModel::headerData(int section, Qt::Orientation orientation, int 
       return QString("Tags");
     if(section == status_col)
       return QString("Status");
+    if(section == category_col) // fork #198
+      return QString("Category");
   }
   return QVariant();
 }
@@ -64,7 +66,7 @@ int ModListModel::rowCount(const QModelIndex& parent) const
 
 int ModListModel::columnCount(const QModelIndex& parent) const
 {
-  return 9;
+  return 10; // fork #198: +1 for the category column
 }
 
 QVariant ModListModel::data(const QModelIndex& index, int role) const
@@ -153,6 +155,8 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
           return QString("Local");
       }
     }
+    if(col == category_col) // fork #198
+      return QString::fromStdString(active_mods_[row].category);
   }
   if(role == Qt::ForegroundRole)
   {
@@ -267,6 +271,8 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
     return !active_mods_[row].mod.pinned_version.empty();
   if(role == mod_pinned_version_role)
     return active_mods_[row].mod.pinned_version.c_str();
+  if(role == category_role) // fork #198
+    return QString::fromStdString(active_mods_[row].category);
   return QVariant();
 }
 

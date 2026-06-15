@@ -909,6 +909,23 @@ std::map<int, std::string> ApplicationManager::getModColors(int app_id)
   return {};
 }
 
+// fork #198: pass-throughs for per-mod free-text categories.
+void ApplicationManager::setModCategory(int app_id, int mod_id, QString category)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::setModCategory>(app_id, mod_id, category.toStdString());
+}
+
+QString ApplicationManager::getModCategory(int app_id, int mod_id)
+{
+  if(!appIndexIsValid(app_id))
+    return {};
+  auto category = handleExceptions(&ModdedApplication::getModCategory, apps_[app_id], mod_id);
+  if(category)
+    return QString::fromStdString(*category);
+  return {};
+}
+
 // fork #145: pass-throughs for bulk prune of outdated mod archive versions.
 std::pair<std::vector<PrunableArchive>, unsigned long>
 ApplicationManager::getPrunableArchives(int app_id)
