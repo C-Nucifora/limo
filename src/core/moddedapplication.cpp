@@ -2332,6 +2332,99 @@ std::filesystem::path ModdedApplication::getDownloadDir() const
   return staging_dir_ / DOWNLOAD_DIR;
 }
 
+// fork #145: compute downloaded archives belonging to outdated mod versions.
+std::pair<std::vector<PrunableArchive>, unsigned long>
+ModdedApplication::getPrunableArchives() const
+{
+  std::vector<PrunableArchive> prunable;
+  unsigned long total_size = 0;
+
+  std::error_code ec;
+  const sfs::path download_dir = sfs::canonical(getDownloadDir(), ec);
+  if(ec)
+    return { prunable, total_size };
+
+  // Collect the local_source archives of every mod which is the active member of its group.
+  // These are the in-use archives and must never be pruned.
+  std::set<sfs::path> keep;
+  for(int group = 0; group < (int)groups_.size(); group++)
+  {
+    const int active_id = getActiveGroupMember(group);
+    auto iter = std::find_if(installed_mods_.begin(),
+                             installed_mods_.end(),
+                             [active_id](const Mod& m) { return m.id == active_id; });
+    if(iter == installed_mods_.end())
+      continue;
+    std::error_code keep_ec;
+    const sfs::path canon = sfs::canonical(iter->local_source, keep_ec);
+    if(!keep_ec)
+      keep.insert(canon);
+  }
+
+  // For every inactive group member, its local_source is an outdated version. Prune it only
+  // if it resides inside the download directory, still exists, and is not also an in-use
+  // archive for some other mod.
+  std::set<sfs::path> seen;
+  for(int group = 0; group < (int)groups_.size(); group++)
+  {
+    const int active_id = getActiveGroupMember(group);
+    for(const int mod_id : getGroupMembers(group))
+    {
+      if(mod_id == active_id)
+        continue;
+      auto iter = std::find_if(installed_mods_.begin(),
+                               installed_mods_.end(),
+                               [mod_id](const Mod& m) { return m.id == mod_id; });
+      if(iter == installed_mods_.end())
+        continue;
+
+      std::error_code mod_ec;
+      const sfs::path canon = sfs::canonical(iter->local_source, mod_ec);
+      if(mod_ec)
+        continue;
+      // Skip if this archive is in use, already queued, or not a regular file.
+      if(keep.contains(canon) || seen.contains(canon))
+        continue;
+      if(!sfs::is_regular_file(canon, mod_ec) || mod_ec)
+        continue;
+      // Only prune archives that actually live inside the download directory.
+      std::error_code rel_ec;
+      const sfs::path rel = sfs::relative(canon, download_dir, rel_ec);
+      if(rel_ec || rel.empty() || *rel.begin() == "..")
+        continue;
+
+      std::error_code size_ec;
+      const auto file_size = sfs::file_size(canon, size_ec);
+      if(size_ec)
+        continue;
+
+      seen.insert(canon);
+      prunable.push_back({ canon, static_cast<unsigned long>(file_size) });
+      total_size += static_cast<unsigned long>(file_size);
+    }
+  }
+
+  return { prunable, total_size };
+}
+
+// fork #145: delete the supplied archive files, swallowing all filesystem errors.
+int ModdedApplication::pruneArchives(const std::vector<std::filesystem::path>& paths) const
+{
+  int deleted = 0;
+  for(const auto& path : paths)
+  {
+    std::error_code ec;
+    if(sfs::remove(path, ec) && !ec)
+    {
+      deleted++;
+      Log::info("Pruned outdated archive '" + path.string() + "'.");
+    }
+    else if(ec)
+      Log::debug("Could not prune archive '" + path.string() + "': " + ec.message());
+  }
+  return deleted;
+}
+
 void ModdedApplication::setModNote(int mod_id, const std::string& note)
 {
   auto iter = std::find_if(

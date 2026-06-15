@@ -45,6 +45,9 @@
 #include <QPalette>
 #include <QPushButton>
 #include <QColorDialog> // fork #199
+#include <QDragEnterEvent> // fork #16
+#include <QDropEvent> // fork #16
+#include <QMimeData> // fork #16
 #include <QLabel> // fork #25
 #include <QVBoxLayout> // fork #25
 #include <QScrollBar>
@@ -261,6 +264,55 @@ void MainWindow::resizeEvent(QResizeEvent* event)
   updateEmptyStateOverlayGeometry();
 }
 
+// fork #16: returns the local archive files among the dropped URLs (by extension allowlist).
+static QList<QUrl> archiveUrlsFromMime(const QMimeData* mime)
+{
+  QList<QUrl> archives;
+  if(!mime || !mime->hasUrls())
+    return archives;
+  static const QStringList kExtensions{ ".zip", ".7z",  ".rar", ".tar", ".gz",
+                                        ".bz2", ".xz",  ".tgz", ".tbz", ".tbz2",
+                                        ".lzma", ".zst", ".archive", ".fomod" };
+  for(const QUrl& url : mime->urls())
+  {
+    if(!url.isLocalFile())
+      continue;
+    const QString lower = url.toLocalFile().toLower();
+    for(const QString& ext : kExtensions)
+    {
+      if(lower.endsWith(ext))
+      {
+        archives.append(url);
+        break;
+      }
+    }
+  }
+  return archives;
+}
+
+// fork #16: accept drags that contain at least one local archive file, but only when an
+// application is selected so the import target is well defined.
+void MainWindow::dragEnterEvent(QDragEnterEvent* event)
+{
+  if(currentApp() >= 0 && !archiveUrlsFromMime(event->mimeData()).isEmpty())
+    event->acceptProposedAction();
+  else
+    QMainWindow::dragEnterEvent(event);
+}
+
+// fork #16: install the dropped archive(s) via the normal local-import path.
+void MainWindow::dropEvent(QDropEvent* event)
+{
+  const QList<QUrl> archives = archiveUrlsFromMime(event->mimeData());
+  if(currentApp() < 0 || archives.isEmpty())
+  {
+    QMainWindow::dropEvent(event);
+    return;
+  }
+  event->acceptProposedAction();
+  onModAdded(archives);
+}
+
 void MainWindow::setCmdArgument(std::string argument)
 {
   if(argument.starts_with('\"'))
@@ -323,6 +375,8 @@ void MainWindow::setupConnections()
   qRegisterMetaType<FileChangeChoices>();
   qRegisterMetaType<Tool>();
   qRegisterMetaType<ImportModInfo>();
+  qRegisterMetaType<std::vector<PrunableArchive>>(); // fork #145
+  qRegisterMetaType<std::vector<std::filesystem::path>>(); // fork #145/#208
   qRegisterMetaType<std::vector<ModRule>>();
   qRegisterMetaType<std::vector<std::string>>();
   qRegisterMetaType<std::vector<std::vector<int>>>();
@@ -347,6 +401,14 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::commitChanges);
   connect(this, &MainWindow::deployMods,
           app_manager_, &ApplicationManager::deployMods);
+  connect(this, &MainWindow::forceRedeployMods, // fork #208
+          app_manager_, &ApplicationManager::forceRedeployMods);
+  connect(this, &MainWindow::requestPrunableArchives, // fork #145
+          app_manager_, &ApplicationManager::requestPrunableArchives);
+  connect(this, &MainWindow::pruneArchives, // fork #145
+          app_manager_, &ApplicationManager::pruneArchives);
+  connect(app_manager_, &ApplicationManager::sendPrunableArchives, // fork #145
+          this, &MainWindow::onPrunableArchives);
   connect(this, &MainWindow::addApplication,
           app_manager_, &ApplicationManager::addApplication);
   connect(this, &MainWindow::addDeployer,
@@ -835,6 +897,12 @@ void MainWindow::setupMenus()
   // fork #203: instance dashboard / overview.
   QAction* dashboard_action = tools_menu->addAction(tr("Instance Dashboard"));
   connect(dashboard_action, &QAction::triggered, this, &MainWindow::onShowInstanceDashboard);
+  // fork #208: force a clean purge + redeploy of all deployers.
+  QAction* redeploy_action = tools_menu->addAction(tr("Force Redeploy (purge && rebuild)"));
+  connect(redeploy_action, &QAction::triggered, this, &MainWindow::onForceRedeploy);
+  // fork #145: bulk-remove outdated downloaded archive versions.
+  QAction* prune_action = tools_menu->addAction(tr("Remove Old Archive Versions"));
+  connect(prune_action, &QAction::triggered, this, &MainWindow::onPruneArchives);
   // fork #1/#2: Add a "Collections" menu with Import/Export actions.
   QMenu* collections_menu = menuBar()->addMenu("Collections");
   QAction* import_collection_action = collections_menu->addAction("Import Collection");
@@ -4234,6 +4302,66 @@ void MainWindow::onShowInstanceDashboard()
                             .arg(stats.enabled_mods);
   InstanceDashboardDialog dialog(stats, this);
   dialog.exec();
+}
+
+void MainWindow::onForceRedeploy()
+{
+  // fork #208: purge then redeploy all deployers from scratch (repair drift/tampering).
+  if(currentApp() < 0)
+    return;
+  const auto reply = QMessageBox::question(
+    this,
+    "Force redeploy?",
+    "This will undeploy every deployer and then redeploy all enabled mods from scratch.\n\n"
+    "Use this to recover from drift or external tampering with the deployed files. Continue?",
+    QMessageBox::Yes | QMessageBox::No,
+    QMessageBox::No);
+  if(reply != QMessageBox::Yes)
+    return;
+  setStatusMessage("Redeploying mods");
+  setBusyStatus(true);
+  emit forceRedeployMods(currentApp());
+}
+
+void MainWindow::onPruneArchives()
+{
+  // fork #145: ask the worker for the list of prunable archives; answered by onPrunableArchives.
+  if(currentApp() < 0)
+    return;
+  setStatusMessage("Scanning for old archive versions");
+  setBusyStatus(true);
+  emit requestPrunableArchives(currentApp());
+}
+
+void MainWindow::onPrunableArchives(std::vector<PrunableArchive> archives,
+                                    unsigned long total_size,
+                                    int app_id)
+{
+  // fork #145: show the confirmation dialog and, if accepted, delete the listed archives.
+  setBusyStatus(false);
+  if(app_id != currentApp())
+    return;
+  if(archives.empty())
+  {
+    setStatusMessage("No old archive versions to remove", 3000);
+    QMessageBox::information(this,
+                             "Remove Old Archive Versions",
+                             "No outdated archive versions were found to remove.");
+    return;
+  }
+  std::vector<std::pair<std::filesystem::path, unsigned long>> items;
+  items.reserve(archives.size());
+  for(const auto& archive : archives)
+    items.emplace_back(archive.path, archive.size);
+  PruneVersionsDialog dialog(items, total_size, this);
+  if(dialog.exec() != QDialog::Accepted)
+    return;
+  std::vector<std::filesystem::path> paths;
+  paths.reserve(archives.size());
+  for(const auto& archive : archives)
+    paths.push_back(archive.path);
+  emit pruneArchives(currentApp(), paths);
+  setStatusMessage("Old archive versions removed", 3000);
 }
 
 void MainWindow::onEditModRules()

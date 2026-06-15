@@ -582,6 +582,25 @@ void ApplicationManager::unDeployMods(int app_id)
   emit completedOperations("Mods undeployed");
 }
 
+// fork #208: purge (undeploy) every deployer then deploy from scratch, to recover from
+// drift or external tampering with the deployed links/files.
+void ApplicationManager::forceRedeployMods(int app_id)
+{
+  if(appIndexIsValid(app_id))
+  {
+    handleExceptions<&ModdedApplication::unDeployMods>(app_id);
+    auto ret_val = handleExceptions(&ModdedApplication::verifyDeployerDirectories, apps_[app_id]);
+    if(ret_val)
+    {
+      auto [code, path, message] = *ret_val;
+      handleAddDeployerError(code, apps_[app_id].getStagingDir(), path, message);
+      if(code == 0)
+        handleExceptions<&ModdedApplication::deployMods>(app_id);
+    }
+  }
+  emit completedOperations("Mods redeployed");
+}
+
 void ApplicationManager::unDeployModsFor(int app_id, std::vector<int> deployer_ids)
 {
   if(appIndexIsValid(app_id))
@@ -888,6 +907,31 @@ std::map<int, std::string> ApplicationManager::getModColors(int app_id)
   if(colors)
     return *colors;
   return {};
+}
+
+// fork #145: pass-throughs for bulk prune of outdated mod archive versions.
+std::pair<std::vector<PrunableArchive>, unsigned long>
+ApplicationManager::getPrunableArchives(int app_id)
+{
+  if(!appIndexIsValid(app_id))
+    return {};
+  auto result = handleExceptions(&ModdedApplication::getPrunableArchives, apps_[app_id]);
+  if(result)
+    return *result;
+  return {};
+}
+
+void ApplicationManager::requestPrunableArchives(int app_id)
+{
+  auto [archives, total] = getPrunableArchives(app_id);
+  emit sendPrunableArchives(archives, total, app_id);
+}
+
+void ApplicationManager::pruneArchives(int app_id,
+                                       const std::vector<std::filesystem::path>& paths)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::pruneArchives>(app_id, paths);
 }
 
 void ApplicationManager::setModPinned(int app_id, int mod_id, bool pinned)

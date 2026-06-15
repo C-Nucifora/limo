@@ -28,6 +28,18 @@
 #include <vector>
 
 
+// fork #145: describes one stale archive file that may be pruned.
+/*!
+ * \brief Describes a single downloaded archive that is eligible for pruning.
+ */
+struct PrunableArchive
+{
+  /*! \brief Absolute path to the archive file on disk. */
+  std::filesystem::path path;
+  /*! \brief Size of the archive in bytes. */
+  unsigned long size = 0;
+};
+
 /*!
  * \brief Contains all mods and Deployer objects used for one target application.
  * Stores internal state in a JSON file.
@@ -761,6 +773,24 @@ public:
    * \return The download path.
    */
   std::filesystem::path getDownloadDir() const;
+  // fork #145: bulk prune of outdated mod archive versions.
+  /*!
+   * \brief Computes the set of downloaded archive files which are safe to delete because
+   * they correspond to outdated versions of installed mods. For every group (version history)
+   * the active member's local_source archive is kept; the local_source archives of all
+   * inactive group members are considered prunable. Only files which lie inside the download
+   * directory and still exist on disk are returned. The currently-installed (active) archive
+   * of any mod is never returned. Filesystem errors are swallowed via std::error_code.
+   * \return A pair of: the list of prunable archives and the total size in bytes.
+   */
+  std::pair<std::vector<PrunableArchive>, unsigned long> getPrunableArchives() const;
+  /*!
+   * \brief Deletes every file in the given list. Uses std::error_code and never throws;
+   * files which are missing or locked are simply skipped.
+   * \param paths Archive paths to delete.
+   * \return The number of files successfully deleted.
+   */
+  int pruneArchives(const std::vector<std::filesystem::path>& paths) const;
   /*!
    * \brief Sets the user note for the given mod. An empty string clears the note.
    * Notes are not profile-scoped and are persisted in lmm_mods.json.

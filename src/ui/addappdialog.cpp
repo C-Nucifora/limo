@@ -26,7 +26,11 @@ AddAppDialog::AddAppDialog(bool is_flatpak, QWidget* parent) :
   ui->import_checkbox->setVisible(false);
   ui->import_tags_checkbox->setVisible(false);
   enableOkButton(false);
-  ui->path_field->setValidationMode(ValidatingLineEdit::VALID_PATH_EXISTS);
+  // fork #78: a staging dir that does not exist yet but is safely creatable (single
+  // missing parent) counts as valid; it is materialised once on accept, not while typing.
+  ui->path_field->setValidationMode(ValidatingLineEdit::VALID_CUSTOM);
+  ui->path_field->setCustomValidator([this](QString p)
+                                     { return pathExistsOrCreatable(p); });
   dialog_completed_ = false;
   import_from_steam_dialog_ = std::make_unique<ImportFromSteamDialog>();
   connect(import_from_steam_dialog_.get(),
@@ -99,11 +103,51 @@ void AddAppDialog::enableOkButton(bool state)
 
 bool AddAppDialog::pathIsValid()
 {
-  QString path = ui->path_field->text();
-  if(path.isEmpty())
+  return pathExistsOrCreatable(ui->path_field->text());
+}
+
+bool AddAppDialog::pathExistsOrCreatable(const QString& text) const // fork #78
+{
+  if(text.isEmpty())
     return false;
   std::error_code ec;
-  return std::filesystem::exists(path.toStdString(), ec);
+  const sfs::path path = text.toStdString();
+  if(sfs::exists(path, ec))
+    return true;
+  // Editing an existing app requires a real, existing staging dir.
+  if(edit_mode_)
+    return false;
+  // Safety: a non-existent staging dir is only acceptable when the immediate parent
+  // already exists, or exactly one parent level is missing ("single missing parent").
+  // If more than one ancestor is missing the path most likely contains a typo, so it
+  // stays invalid rather than being silently materialised as a deep directory tree.
+  const sfs::path parent = path.parent_path();
+  if(parent.empty())
+    return false;
+  return sfs::exists(parent, ec) || sfs::exists(parent.parent_path(), ec);
+}
+
+bool AddAppDialog::createStagingDirIfNeeded() // fork #78
+{
+  if(edit_mode_)
+    return true;
+  const QString text = ui->path_field->text();
+  std::error_code ec;
+  const sfs::path path = text.toStdString();
+  if(text.isEmpty() || sfs::exists(path, ec))
+    return true;
+  if(!pathExistsOrCreatable(text))
+    return false;
+  // create_directories fills in the (at most one) missing parent and the staging dir.
+  sfs::create_directories(path, ec);
+  if(ec)
+  {
+    Log::error("Failed to create staging directory at: " + path.string() +
+               ". Error was: " + ec.message());
+    return false;
+  }
+  Log::info("Created staging directory at: " + path.string());
+  return true;
 }
 
 bool AddAppDialog::iconIsValid(const QString& path)
@@ -519,6 +563,16 @@ void AddAppDialog::on_buttonBox_accepted()
 {
   if(dialog_completed_)
     return;
+  // fork #78: materialise a not-yet-existing (but safely creatable) staging directory now,
+  // once, rather than while the user is still typing the path.
+  if(!createStagingDirIfNeeded())
+  {
+    QMessageBox::warning(this,
+                         "Could not create staging directory",
+                         "The staging directory could not be created. Please choose a "
+                         "different location.");
+    return;
+  }
   dialog_completed_ = true;
   EditApplicationInfo info;
   info.name = ui->name_field->text().toStdString();
