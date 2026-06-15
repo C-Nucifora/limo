@@ -4,6 +4,7 @@
 
 class DeployerEntryVectorMatcher : public Catch::Matchers::MatcherBase<std::vector<std::weak_ptr<DeployerEntry>>> {
     std::vector<std::weak_ptr<DeployerEntry>> m_expected;
+    mutable std::string m_actual_desc;
 public:
     DeployerEntryVectorMatcher(std::vector<std::weak_ptr<DeployerEntry>> const& expected)
         : m_expected(expected) {}

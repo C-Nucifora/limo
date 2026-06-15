@@ -26,28 +26,36 @@ void resetOpenMwFiles()
 
 TEST_CASE("State is read", "[openmw]")
 {
-  auto expectedEntry0 = std::make_shared<DeployerModInfo>(false, "mod 0", "", -1, true);
-  auto expectedEntry1 = std::make_shared<DeployerModInfo>(false, "mod 1", "", -1, true);
-  auto expectedEntry2 = std::make_shared<DeployerModInfo>(false, "mod 2", "", -1, true);
-  auto expectedEntry3 = std::make_shared<DeployerModInfo>(false, "mod 3", "", -1, true);
-  auto expectedEntry4 = std::make_shared<DeployerModInfo>(false, "mod 4", "", -1, true);
-  auto expectedEntry5 = std::make_shared<DeployerModInfo>(false, "mod 5", "", -1, true);
-  auto expectedEntry6 = std::make_shared<DeployerModInfo>(false, "mod 6", "", -1, true);
-  auto expectedEntry7 = std::make_shared<DeployerModInfo>(false, "mod 7", "", -1, true);
+  auto root = std::make_shared<DeployerEntry>(true, "Root", -2);
+  // Archive deployer entries (Morrowind.bsa, a.bsa, b.bsa)
+  auto archiveEntry0 = std::make_shared<DeployerModInfo>(false, "Morrowind.bsa", "", -1, true);
+  auto archiveEntry1 = std::make_shared<DeployerModInfo>(false, "a.bsa", "", -1, true);
+  auto archiveEntry2 = std::make_shared<DeployerModInfo>(false, "b.bsa", "", -1, true);
+  // Plugin deployer entries (reordered to mod_names order)
+  auto pluginEntry0 = std::make_shared<DeployerModInfo>(false, "Morrowind.esm", "", -1, true);
+  auto pluginEntry1 = std::make_shared<DeployerModInfo>(false, "f.omwgame", "", -1, true);
+  auto pluginEntry2 = std::make_shared<DeployerModInfo>(false, "c.esp", "", -1, true);
+  auto pluginEntry3 = std::make_shared<DeployerModInfo>(false, "d.EsP", "", -1, true);
+  auto pluginEntry4 = std::make_shared<DeployerModInfo>(false, "a.esp", "", -1, true);
+  auto pluginEntry5 = std::make_shared<DeployerModInfo>(false, "e.omwaddon", "", -1, true);
+  auto pluginEntry6 = std::make_shared<DeployerModInfo>(false, "g.omwscripts", "", -1, true);
+  auto pluginEntry7 = std::make_shared<DeployerModInfo>(false, "h.omwscripts", "", -1, true);
   std::vector<std::weak_ptr<DeployerEntry>> expectedEntries0 = {
-    expectedEntry0,
-    expectedEntry1,
-    expectedEntry2,
+    root,
+    archiveEntry0,
+    archiveEntry1,
+    archiveEntry2,
   };
   std::vector<std::weak_ptr<DeployerEntry>> expectedEntries1 = {
-    expectedEntry0,
-    expectedEntry1,
-    expectedEntry2,
-    expectedEntry3,
-    expectedEntry4,
-    expectedEntry5,
-    expectedEntry6,
-    expectedEntry7,
+    root,
+    pluginEntry0,
+    pluginEntry1,
+    pluginEntry2,
+    pluginEntry3,
+    pluginEntry4,
+    pluginEntry5,
+    pluginEntry6,
+    pluginEntry7,
   };
 
   resetOpenMwFiles();
@@ -56,7 +64,7 @@ TEST_CASE("State is read", "[openmw]")
     DATA_DIR / "target" / "openmw" / "source", DATA_DIR / "target" / "openmw" / "target", "");
   REQUIRE(a_depl.getNumMods() == 3);
   REQUIRE_THAT(a_depl.getModNames(),
-               Catch::Matchers::Equals(std::vector<std::string>{ "Morrowind.bsa", "b.bsa", "a.bsa" }));
+               Catch::Matchers::Equals(std::vector<std::string>{ "Morrowind.bsa", "a.bsa", "b.bsa" }));
   REQUIRE_THAT(a_depl.getLoadorder()->getTraversalItems(),
               EqualsDeployerEntryVector(expectedEntries0));
   
@@ -164,9 +172,9 @@ TEST_CASE("Profiles are managed", "[openmw]")
   p_depl.setProfile(0);
   p_depl.applyModAction(1, 2);
   p_depl.applyModAction(1, 4);
-  verifyFilesAreEqual(DATA_DIR / "target" / "openmw" / "target" / "openmw.cfg", DATA_DIR / "target" / "openmw" / "0" / "openmw.cfg");
+  verifyFilesAreEqual(DATA_DIR / "target" / "openmw" / "target" / "openmw.cfg", DATA_DIR / "target" / "openmw" / "3" / "openmw.cfg");
   
   a_depl.setProfile(1);
   p_depl.setProfile(1);
-  verifyFilesAreEqual(DATA_DIR / "target" / "openmw" / "target" / "openmw.cfg", DATA_DIR / "target" / "openmw" / "1" / "openmw.cfg");
+  verifyFilesAreEqual(DATA_DIR / "target" / "openmw" / "target" / "openmw.cfg", DATA_DIR / "target" / "openmw" / "4" / "openmw.cfg");
 }
