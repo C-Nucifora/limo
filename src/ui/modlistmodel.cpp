@@ -298,9 +298,17 @@ void ModListModel::setModInfo(const std::vector<ModInfo>& mods)
   manual_tag_map_.clear();
   auto_tag_map_.clear();
   mod_size_strings_.clear();
+  mod_color_map_.clear(); // fork #199
   for(const auto& info : mods)
   {
     deployer_statuses_[info.mod.id] = info.deployer_statuses;
+    // fork #199: apply the per-mod highlight colour carried by ModInfo.
+    if(!info.color.empty())
+    {
+      QColor color(QString::fromStdString(info.color));
+      if(color.isValid())
+        mod_color_map_[info.mod.id] = color;
+    }
     if(info.group >= 0)
     {
       group_map_[info.mod.id] = info.group;

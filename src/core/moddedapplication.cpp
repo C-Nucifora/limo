@@ -500,6 +500,9 @@ std::vector<ModInfo> ModdedApplication::getModInfo() const
       is_active,
       manual_tag_map_.contains(mod.id) ? manual_tag_map_.at(mod.id) : std::vector<std::string>{},
       auto_tag_map_.contains(mod.id) ? auto_tag_map_.at(mod.id) : std::vector<std::string>{});
+    // fork #199: carry the user-assigned highlight colour with the mod info.
+    if(mod_color_map_.contains(mod.id))
+      mod_info.back().color = mod_color_map_.at(mod.id);
   }
   return mod_info;
 }

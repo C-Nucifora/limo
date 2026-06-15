@@ -41,6 +41,8 @@
 #include "settingsdialog.h"
 #include "tablecelldelegate.h"
 #include "ui/changelogdialog.h"
+#include "ui/modconfigeditordialog.h" // fork #200
+#include "ui/instancedashboarddialog.h" // fork #203
 #include "ui/editautotagsdialog.h"
 #include "ui/editmanualtagsdialog.h"
 #include "ui/exportappconfigdialog.h"
@@ -224,6 +226,12 @@ private:
   QAction* mod_rules_action_;
   /*! \brief Mod context action: open the manage-groups dialog. */
   QAction* manage_groups_action_;
+  /*! \brief fork #199: Mod context action: assign a highlight colour to the selected mod(s). */
+  QAction* set_color_action_;
+  /*! \brief fork #199: Mod context action: clear the highlight colour of the selected mod(s). */
+  QAction* clear_color_action_;
+  /*! \brief fork #200: Mod context action: open the per-mod config-file editor. */
+  QAction* edit_config_action_;
   /*! \brief Deployer context action: show per-file win/loss conflict detail for the selected mod. */
   QAction* conflict_detail_action_;
   /*! \brief Deployer context action (Witcher 3): merge conflicting WitcherScript files. */
@@ -1303,6 +1311,14 @@ private slots:
   void onPinModVersion();
   /*! \brief Removes the version pin from the currently selected mod. */
   void onUnpinModVersion();
+  /*! \brief fork #199: Assigns a highlight colour (via a colour picker) to the selected mod(s). */
+  void onSetModColor();
+  /*! \brief fork #199: Clears the highlight colour of the selected mod(s). */
+  void onClearModColor();
+  /*! \brief fork #200: Opens the per-mod config-file editor for the selected mod. */
+  void onEditModConfig();
+  /*! \brief fork #203: Builds an instance summary and shows the dashboard dialog. */
+  void onShowInstanceDashboard();
   /*! \brief Opens the ManageModRulesDialog for the currently selected mod. */
   void onEditModRules();
   /*!
@@ -1901,6 +1917,13 @@ signals:
    * \param note The new note text.
    */
   void setModNote(int app_id, int mod_id, QString note);
+  /*!
+   * \brief fork #199: Sets (or clears, when empty) the user-assigned highlight colour of a mod.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   * \param color #rrggbb hex string, or empty to clear.
+   */
+  void setModColor(int app_id, int mod_id, QString color);
   /*!
    * \brief Pins or unpins the version of a mod.
    * \param app_id Target app.
