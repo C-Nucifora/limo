@@ -7,6 +7,9 @@
 
 #include "casematchingdeployer.h"
 
+#include <array>
+#include <string>
+
 
 /*!
  * \brief Deployer for Cyberpunk 2077 mods which deploys into the game's root directory and
@@ -87,12 +90,59 @@ public:
     std::optional<ProgressNode*> progress_node = {}) override;
   /*! \brief Use base class implementation of overloaded function. */
   using CaseMatchingDeployer::deploy;
+  /*!
+   * \brief Adds a new mod to the load order, then warns if it introduces a dependency on a
+   * framework which no enabled mod installs.
+   * \param mod_id Id of the mod to be added.
+   * \param enabled Controls if the new mod will be enabled.
+   * \param update_conflicts Controls if the conflict groups are updated.
+   * \return True iff the mod was added (i.e. was not already present).
+   */
+  bool addMod(int mod_id, bool enabled = true, bool update_conflicts = true) override;
+  /*!
+   * \brief Determines which Cyberpunk 2077 modding frameworks are required by the currently
+   * enabled mods but installed by none of them.
+   *
+   * A mod implies a dependency on a framework purely by the kind of files it ships (see
+   * \ref cp2077_frameworks). A framework counts as installed when any enabled mod ships that
+   * framework's signature file. The check inspects the source files of all enabled mods, so it is
+   * independent of whether a deployment has been run.
+   * \return The display names of all required but missing frameworks, in a stable order.
+   */
+  std::vector<std::string> getMissingFrameworks() const;
 
 private:
   /*! \brief Relative directory under which ordering sensitive \c .archive files are placed. */
   static inline const std::filesystem::path ARCHIVE_MOD_DIR = "archive/pc/mod";
   /*! \brief File extension (lower case) of ordering sensitive archive files. */
   static inline const std::string ARCHIVE_EXTENSION = ".archive";
+
+  /*!
+   * \section cp2077_frameworks Framework detection
+   * Cyberpunk 2077 mods commonly depend on a small set of script/plugin frameworks. A mod does not
+   * declare these dependencies in a machine readable way, but the files it ships reliably imply
+   * them: a \c .reds script needs redscript, a TweakXL tweak needs TweakXL, an \c .xl file needs
+   * ArchiveXL, a plugin under \c red4ext/plugins/ needs RED4ext and a Cyber Engine Tweaks mod needs
+   * CET. Each framework is in turn detected as installed by a characteristic signature file it
+   * ships. Because ArchiveXL and TweakXL are themselves RED4ext plugins, the presence of either
+   * implies RED4ext is installed as well; \ref warnAboutMissingFrameworks accounts for this.
+   *
+   * \brief Identifiers for the supported Cyberpunk 2077 frameworks. \c NUM_FRAMEWORKS is the count
+   * and must remain last.
+   */
+  enum Framework
+  {
+    CET = 0,
+    RED4EXT,
+    REDSCRIPT,
+    ARCHIVEXL,
+    TWEAKXL,
+    NUM_FRAMEWORKS
+  };
+  /*! \brief Human readable names for each \ref Framework, indexed by the enum value. */
+  static inline const std::array<std::string, NUM_FRAMEWORKS> FRAMEWORK_NAMES = {
+    "Cyber Engine Tweaks (CET)", "RED4ext", "redscript", "ArchiveXL", "TweakXL"
+  };
 
   /*!
    * \brief Builds the destination keyed deployment maps for the given load order, applying the
@@ -135,4 +185,37 @@ private:
     const std::map<std::filesystem::path, int>& dest_files,
     const std::map<std::filesystem::path, std::filesystem::path>& source_paths,
     std::optional<ProgressNode*> progress_node = {}) const;
+  /*!
+   * \brief Records, for a single mod relative file path, which frameworks it requires and which it
+   * provides (installs). Either set is only ever turned on, never off, so results accumulate across
+   * all files of all enabled mods. See \ref cp2077_frameworks for the heuristics applied.
+   * \param relative_path Path relative to a mod's root directory (matched case insensitively).
+   * \param[in,out] required Per framework "is required by some enabled mod" flags.
+   * \param[in,out] installed Per framework "is installed by some enabled mod" flags.
+   */
+  void scanFile(const std::filesystem::path& relative_path,
+                std::array<bool, NUM_FRAMEWORKS>& required,
+                std::array<bool, NUM_FRAMEWORKS>& installed) const;
+  /*!
+   * \brief Computes the required and installed framework sets across the given mods.
+   * \param mod_ids Ids of the mods (typically the enabled ones) whose source files are scanned.
+   * \return A pair of (required, installed) per framework flag arrays.
+   */
+  std::pair<std::array<bool, NUM_FRAMEWORKS>, std::array<bool, NUM_FRAMEWORKS>>
+  scanFrameworks(const std::vector<int>& mod_ids) const;
+  /*!
+   * \brief Collects the ids of all currently enabled, non separator mods in load order.
+   *
+   * Not \c const because reading the load order tree may refresh its internal traversal cache; it
+   * performs no logically observable mutation.
+   * \return The enabled mod ids.
+   */
+  std::vector<int> getEnabledModIds();
+  /*!
+   * \brief Logs a warning for every framework that is required by one of the given mods but
+   * installed by none. Intended to be called whenever the set of enabled mods may have changed
+   * (after a deploy or after adding a mod).
+   * \param mod_ids Ids of the mods to check (typically the enabled ones).
+   */
+  void warnAboutMissingFrameworks(const std::vector<int>& mod_ids) const;
 };
