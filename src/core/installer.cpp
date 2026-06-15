@@ -90,10 +90,27 @@ void Installer::extract(const sfs::path& source_path,
                    extension.begin(),
                    [](unsigned char c) { return std::tolower(c); });
 #ifdef LIMO_WITH_UNRAR
-    if(extension == ".rar")
+    // A .fomod file is a FOMOD-packaged archive that may use any container
+    // format (zip/7z/rar). libarchive content-sniffs and usually handles it,
+    // but old Fallout 3 / New Vegas .fomod files are frequently RAR archives.
+    // Since the .fomod extension hides the real container type, fall back to
+    // the libunrar based extraction (as is done for .rar) when libarchive
+    // fails on a .fomod file.
+    if(extension == ".rar" || extension == ".fomod")
     {
       sfs::remove_all(dest_path);
-      extractRarArchive(source_path, dest_path);
+      try
+      {
+        extractRarArchive(source_path, dest_path);
+      }
+      catch(CompressionError& rar_error)
+      {
+        // Not a RAR either: re-raise the original libarchive error so the
+        // caller sees the more relevant message.
+        if(extension == ".fomod")
+          throw error;
+        throw rar_error;
+      }
     }
     else
       throw error;
@@ -470,6 +487,33 @@ std::tuple<int, std::string, std::string> Installer::detectInstallerSignature(
         return { root_level, head.string(), FOMODINSTALLER };
     }
   }
+
+  // No fomod/ModuleConfig.xml was found. Some old Fallout 3 / New Vegas
+  // .fomod files do not ship a ModuleConfig.xml and instead use a simple
+  // structure where the mod payload lives inside (or under a wrapper of) a
+  // "Data" directory and/or loose plugin files. In that case fall back to a
+  // simple install, choosing the root level so the wrapping directory (if any)
+  // is stripped and the "Data" folder / plugins end up at the mod root.
+  static const std::regex plugin_regex(R"(.*\.(esp|esm|esl|bsa|ba2)$)",
+                                       std::regex::icase);
+  for(int root_level = 0; root_level < std::max(max_length, 1); root_level++)
+  {
+    for(const auto& [file, is_dir] : files)
+    {
+      const auto [head, tail] = pu::removePathComponents(file, root_level);
+      // A "Data" directory at this level, or a plugin/archive file directly at
+      // this level, marks a valid simple-install root.
+      const std::string first = tail.begin() == tail.end()
+                                  ? std::string{}
+                                  : tail.begin()->string();
+      const bool data_dir_here = pu::getPathLength(tail) == 1 && str_equals("Data", first);
+      const bool plugin_here =
+        !is_dir && pu::getPathLength(tail) == 1 && std::regex_match(first, plugin_regex);
+      if(data_dir_here || plugin_here)
+        return { root_level, head.string(), SIMPLEINSTALLER };
+    }
+  }
+
   return { 0, {}, SIMPLEINSTALLER };
 }
 
