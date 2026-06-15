@@ -30,6 +30,12 @@ public:
   /*! \brief Deploys Cyberpunk 2077 mods with .archive load-order filename prefixing. */
   inline static const std::string CYBERPUNKDEPLOYER{ "Cyberpunk 2077 Deployer" };
   /*!
+   * \brief Presents merged mod files via a fuse-overlayfs union mount so the game
+   * directory is never physically modified (limo fork #110 / limo-app/limo#158, #77).
+   * Linux-only; requires fuse-overlayfs.
+   */
+  inline static const std::string OVERLAYDEPLOYER{ "Overlay Deployer" };
+  /*!
    * \brief Returns a vector of available deployer types.
    * \return The vector of deployer types.
    */
@@ -46,7 +52,8 @@ public:
 #endif
                                                                BG3DEPLOYER,
                                                                WITCHER3DEPLOYER,
-                                                               CYBERPUNKDEPLOYER };
+                                                               CYBERPUNKDEPLOYER,
+                                                               OVERLAYDEPLOYER };
   /*! \brief Maps deployer types to a description of what they do. */
   inline static const std::map<std::string, std::string> DEPLOYER_DESCRIPTIONS{
     { SIMPLEDEPLOYER,
@@ -83,7 +90,12 @@ public:
     { CYBERPUNKDEPLOYER,
       "Deploys Cyberpunk 2077 mods into the game's root directory. Prefixes each .archive file "
       "under archive/pc/mod/ with a load-order index so the game's first-wins archive order "
-      "matches Limo's load order. Target path should point to the Cyberpunk 2077 root directory." }
+      "matches Limo's load order. Target path should point to the Cyberpunk 2077 root directory." },
+    { OVERLAYDEPLOYER,
+      "Presents merged mod files to the game via a fuse-overlayfs union mount so the game "
+      "directory is never physically modified on disk. Requires fuse-overlayfs (Linux only). "
+      "Source path should point to the mod staging directory; target path is the game directory "
+      "used as the mount point." }
   };
   /*! \brief Maps deployer types to a bool indicating
    *  if the type refers to an autonomous deployer. */
@@ -96,7 +108,8 @@ public:
                                                                         { OPENMWARCHIVEDEPLOYER, true },
                                                                         { BG3DEPLOYER, true },
                                                                         { WITCHER3DEPLOYER, false },
-                                                                        { CYBERPUNKDEPLOYER, false } };
+                                                                        { CYBERPUNKDEPLOYER, false },
+                                                                        { OVERLAYDEPLOYER, false } };
   /*!
    * \brief Constructs a unique pointer to a new deployer of given type.
    * \param type Deployer type to be constructed.

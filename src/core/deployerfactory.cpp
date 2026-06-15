@@ -2,6 +2,7 @@
 #include "bg3deployer.h"
 #include "casematchingdeployer.h"
 #include "cyberpunkdeployer.h"
+#include "overlaydeployer.h"
 #include "reversedeployer.h"
 #include "tw3deployer.h"
 #ifdef LIMO_WITH_LOOT
@@ -42,6 +43,8 @@ std::unique_ptr<Deployer> DeployerFactory::makeDeployer(const std::string& type,
     return std::make_unique<Tw3Deployer>(source_path, dest_path, name, deploy_mode);
   else if(type == CYBERPUNKDEPLOYER)
     return std::make_unique<CyberpunkDeployer>(source_path, dest_path, name, deploy_mode);
+  else if(type == OVERLAYDEPLOYER)
+    return std::make_unique<OverlayDeployer>(source_path, dest_path, name, deploy_mode);
   else
     throw std::runtime_error("Unknown deployer type \"" + type + "\"!");
 }

@@ -142,6 +142,8 @@ set(CORE_SOURCES
         src/core/deployer.h
         src/core/deployerfactory.cpp
         src/core/deployerfactory.h
+        src/core/overlaydeployer.cpp
+        src/core/overlaydeployer.h
         src/core/deployerinfo.h
         src/core/editapplicationinfo.h
         src/core/editautotagaction.cpp
