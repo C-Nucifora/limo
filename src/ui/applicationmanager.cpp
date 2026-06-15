@@ -890,6 +890,25 @@ std::map<int, std::string> ApplicationManager::getModColors(int app_id)
   return {};
 }
 
+// fork #145: pass-throughs for bulk prune of outdated mod archive versions.
+std::pair<std::vector<PrunableArchive>, unsigned long>
+ApplicationManager::getPrunableArchives(int app_id)
+{
+  if(!appIndexIsValid(app_id))
+    return {};
+  auto result = handleExceptions(&ModdedApplication::getPrunableArchives, apps_[app_id]);
+  if(result)
+    return *result;
+  return {};
+}
+
+void ApplicationManager::pruneArchives(int app_id,
+                                       const std::vector<std::filesystem::path>& paths)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::pruneArchives>(app_id, paths);
+}
+
 void ApplicationManager::setModPinned(int app_id, int mod_id, bool pinned)
 {
   if(!appIndexIsValid(app_id))

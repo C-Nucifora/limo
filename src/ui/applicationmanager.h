@@ -1358,6 +1358,21 @@ public slots:
    * \return Map of mod id to hex colour string. Empty if the app id is invalid.
    */
   std::map<int, std::string> getModColors(int app_id);
+  // fork #145: bulk prune of outdated mod archive versions.
+  /*!
+   * \brief Returns the downloaded archives belonging to outdated mod versions which can be
+   * safely deleted, together with the total size to be freed in bytes.
+   * \param app_id Target app.
+   * \return A pair of: the list of prunable archives and the total freed size in bytes. Empty
+   * if the app id is invalid.
+   */
+  std::pair<std::vector<PrunableArchive>, unsigned long> getPrunableArchives(int app_id);
+  /*!
+   * \brief Deletes the supplied archive files. Missing or locked files are skipped.
+   * \param app_id Target app.
+   * \param paths Archive paths to delete.
+   */
+  void pruneArchives(int app_id, const std::vector<std::filesystem::path>& paths);
   /*!
    * \brief Pins or unpins the version of a mod.
    * \param app_id Target app.
