@@ -1,6 +1,8 @@
 #pragma once
 
-#define BASE_PATH sfs::path("@PROJECT_SOURCE_DIR@/tests")
+// FIXTURE_DIR is the immutable source-tree copy of the test data.
+// It is set at configure time and must never be written to.
+#define FIXTURE_DIR sfs::path("@PROJECT_SOURCE_DIR@/tests/data")
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
@@ -9,7 +11,11 @@
 namespace sfs = std::filesystem;
 
 
-const sfs::path DATA_DIR = BASE_PATH / "data";
+// DATA_DIR points to a writable temp copy of FIXTURE_DIR, populated at startup.
+// Tests read and write only here; the source tree is never modified.
+extern sfs::path DATA_DIR;
+
+void initTestDataDir();
 void verifyDirsAreEqual(sfs::path first_dir, sfs::path second_dir, bool test_content = false);
 void resetAppDir();
 void resetStagingDir();

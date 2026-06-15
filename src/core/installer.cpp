@@ -4,10 +4,11 @@
 #include "pathutils.h"
 #include <archive.h>
 #include <archive_entry.h>
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <ranges>
 #include <regex>
-#include <cstdint>
 #ifdef LIMO_WITH_UNRAR
 #define _UNIX
 #include <dll.hpp>
