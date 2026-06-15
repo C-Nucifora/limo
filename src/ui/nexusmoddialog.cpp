@@ -1,10 +1,14 @@
 #include "nexusmoddialog.h"
 #include <iomanip>
 #include "core/log.h"
+#include "src/core/nexus/integrityverifier.h"
 #include "tablepushbutton.h"
 #include "ui_nexusmoddialog.h"
+#include <QApplication>
 #include <QDebug>
+#include <QFileDialog>
 #include <QLabel>
+#include <QMessageBox>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSpacerItem>
@@ -197,6 +201,15 @@ void NexusModDialog::setupDialog(int app_id, int mod_id, const nexus::Page& page
 
       frame_layout->addWidget(download_button);
     }
+
+    auto verify_button = new TablePushButton(file.file_id, file.file_id);
+    verify_button->setText("Verify integrity");
+    verify_button->setIcon(QIcon::fromTheme("dialog-ok"));
+    verify_button->setToolTip(
+      "Select a downloaded archive and verify its MD5 hash and file size against NexusMods.");
+    connect(verify_button, &TablePushButton::clickedAt, this, &NexusModDialog::onVerifyClicked);
+    frame_layout->addWidget(verify_button);
+
     frame_layout->addStretch();
     base_layout->addWidget(frame);
   }
@@ -251,4 +264,51 @@ void NexusModDialog::onDownloadClicked(int file_id, int file_id_copy)
     Log::error(std::format("Failed to parse Nexus response for file: {}", file_id));
   else
     emit modDownloadRequested(app_id_, mod_id_, file_id, page_.url.c_str(), iter->version.c_str());
+}
+
+void NexusModDialog::onVerifyClicked(int file_id, int file_id_copy)
+{
+  auto iter = str::find_if(page_.files, [file_id](auto f) { return f.file_id == file_id; });
+  if(iter == page_.files.end())
+  {
+    Log::error(std::format("Failed to find Nexus file for verification: {}", file_id));
+    return;
+  }
+
+  const QString path = QFileDialog::getOpenFileName(
+    this, "Select downloaded archive to verify", QString(), "All Files (*)");
+  if(path.isEmpty())
+    return;
+
+  if(!nexus::Api::isInitialized())
+  {
+    QMessageBox::warning(this,
+                         "Verification unavailable",
+                         "A NexusMods API key is required to verify file integrity.");
+    return;
+  }
+
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  nexus::IntegrityVerifier::Result result;
+  try
+  {
+    result =
+      nexus::IntegrityVerifier::verify(path.toStdString(), *iter, page_.mod.domain_name);
+  }
+  catch(const std::exception& e)
+  {
+    QApplication::restoreOverrideCursor();
+    Log::error(std::format("Integrity verification failed: {}", e.what()));
+    QMessageBox::critical(
+      this, "Verification error", QString("Failed to verify file:\n%1").arg(e.what()));
+    return;
+  }
+  QApplication::restoreOverrideCursor();
+
+  if(result.passed())
+    QMessageBox::information(
+      this, "Integrity verified", QString::fromStdString(result.message));
+  else
+    QMessageBox::warning(
+      this, "Integrity check failed", QString::fromStdString(result.message));
 }

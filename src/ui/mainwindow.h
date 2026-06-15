@@ -49,6 +49,7 @@
 #include "ui/importmo2dialog.h"
 #include "ui/ipcserver.h"
 #include "ui/listaction.h"
+#include "ui/loadorderbisectdialog.h"
 #include "ui/rootlevelcondition.h"
 #include "ui/tagcheckbox.h"
 #include "versionboxdelegate.h"
@@ -191,6 +192,8 @@ private:
   QAction* deployed_files_tree_action_;
   // fork #50: action used to run a health check for the current deployer.
   QAction* health_check_deployer_action_;
+  // fork #149: action opening the load-order bisect tool for the current deployer.
+  QAction* bisect_deployer_action_;
 #ifdef LIMO_WITH_LOOT
   // fork #31: action opening the LOOT user-metadata (userlist.yaml) editor.
   /*! \brief Action used to edit LOOT user metadata for the current LOOT deployer. */
@@ -888,6 +891,8 @@ private slots:
   void onDeployedFilesTreeMenuClicked();
   // fork #50: runs a health check for the current deployer and shows the aggregated problems.
   void onHealthCheckDeployerMenuClicked();
+  // fork #149: opens the load-order bisect tool for the current deployer.
+  void onBisectDeployerMenuClicked();
 #ifdef LIMO_WITH_LOOT
   // fork #31: opens the LOOT user-metadata editor for the current LOOT deployer.
   /*! \brief Shows a dialog to edit LOOT user metadata (userlist.yaml). */

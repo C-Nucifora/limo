@@ -188,6 +188,8 @@ set(CORE_SOURCES
         src/core/nexus/collection.h
         src/core/nexus/file.cpp
         src/core/nexus/file.h
+        src/core/nexus/integrityverifier.cpp
+        src/core/nexus/integrityverifier.h
         src/core/nexus/mod.cpp
         src/core/nexus/mod.h
         src/core/parseerror.h
@@ -447,6 +449,10 @@ set(PROJECT_SOURCES
         src/ui/savemanagerwidget.cpp
         src/ui/savemanagerwidget.h
         src/ui/savemanagerwidget.ui
+        # fork #149: load-order bisect tool
+        src/ui/loadorderbisectdialog.cpp
+        src/ui/loadorderbisectdialog.h
+        src/ui/loadorderbisectdialog.ui
 )
 
 qt_add_resources(QSS_RESOURCES
