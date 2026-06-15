@@ -6,6 +6,9 @@
 #include "ui/ipcclient.h"
 #include "ui/mainwindow.h"
 #include <QApplication>
+#include <QIcon>
+#include <QStyle>
+#include <QStyleFactory>
 #include <filesystem>
 #include <iostream>
 
@@ -21,6 +24,41 @@ int main(int argc, char* argv[])
 {
   QCoreApplication::setApplicationName("Limo");
   QApplication app(argc, argv);
+
+  // limo-app/limo#230: Under Flatpak/KDE, QT_STYLE_OVERRIDE may name a style
+  // (e.g. "kvantum") that isn't present in the runtime, causing Qt to silently
+  // drop it and leave the app with a broken style and missing icons.  Detect
+  // this and fall back to Breeze (if available) or Fusion so the UI stays sane.
+  {
+    const QString requested =
+      QString::fromLocal8Bit(qgetenv("QT_STYLE_OVERRIDE")).trimmed();
+    if(!requested.isEmpty())
+    {
+      const QStringList available = QStyleFactory::keys();
+      // Case-insensitive search: Qt itself normalises names this way.
+      const bool valid = std::any_of(
+        available.cbegin(), available.cend(),
+        [&](const QString& key) { return key.compare(requested, Qt::CaseInsensitive) == 0; });
+      if(!valid)
+      {
+        const QStringList preferred = { "Breeze", "Fusion" };
+        for(const QString& candidate : preferred)
+        {
+          if(available.contains(candidate, Qt::CaseInsensitive))
+          {
+            QApplication::setStyle(QStyleFactory::create(candidate));
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // limo-app/limo#230: Ensure action icons render when no XDG icon theme is
+  // configured (common in minimal Flatpak runtimes).
+  if(QIcon::themeName().isEmpty())
+    QIcon::setFallbackThemeName("breeze");
+
   QIcon::setFallbackSearchPaths(
     QIcon::fallbackSearchPaths()
     << (std::filesystem::path(__FILE__).parent_path().parent_path() / "resources").c_str());
