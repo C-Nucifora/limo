@@ -1,6 +1,9 @@
 #include "tool.h"
+#include <cstdlib>
 #include <format>
 #include <ranges>
+#include <string_view>
+#include <system_error>
 
 namespace sfs = std::filesystem;
 
@@ -57,6 +60,19 @@ Tool::Tool(const std::string& name,
 Tool::Tool(const std::string& name,
            const sfs::path& icon_path,
            const sfs::path& executable_path,
+           const sfs::path& prefix_path,
+           const std::string& game_id,
+           const sfs::path& working_directory,
+           const std::map<std::string, std::string>& environment_variables,
+           const std::string& arguments) :
+  name_(name), icon_path_(icon_path), executable_path_(executable_path), runtime_(umu),
+  prefix_path_(prefix_path), umu_game_id_(game_id), working_directory_(working_directory),
+  environment_variables_(environment_variables), arguments_(arguments)
+{}
+
+Tool::Tool(const std::string& name,
+           const sfs::path& icon_path,
+           const sfs::path& executable_path,
            bool use_flatpak_protontricks,
            int steam_app_id,
            const sfs::path& working_directory,
@@ -102,6 +118,8 @@ Tool::Tool(const Json::Value& json_object)
     }
     arguments_ = json_object["arguments"].asString();
     protontricks_arguments_ = json_object["protontricks_arguments"].asString();
+    if(json_object.isMember("umu_game_id"))
+      umu_game_id_ = json_object["umu_game_id"].asString();
     command_overwrite_ = json_object["command"].asString();
   }
 }
@@ -136,11 +154,20 @@ std::string Tool::getCommand(bool is_flatpak) const
   appendEnvironmentVariables(command, environment_variables_, is_flatpak);
   if(runtime_ == wine && !prefix_path_.empty())
     appendEnvironmentVariables(command, { { "WINEPREFIX", prefix_path_.string() } }, is_flatpak);
+  if(runtime_ == umu)
+  {
+    if(!prefix_path_.empty())
+      appendEnvironmentVariables(command, { { "WINEPREFIX", prefix_path_.string() } }, is_flatpak);
+    appendEnvironmentVariables(
+      command, { { "GAMEID", umu_game_id_.empty() ? "0" : umu_game_id_ } }, is_flatpak);
+  }
 
   if(!command.empty() && runtime_ != native)
     command += " ";
   if(runtime_ == wine)
     command += "wine";
+  else if(runtime_ == umu)
+    command += "umu-run";
   else if(runtime_ == protontricks)
   {
     if(use_flatpak_runtime_)
@@ -181,6 +208,7 @@ Json::Value Tool::toJson() const
   }
   json_object["arguments"] = arguments_;
   json_object["protontricks_arguments"] = protontricks_arguments_;
+  json_object["umu_game_id"] = umu_game_id_;
   json_object["command"] = command_overwrite_;
   return json_object;
 }
@@ -240,9 +268,61 @@ std::string Tool::getProtontricksArguments() const
   return protontricks_arguments_;
 }
 
+std::string Tool::getUmuGameId() const
+{
+  return umu_game_id_;
+}
+
 std::string Tool::getCommandOverwrite() const
 {
   return command_overwrite_;
+}
+
+bool Tool::umuLauncherAvailable()
+{
+  // Cache the result: detection only needs to happen once per process.
+  static const bool available = []
+  {
+    const std::string executable = "umu-run";
+
+    // Search every directory listed on PATH.
+    if(const char* const path_env = std::getenv("PATH"); path_env != nullptr)
+    {
+      std::string_view paths(path_env);
+      while(!paths.empty())
+      {
+        const auto separator = paths.find(':');
+        const std::string_view entry =
+          separator == std::string_view::npos ? paths : paths.substr(0, separator);
+        if(!entry.empty())
+        {
+          std::error_code ec;
+          const sfs::path candidate = sfs::path(entry) / executable;
+          if(sfs::exists(candidate, ec) && !ec)
+            return true;
+        }
+        if(separator == std::string_view::npos)
+          break;
+        paths.remove_prefix(separator + 1);
+      }
+    }
+
+    // Fall back to a few common install locations.
+    const sfs::path common_locations[] = {
+      "/usr/bin/umu-run",
+      "/usr/local/bin/umu-run",
+      "/app/bin/umu-run",
+    };
+    for(const auto& candidate : common_locations)
+    {
+      std::error_code ec;
+      if(sfs::exists(candidate, ec) && !ec)
+        return true;
+    }
+
+    return false;
+  }();
+  return available;
 }
 
 void Tool::appendEnvironmentVariables(
