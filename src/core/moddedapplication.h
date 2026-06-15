@@ -23,6 +23,7 @@
 #include "tool.h"
 #include <filesystem>
 #include <json/json.h>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -639,6 +640,20 @@ public:
    */
   void suppressUpdateNotification(const std::vector<int>& mod_ids);
   /*!
+   * \brief Permanently enables or disables update checks for the given mod. Unlike
+   * suppressUpdateNotification, this persists across runs and prevents the mod from ever
+   * being reported as out of date until explicitly re-enabled.
+   * \param mod_id Id of the target mod.
+   * \param ignored If true, updates for the mod are permanently ignored.
+   */
+  void setUpdateIgnored(int mod_id, bool ignored);
+  /*!
+   * \brief Checks whether updates for the given mod are permanently ignored.
+   * \param mod_id Id of the target mod.
+   * \return True if the mod is on the update ignore list.
+   */
+  bool isUpdateIgnored(int mod_id) const;
+  /*!
    * \brief Checks if files deployed by the given deployer have been externally overwritten.
    * \param deployer Deployer to check.
    * \return Contains data about overwritten files.
@@ -822,6 +837,8 @@ private:
   std::vector<std::string> group_notes_;
   /*! \brief Maps mods to the installer used during their installation. */
   std::map<int, std::string> installer_map_;
+  /*! \brief Ids of mods for which update checks are permanently ignored. */
+  std::set<int> update_ignore_list_;
   /*! \brief Path to this applications icon. */
   std::filesystem::path icon_path_;
   /*! \brief Callback for logging. */
