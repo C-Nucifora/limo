@@ -156,6 +156,13 @@ private:
    */
   void updateDetectedPath();
   /*!
+   * \brief Shows or hides the advanced setup fields (version, icon, launch command,
+   * detected-path display and deploy hooks). The simple, guided fields (name, staging
+   * directory, game template and Steam import) always stay visible. (issue #92)
+   * \param advanced Whether advanced fields should be shown.
+   */
+  void setAdvancedMode(bool advanced);
+  /*!
    * \brief Loads the four deploy hook commands from the given app's config file
    * into the hook line edits. Clears the fields if the file or hooks are absent.
    * \param staging_dir Staging directory of the app whose config should be read.
@@ -239,6 +246,11 @@ private slots:
    * \param path The chosen directory path.
    */
   void onGogPrefixDialogAccepted(const QString& path);
+  /*!
+   * \brief Toggles the advanced setup fields when the "Advanced setup" checkbox changes.
+   * \param state Qt::Checked when advanced fields should be shown. (issue #92)
+   */
+  void on_advanced_checkbox_stateChanged(int state);
 
 signals:
   /*!
