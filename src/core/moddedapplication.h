@@ -880,6 +880,45 @@ public:
   static void importInstanceInto(const std::filesystem::path& bundle,
                                  const std::filesystem::path& staging_dir);
 
+  /*! \brief Name of the JSON file contained in an exported profile bundle. */
+  inline static const std::string PROFILE_BUNDLE_FILE_NAME = "limo_profile.json";
+  /*! \brief Format version written into exported profile bundles. */
+  inline static constexpr int PROFILE_BUNDLE_VERSION = 1;
+
+  /*!
+   * \brief Exports a single profile to a portable, self-contained zip bundle.
+   *
+   * The bundle contains \ref PROFILE_BUNDLE_FILE_NAME, a JSON document capturing the profile's
+   * name, app version, per-deployer load order (the full load-order TREE, serialized exactly as
+   * in the on-disk settings via \ref TreeItem::toJson, i.e. an object with a \c children array)
+   * together with each entry's enabled state, and per-deployer conflict groups. Instance level
+   * mod-group / active-member information is included for reference. The bundle does NOT contain
+   * any mod blobs; it references mods by id.
+   *
+   * \param profile The profile to export.
+   * \param target Destination file for the zip bundle. If it names an existing directory, the
+   * bundle is written inside it using the profile name.
+   * \throws std::runtime_error If the profile is invalid or the archive can not be written.
+   */
+  void exportProfile(int profile, const std::filesystem::path& target) const;
+
+  /*!
+   * \brief Imports a profile bundle (as produced by \ref exportProfile) into this instance by
+   * creating a new profile populated with the bundle's load order, enabled state, conflict
+   * groups and app version.
+   *
+   * The new profile is appended to the existing profiles. Mods referenced by the bundle which
+   * are not installed in this instance are skipped (with a warning); no mod blobs are moved.
+   * Group / active-member information stored in the bundle is informational only; it is not
+   * re-applied because groups are an instance-wide concept managed independently of profiles.
+   *
+   * \param bundle Path to the bundle zip (or a directory containing
+   * \ref PROFILE_BUNDLE_FILE_NAME).
+   * \throws std::runtime_error If the bundle can not be read.
+   * \throws ParseError If the bundle is not a valid profile bundle.
+   */
+  void importProfile(const std::filesystem::path& bundle);
+
 private:
   /*! \brief The subdirectory used to store downloads. */
   static inline constexpr std::string DOWNLOAD_DIR = "_download";
