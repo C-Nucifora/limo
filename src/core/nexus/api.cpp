@@ -308,6 +308,82 @@ std::vector<std::pair<std::string, std::vector<std::string>>> Api::getChangelogs
   return changelogs;
 }
 
+std::vector<std::pair<std::string, std::vector<std::string>>> Api::getModChangelogs(
+  const std::string& domain_name, long mod_id)
+{
+  std::vector<std::pair<std::string, std::vector<std::string>>> changelogs;
+  cpr::Response response = cpr::Get(
+    cpr::Url(std::format(
+      "https://api.nexusmods.com/v1/games/{}/mods/{}/changelogs.json", domain_name, mod_id)),
+    cpr::Header{ { "apikey", api_key_ } });
+  if(response.status_code != 200)
+  {
+    Log::error(std::format(
+      "Failed to get changelogs for mod with id {} from NexusMods. Response code was {}",
+      mod_id,
+      response.status_code));
+    return changelogs;
+  }
+
+  Json::Value json_body;
+  Json::Reader reader;
+  if(!reader.parse(response.text.c_str(), json_body))
+  {
+    Log::error(std::format(
+      "Failed to parse changelog response from NexusMods for mod with id {}.", mod_id));
+    return changelogs;
+  }
+
+  for(const auto& key : json_body.getMemberNames())
+  {
+    std::vector<std::string> changes;
+    auto log = json_body[key];
+    for(int i = 0; i < log.size(); i++)
+      changes.push_back(log[i].asString());
+    changelogs.emplace_back(key, changes);
+  }
+  // Jsoncpp uses a std::map to store key, value pairs. This messes up the order of the keys, so
+  // they have be re-sorted by version number
+  std::sort(changelogs.begin(),
+            changelogs.end(),
+            [](auto a, auto b)
+            {
+              std::regex regex(R"(.*?(\d+)\.?(.*))");
+              std::smatch match;
+              std::vector<int> a_parts;
+              std::vector<int> b_parts;
+              std::string target = a.first;
+              bool found = false;
+              while(std::regex_search(target, match, regex))
+              {
+                found = true;
+                a_parts.push_back(std::stoi(match[1]));
+                target = match[2];
+              }
+              if(!found)
+                return a > b;
+
+              found = false;
+              target = b.first;
+              while(std::regex_search(target, match, regex))
+              {
+                found = true;
+                b_parts.push_back(std::stoi(match[1]));
+                target = match[2];
+              }
+              if(!found)
+                return a > b;
+
+              for(auto [a_num, b_num] : str::zip_view(a_parts, b_parts))
+              {
+                if(a_num != b_num)
+                  return a_num > b_num;
+              }
+              return a > b;
+            });
+  return changelogs;
+}
+
 bool Api::modUrlIsValid(const std::string& url)
 {
   if(url.empty())

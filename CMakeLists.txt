@@ -315,6 +315,9 @@ set(PROJECT_SOURCES
         src/ui/collectiondialog.cpp
         src/ui/collectiondialog.h
         src/ui/collectiondialog.ui
+        src/ui/nexuschangelogdialog.cpp
+        src/ui/nexuschangelogdialog.h
+        src/ui/nexuschangelogdialog.ui
         src/ui/colors.h
         src/ui/conflictdetaildialog.cpp
         src/ui/conflictdetaildialog.h
