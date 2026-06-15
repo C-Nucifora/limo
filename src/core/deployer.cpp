@@ -545,6 +545,18 @@ void Deployer::backupOrRestoreFiles(const std::map<sfs::path, int>& source_files
       restore_directories[path] = id;
       continue;
     }
+    // Only remove the orphaned target if it is still the file Limo deployed. This prevents
+    // deleting files a user has put in place of (or in addition to) a previously deployed mod
+    // file. For copy mode the origin cannot be determined, so the recorded entry is trusted.
+    if(!targetWasDeployedByLimo(absolute_path, id, path))
+    {
+      log_(Log::LOG_DEBUG,
+           std::format("Deployer '{}': Skipping cleanup of '{}', it no longer matches the "
+                       "deployed file",
+                       name_,
+                       absolute_path.string()));
+      continue;
+    }
     sfs::path backup_name = absolute_path.string() + backup_extension_;
     // Restore atomically: when a backup exists, rename overwrites the deployed file in one step so
     // an I/O failure can't leave the target missing. Only plainly remove the deployed file when
@@ -554,10 +566,12 @@ void Deployer::backupOrRestoreFiles(const std::map<sfs::path, int>& source_files
     else
       sfs::remove(absolute_path);
   }
-  for(const auto& [path, id] : restore_directories)
+  // Remove now-empty directories Limo created. Iterate deepest first so that emptying a child
+  // directory allows its parent to be removed within this single pass.
+  for(const auto& [path, id] : restore_directories | stv::reverse)
   {
     sfs::path absolute_path = dest_path_ / path;
-    if(pu::directoryIsEmpty(absolute_path, {managed_dir_file_name_}))
+    if(pu::directoryIsEmpty(absolute_path, { managed_dir_file_name_ }))
       sfs::remove_all(absolute_path);
   }
 
@@ -1128,4 +1142,29 @@ bool Deployer::isIgnoredFile(const sfs::path& path) const
       return true;
   }
   return false;
+}
+
+bool Deployer::targetWasDeployedByLimo(const sfs::path& target_path,
+                                       int mod_id,
+                                       const sfs::path& relative_path) const
+{
+  if(!pu::exists(target_path) || sfs::is_directory(target_path))
+    return false;
+  // Copies leave no trace linking them back to the source mod, so the recorded entry is trusted.
+  if(deploy_mode_ == copy)
+    return true;
+
+  const sfs::path source_path = source_path_ / std::to_string(mod_id) / relative_path;
+  try
+  {
+    if(deploy_mode_ == sym_link)
+      return sfs::is_symlink(target_path) && sfs::read_symlink(target_path) == source_path;
+    // hard_link: the target is a Limo file iff it still shares an inode with the source file.
+    return !sfs::is_symlink(target_path) && sfs::exists(source_path) &&
+           sfs::equivalent(source_path, target_path);
+  }
+  catch(const sfs::filesystem_error&)
+  {
+    return false;
+  }
 }

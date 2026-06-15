@@ -537,4 +537,15 @@ protected:
    */
   void removeManagedDirFile(const std::filesystem::path& directory) const;
   void setLoadorder(Json::Value entry, std::shared_ptr<TreeItem<DeployerEntry>> current);
+  /*!
+   * \brief Checks whether the file currently at the given target path is the one Limo deployed
+   * for the given mod. Used to avoid deleting user supplied files during cleanup.
+   * \param target_path Absolute path to the deployed file in the target directory.
+   * \param mod_id Id of the mod that is recorded as having deployed the file.
+   * \param relative_path Path of the file relative to the target / mod source directory.
+   * \return True if the file matches what Limo deployed (or, for copy mode, if it still exists).
+   */
+  bool targetWasDeployedByLimo(const std::filesystem::path& target_path,
+                               int mod_id,
+                               const std::filesystem::path& relative_path) const;
 };

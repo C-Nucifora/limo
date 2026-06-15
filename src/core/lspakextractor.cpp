@@ -33,7 +33,7 @@ void LsPakExtractor::init()
   if(static_cast<unsigned int>(header_->magic_number) != LS_PAK_MAGIC_HEADER_NUMBER)
     throw std::runtime_error(std::format("Unknown file format with magic number: {}",
                                          static_cast<unsigned int>(header_->magic_number)));
-  if(static_cast<unsigned int>(header_->version) != LS_PAK_SUPPORTED_VERSION)
+  if(!isSupportedVersion(static_cast<unsigned int>(header_->version)))
   {
     throw std::runtime_error(
       std::format("Unsupported file version: {}", static_cast<unsigned int>(header_->version)));

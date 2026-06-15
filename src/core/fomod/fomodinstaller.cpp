@@ -26,18 +26,33 @@ void FomodInstaller::init(const sfs::path& config_file,
   flags_.clear();
   prev_selections_.clear();
   target_path_ = target_path;
+  pugi::xml_parse_result load_result;
   if(sfs::is_directory(config_file))
   {
     mod_base_path_ = config_file;
     auto [fomod_dir_name, config_file_name] = getFomodPath(config_file);
-    config_file_.load_file((config_file / fomod_dir_name / config_file_name).c_str());
+    load_result =
+      config_file_.load_file((config_file / fomod_dir_name / config_file_name).c_str());
   }
   else
   {
     mod_base_path_ = config_file.parent_path().parent_path();
-    config_file_.load_file(config_file.c_str());
+    load_result = config_file_.load_file(config_file.c_str());
+  }
+  if(!load_result)
+  {
+    Log::error(std::format("Failed to parse FOMOD config file '{}': {}",
+                           config_file.string(),
+                           load_result.description()));
+    return;
   }
   config_ = config_file_.child("config");
+  if(!config_)
+  {
+    Log::error(std::format("FOMOD config file '{}' contains no 'config' root node.",
+                           config_file.string()));
+    return;
+  }
   auto file_list = config_.child("requiredInstallFiles");
   if(file_list)
     parseFileList(file_list, files_);
@@ -92,25 +107,29 @@ std::optional<std::pair<std::vector<std::vector<bool>>, InstallStep>> FomodInsta
   auto old_selections = prev_selections_;
   prev_selections_.clear();
   step();
-  for(int i = 0; i < old_selections.size() - 2; i++)
+  for(int i = 0; i + 2 < static_cast<int>(old_selections.size()); i++)
     step(old_selections[i]);
-  int idx = old_selections.size() - 2;
+  int idx = static_cast<int>(old_selections.size()) - 2;
   return { { old_selections[idx + 1], *step(old_selections[idx]) } };
 }
 
 bool FomodInstaller::hasNextStep(const std::vector<std::vector<bool>>& selection) const
 {
-  if(cur_step_ == steps_.size() - 1)
+  if(steps_.empty() || cur_step_ >= static_cast<int>(steps_.size()) - 1)
     return false;
   std::map<std::string, std::string> cur_flags = flags_;
   int group_idx = 0;
-  if(!selection.empty())
+  if(!selection.empty() && cur_step_ >= 0 && cur_step_ < static_cast<int>(steps_.size()))
   {
     for(auto& group : steps_[cur_step_].groups)
     {
+      if(group_idx >= static_cast<int>(selection.size()))
+        break;
       int plugin_idx = 0;
       for(auto& plugin : group.plugins)
       {
+        if(plugin_idx >= static_cast<int>(selection[group_idx].size()))
+          break;
         if(!selection[group_idx][plugin_idx])
         {
           plugin_idx++;
@@ -394,12 +413,16 @@ PluginType FomodInstaller::parsePluginType(const std::string& type)
 
 void FomodInstaller::updateState(const std::vector<std::vector<bool>>& selection)
 {
-  if(cur_step_ < 0 || selection.empty())
+  if(cur_step_ < 0 || cur_step_ >= static_cast<int>(steps_.size()) || selection.empty())
     return;
   for(int group_idx = 0; auto& group : steps_[cur_step_].groups)
   {
+    if(group_idx >= static_cast<int>(selection.size()))
+      break;
     for(int plugin_idx = 0; auto& plugin : group.plugins)
     {
+      if(plugin_idx >= static_cast<int>(selection[group_idx].size()))
+        break;
       if(!selection[group_idx][plugin_idx])
       {
         plugin_idx++;
