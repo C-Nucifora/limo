@@ -103,6 +103,26 @@ public:
     int root_level = 0,
     const std::vector<std::pair<std::filesystem::path, std::filesystem::path>> fomod_files = {});
   /*!
+   * \brief Installs the given source as a patch/upgrade by overlaying its files onto an
+   * existing mod's staging directory, instead of creating a new mod.
+   *
+   * The source is extracted to a temporary directory (reusing the same extraction
+   * pipeline as \ref install), the requested name/structure options are applied, and the
+   * resulting files are merged recursively into \p existing_mod_dir. Files present in the
+   * patch overwrite files of the same relative path in the existing mod; files in the
+   * existing mod that are not part of the patch are left untouched.
+   * \param source Path to the archive (or directory) containing the patch.
+   * \param existing_mod_dir Staging directory of the mod to patch. Must already exist.
+   * \param options Sum of installation flags (case and single_directory are honored).
+   * \param root_level If > 0: Ignore all patch files and path components with depth <
+   * root_level before overlaying.
+   * \return The total file size of the patched mod on disk after the overlay.
+   */
+  static unsigned long installPatch(const std::filesystem::path& source,
+                                    const std::filesystem::path& existing_mod_dir,
+                                    int options,
+                                    int root_level = 0);
+  /*!
    * \brief Uninstalls the mod at given directory using the given installer type.
    * \param path Path to the mod.
    * \param installer Installer type to use.
