@@ -108,10 +108,14 @@ void CaseMatchingDeployer::adaptDirectoryFiles(const sfs::path& path,
       else if(sfs::is_directory(target))
         pu::moveFilesToDirectory(source, target);
       else if(match_file_name != file_name)
-        throw std::runtime_error(std::format("Could not rename file '{}' to '{}' "
-                                             "because the target already exists",
-                                             source.string(),
-                                             target.string()));
+        // The mod contains two files differing only by case; skip the case match for this one and
+        // keep deploying instead of aborting the whole deployment (limo-app/limo#141, #100).
+        log_(Log::LOG_WARNING,
+             std::format("Deployer '{}': skipping case match for '{}' because '{}' already exists "
+                         "(files differ only by case).",
+                         name_,
+                         source.string(),
+                         target.string()));
     }
     if(sfs::is_directory(source_path_ / std::to_string(mod_id) / path / match_file_name))
       directories.push_back(path / match_file_name);
@@ -167,10 +171,14 @@ void CaseMatchingDeployer::adaptLoadorderFiles(const std::vector<int>& loadorder
         else if(sfs::is_directory(target))
           pu::moveFilesToDirectory(source, target);
         else
-          throw std::runtime_error(std::format("Could not rename file '{}' to '{}' "
-                                               "because the target already exists",
-                                               source.string(),
-                                               target.string()));
+          // Two enabled mods provide files differing only by case; skip the case match for this one
+          // and keep deploying instead of aborting (limo-app/limo#141, #100).
+          log_(Log::LOG_WARNING,
+               std::format("Deployer '{}': skipping case match for '{}' because '{}' already exists "
+                           "(files differ only by case).",
+                           name_,
+                           source.string(),
+                           target.string()));
       }
       else
         file_name_map[lower_case_path] = relative_path;
