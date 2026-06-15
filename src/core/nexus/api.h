@@ -158,6 +158,20 @@ public:
   static std::vector<std::pair<std::string, std::vector<std::string>>> getChangelogs(
     const std::string& mod_url);
   /*!
+   * \brief Fetches changelogs for the mod specified by the NexusMods domain and mod id.
+   *
+   * Uses the \c /games/<domain>/mods/<id>/changelogs.json endpoint. Unlike getChangelogs,
+   * this method does not throw on network or parse failures: it logs the error and returns
+   * an empty vector instead, making it suitable for direct use from UI code.
+   *
+   * \param domain_name The NexusMods domain containing the mod.
+   * \param mod_id Target mod id.
+   * \return For every Version of the mod: A vector of changes in that version, ordered by
+   * descending version number. Empty on failure.
+   */
+  static std::vector<std::pair<std::string, std::vector<std::string>>> getModChangelogs(
+    const std::string& domain_name, long mod_id);
+  /*!
    * \brief Checks if the given URL is a valid NexusMods mod page URL.
    * Only verifies if the URL is semantically correct, not if the target exists.
    * \param url URL to check.
