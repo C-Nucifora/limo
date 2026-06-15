@@ -14,6 +14,16 @@
    <string>Add Application</string>
   </property>
   <layout class="QGridLayout" name="gridLayout_3">
+   <item row="9" column="0">
+    <widget class="QCheckBox" name="advanced_checkbox">
+     <property name="toolTip">
+      <string>Show advanced fields: version, icon, launch command and deploy hooks. Leave unchecked for a simple, guided setup.</string>
+     </property>
+     <property name="text">
+      <string>Advanced setup</string>
+     </property>
+    </widget>
+   </item>
    <item row="0" column="0">
     <layout class="QGridLayout" name="gridLayout">
      <item row="2" column="2">

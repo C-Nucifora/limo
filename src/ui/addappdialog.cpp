@@ -36,6 +36,8 @@ AddAppDialog::AddAppDialog(bool is_flatpak, QWidget* parent) :
   // Populate GOG template combo at construction so it's ready when setAddMode() is called.
   // (issue #74 / limo-app/limo#51)
   populateGogTemplateCombo();
+  // Default to the simple, guided layout; setAddMode()/setEditMode() refine this. (issue #92)
+  setAdvancedMode(false);
 }
 
 AddAppDialog::~AddAppDialog()
@@ -325,6 +327,28 @@ void AddAppDialog::updateDetectedPath()
   ui->detected_path_label->setText(steam_install_path_);
 }
 
+void AddAppDialog::setAdvancedMode(bool advanced)
+{
+  // The simple, guided fields (name, staging directory, game template combo and the
+  // "Import from Steam" button) always stay visible. Everything below is advanced
+  // detail that new users should not have to deal with. (issue #92)
+  ui->label_5->setVisible(advanced);
+  ui->version_field->setVisible(advanced);
+  ui->label_3->setVisible(advanced);
+  ui->icon_field->setVisible(advanced);
+  ui->icon_picker_button->setVisible(advanced);
+  ui->label_4->setVisible(advanced);
+  ui->command_field->setVisible(advanced);
+  ui->detected_path_caption->setVisible(advanced);
+  ui->detected_path_label->setVisible(advanced);
+  ui->hooks_box->setVisible(advanced);
+}
+
+void AddAppDialog::on_advanced_checkbox_stateChanged(int state)
+{
+  setAdvancedMode(state == Qt::Checked);
+}
+
 void AddAppDialog::loadHooksFromConfig(const QString& staging_dir)
 {
   ui->pre_deploy_field->setText("");
@@ -449,6 +473,10 @@ void AddAppDialog::setEditMode(const QString& name,
   ui->command_field->setText(command);
   updateDetectedPath();
   loadHooksFromConfig(path);
+  // Editing an existing application means dealing with details (command, icon, hooks),
+  // so show the advanced fields by default. (issue #92)
+  ui->advanced_checkbox->setChecked(true);
+  setAdvancedMode(true);
   dialog_completed_ = false;
 }
 
@@ -478,6 +506,12 @@ void AddAppDialog::setAddMode()
   edit_mode_ = false;
   ui->move_dir_box->setVisible(false);
   updateDetectedPath();
+  // Start new applications in the simple, guided mode. The user fills in a name and a
+  // staging directory and then either imports from Steam or applies a bundled game
+  // template, both of which auto-fill the command and deployers. Advanced fields stay
+  // hidden until the "Advanced setup" box is ticked. (issue #92)
+  ui->advanced_checkbox->setChecked(false);
+  setAdvancedMode(false);
   dialog_completed_ = false;
 }
 
