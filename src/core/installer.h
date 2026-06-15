@@ -147,6 +147,58 @@ private:
   static inline std::string MOVE_EXTENSION = "tmpmove";
   /*! \brief If true: The application is running as a flatpak. */
   static inline bool is_a_flatpak_ = false;
+  /*!
+   * \brief Name of the extraction cache directory (created under the system temp
+   * directory). Holds a verbatim extraction of recently installed archives so
+   * reinstalls can be populated without re-running libarchive.
+   */
+  static inline std::string EXTRACT_CACHE_DIR = "limo_extract_cache";
+  /*! \brief File name of the marker storing the cached archive's identity. */
+  static inline std::string CACHE_MARKER_FILE = ".limo_cache_marker";
+  /*! \brief Directory name holding the cached extraction payload. */
+  static inline std::string CACHE_PAYLOAD_DIR = "payload";
+
+  /*!
+   * \brief Computes a stable cache key for the given archive based on its
+   * canonical path, file size and last write time.
+   * \param source Path to the archive.
+   * \return The cache key string, or an empty optional if it can not be derived
+   * (e.g. source is a directory or stat fails).
+   */
+  static std::optional<std::string> computeCacheKey(const std::filesystem::path& source);
+  /*!
+   * \brief Returns the cache entry directory for the given key.
+   * \param key Cache key as produced by \ref computeCacheKey.
+   */
+  static std::filesystem::path cacheEntryPath(const std::string& key);
+  /*!
+   * \brief Attempts to populate dest_path from a valid cached extraction of the
+   * given archive. Files are hard-linked where possible, falling back to a copy
+   * across file system boundaries.
+   * \param source Path to the archive.
+   * \param dest_path Directory to populate (created if missing).
+   * \return True if dest_path was fully populated from the cache, false if no
+   * valid cache exists or population failed (caller should extract normally).
+   */
+  static bool populateFromCache(const std::filesystem::path& source,
+                                const std::filesystem::path& dest_path);
+  /*!
+   * \brief Stores a verbatim extraction of the given archive in the cache so
+   * later reinstalls can be served from it. Failures are non-fatal and ignored.
+   * \param source Path to the archive.
+   * \param extracted_path Directory containing the verbatim extraction.
+   */
+  static void storeInCache(const std::filesystem::path& source,
+                           const std::filesystem::path& extracted_path);
+  /*!
+   * \brief Recursively recreates the directory tree of src in dst, hard-linking
+   * regular files and falling back to a copy when hard-linking fails (e.g.
+   * across file systems). Throws on unrecoverable errors.
+   * \param src Source directory.
+   * \param dst Destination directory.
+   */
+  static void hardLinkOrCopyTree(const std::filesystem::path& src,
+                                 const std::filesystem::path& dst);
 
   /*!
    * \brief Throws a CompressionError containing the error message of given archive.

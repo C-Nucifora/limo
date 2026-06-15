@@ -6,9 +6,11 @@
 #include <archive_entry.h>
 #include <cstdint>
 #include <filesystem>
-#include <limits>
+#include <fstream>
 #include <ranges>
 #include <regex>
+#include <string>
+#include <system_error>
 #ifdef LIMO_WITH_UNRAR
 #define _UNIX
 #include <dll.hpp>
@@ -129,14 +131,41 @@ unsigned long Installer::install(const sfs::path& source,
   while(pu::exists(tmp_dir) && tmp_id++ < std::numeric_limits<unsigned>::max());
   if(tmp_id == std::numeric_limits<unsigned>::max())
     throw std::runtime_error("Could not create directory!");
-  try
+
+  // Try to populate the temporary directory from a previously cached extraction
+  // of this exact archive. This avoids re-running libarchive on reinstall. On
+  // any miss or failure, fall back to a normal extraction and refresh the cache.
+  bool populated_from_cache = false;
+  if(!sfs::is_directory(source))
   {
-    extract(source, tmp_dir, {});
+    try
+    {
+      populated_from_cache = populateFromCache(source, tmp_dir);
+    }
+    catch(...)
+    {
+      sfs::remove_all(tmp_dir);
+      sfs::create_directories(tmp_dir);
+      populated_from_cache = false;
+    }
   }
-  catch(CompressionError& error)
+
+  if(!populated_from_cache)
   {
-    sfs::remove_all(tmp_dir);
-    throw error;
+    try
+    {
+      extract(source, tmp_dir, {});
+    }
+    catch(CompressionError& error)
+    {
+      sfs::remove_all(tmp_dir);
+      throw error;
+    }
+    // Store a verbatim copy of the freshly extracted archive in the cache so the
+    // next reinstall can reuse it. Only meaningful for actual archives, not
+    // directory sources (which extract() handles via rename/copy).
+    if(!sfs::is_directory(source))
+      storeInCache(source, tmp_dir);
   }
 
   if(type == FOMODINSTALLER)
@@ -555,3 +584,128 @@ void Installer::extractRarArchive(const sfs::path& source_path, const sfs::path&
   RARCloseArchive(hArcData);
 }
 #endif
+
+std::optional<std::string> Installer::computeCacheKey(const sfs::path& source)
+{
+  std::error_code ec;
+  if(sfs::is_directory(source, ec) || ec)
+    return {};
+  const auto size = sfs::file_size(source, ec);
+  if(ec)
+    return {};
+  const auto mtime = sfs::last_write_time(source, ec);
+  if(ec)
+    return {};
+  auto canonical = sfs::weakly_canonical(source, ec);
+  const std::string path_str = (ec ? source.string() : canonical.string());
+
+  // Derive a hash from the canonical path; combine with size and mtime so a
+  // changed archive (even at the same path) never matches a stale cache entry.
+  const auto path_hash = std::hash<std::string>{}(path_str);
+  const auto mtime_count =
+    static_cast<long long>(mtime.time_since_epoch().count());
+  return std::to_string(path_hash) + "_" + std::to_string(size) + "_" +
+         std::to_string(mtime_count);
+}
+
+sfs::path Installer::cacheEntryPath(const std::string& key)
+{
+  std::error_code ec;
+  sfs::path base = sfs::temp_directory_path(ec);
+  if(ec)
+    base = "/tmp";
+  return base / EXTRACT_CACHE_DIR / key;
+}
+
+void Installer::hardLinkOrCopyTree(const sfs::path& src, const sfs::path& dst)
+{
+  sfs::create_directories(dst);
+  for(const auto& dir_entry : sfs::recursive_directory_iterator(src))
+  {
+    const auto relative = pu::getRelativePath(dir_entry.path(), src);
+    const auto target = dst / relative;
+    if(dir_entry.is_directory())
+    {
+      sfs::create_directories(target);
+    }
+    else if(dir_entry.is_regular_file())
+    {
+      sfs::create_directories(target.parent_path());
+      std::error_code ec;
+      sfs::create_hard_link(dir_entry.path(), target, ec);
+      if(ec)
+      {
+        // Hard links can not cross file system boundaries (and fail for some
+        // file systems); fall back to a plain copy in that case.
+        sfs::copy_file(dir_entry.path(), target, sfs::copy_options::overwrite_existing);
+      }
+    }
+    else
+    {
+      // Symlinks and other special entries: copy verbatim where possible.
+      std::error_code ec;
+      sfs::copy(dir_entry.path(),
+                target,
+                sfs::copy_options::copy_symlinks | sfs::copy_options::overwrite_existing,
+                ec);
+    }
+  }
+}
+
+bool Installer::populateFromCache(const sfs::path& source, const sfs::path& dest_path)
+{
+  const auto key = computeCacheKey(source);
+  if(!key)
+    return false;
+  const auto entry = cacheEntryPath(*key);
+  const auto marker = entry / CACHE_MARKER_FILE;
+  const auto payload = entry / CACHE_PAYLOAD_DIR;
+  std::error_code ec;
+  if(!sfs::exists(marker, ec) || !sfs::is_directory(payload, ec))
+    return false;
+
+  // Verify the marker matches the current archive identity before reusing it.
+  std::string stored_key;
+  {
+    std::ifstream marker_stream(marker);
+    if(!marker_stream)
+      return false;
+    std::getline(marker_stream, stored_key);
+  }
+  if(stored_key != *key)
+    return false;
+
+  log(Log::LOG_DEBUG, "Populating installation from extraction cache");
+  if(!sfs::exists(dest_path))
+    sfs::create_directories(dest_path);
+  hardLinkOrCopyTree(payload, dest_path);
+  return true;
+}
+
+void Installer::storeInCache(const sfs::path& source, const sfs::path& extracted_path)
+{
+  try
+  {
+    const auto key = computeCacheKey(source);
+    if(!key)
+      return;
+    const auto entry = cacheEntryPath(*key);
+    const auto marker = entry / CACHE_MARKER_FILE;
+    const auto payload = entry / CACHE_PAYLOAD_DIR;
+
+    // Rebuild the entry from scratch so a partial/stale cache can not be reused.
+    sfs::remove_all(entry);
+    sfs::create_directories(payload);
+    hardLinkOrCopyTree(extracted_path, payload);
+
+    std::ofstream marker_stream(marker, std::ios::trunc);
+    if(marker_stream)
+      marker_stream << *key << "\n";
+    log(Log::LOG_DEBUG, "Stored extraction in cache for future reinstalls");
+  }
+  catch(...)
+  {
+    // Caching is a best-effort optimization; never let it break installation.
+    log(Log::LOG_DEBUG, "Failed to store extraction cache (ignored)");
+  }
+}
