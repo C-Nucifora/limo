@@ -9,6 +9,8 @@
 #include <fstream>
 #include <regex>
 #include <set>
+#include <system_error>
+#include <vector>
 
 namespace sfs = std::filesystem;
 
@@ -91,39 +93,43 @@ void ImportFromSteamDialog::updateTable(sfs::path steam_dir)
       std::format("Could not open \"{}\"!", (steam_dir / library_file_name_).string()).c_str());
     return;
   }
+  // Collect every library folder recorded in libraryfolders.vdf. Both the old
+  // (single library) and the new (numbered library objects, each with its own
+  // "path" key) schema simply expose a quoted "path" entry per library, so we
+  // gather all of them and scan each library's steamapps directory below. This
+  // ensures games installed in additional / custom Steam library folders (e.g.
+  // on other drives) are detected, not only those in the primary library.
+  std::vector<sfs::path> library_paths;
+  std::set<std::string> seen_paths;
   std::string line;
-  std::regex dir_id_regex("\\s*\"[0-9]+\"");
   std::regex path_regex("\\s*\"path\"\\s*\"([^\"]+)\"");
-  std::regex apps_regex("\\s*\"apps\"");
-  std::regex app_id_regex("\\s*\"(\\d+)\"\\s*\"\\d+\"");
-  std::regex close_brace_regex("\\s*}");
-  std::string cur_path = "";
-  bool is_in_apps = false;
   while(std::getline(file, line))
   {
     std::smatch match;
     if(std::regex_search(line, match, path_regex))
     {
-      cur_path = match[1].str();
-      continue;
+      std::string lib_path = match[1].str();
+      if(seen_paths.insert(lib_path).second)
+        library_paths.emplace_back(lib_path);
     }
-    if(std::regex_search(line, apps_regex))
-    {
-      is_in_apps = true;
+  }
+  // Fall back to the selected library if the file did not list any path entries.
+  if(library_paths.empty())
+    library_paths.emplace_back(sfs::path(steam_dir).parent_path());
+
+  std::regex app_manifest_regex(R"(appmanifest_(\d+)\.acf)");
+  for(const auto& library_path : library_paths)
+  {
+    const sfs::path steamapps_path = library_path / "steamapps";
+    std::error_code ec;
+    if(!sfs::is_directory(steamapps_path, ec))
       continue;
-    }
-    if(is_in_apps)
+    for(const auto& dir_entry : sfs::directory_iterator(steamapps_path, ec))
     {
-      if(std::regex_search(line, close_brace_regex))
-      {
-        is_in_apps = false;
-        continue;
-      }
-      if(std::regex_search(line, match, app_id_regex))
-      {
-        if(!addTableRow(match[1].str(), cur_path))
-          continue;
-      }
+      std::smatch match;
+      const std::string entry_name = dir_entry.path().filename().string();
+      if(std::regex_match(entry_name, match, app_manifest_regex))
+        addTableRow(match[1].str(), library_path);
     }
   }
   ui->app_table->resizeColumnToContents(0);
