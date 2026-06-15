@@ -195,6 +195,8 @@ set(CORE_SOURCES
         src/core/plugindeployer.h
         src/core/progressnode.cpp
         src/core/progressnode.h
+        src/core/remote/ommrepository.cpp
+        src/core/remote/ommrepository.h
         src/core/reversedeployer.cpp
         src/core/reversedeployer.h
         src/core/tag.cpp
@@ -394,6 +396,9 @@ set(PROJECT_SOURCES
         src/ui/overwritebackupdialog.ui
         src/ui/passwordfield.cpp
         src/ui/passwordfield.h
+        src/ui/repositoriesdialog.cpp
+        src/ui/repositoriesdialog.h
+        src/ui/repositoriesdialog.ui
         src/ui/rootlevelcondition.cpp
         src/ui/rootlevelcondition.h
         src/ui/settingsdialog.cpp
