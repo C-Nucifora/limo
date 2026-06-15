@@ -211,7 +211,10 @@ void AddAppDialog::initConfigForApp()
       info.target_dir = target_dir;
 
       QString deploy_mode = deployer[JSON_DEPLOYERS_MODE].asString().c_str();
-      deploy_mode = deploy_mode.toLower();
+      // Accept both the underscore ("hard_link") and space ("hard link") spellings: the bundled
+      // steam_app_configs use both forms, and previously only the space form matched here, which
+      // silently dropped deployers from underscore-style configs (limo-app/limo#136).
+      deploy_mode = deploy_mode.toLower().replace("_", " ");
       if(deploy_mode == "hard link")
         info.deploy_mode = Deployer::hard_link;
       else if(deploy_mode == "sym link" || deploy_mode == "soft link")
