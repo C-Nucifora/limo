@@ -1,10 +1,13 @@
 #include "installer.h"
+#include <algorithm>
 #include <limits>
 #include "compressionerror.h"
 #include "pathutils.h"
 #include <archive.h>
 #include <archive_entry.h>
 #include <cstdint>
+#include <set>
+#include <vector>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -134,7 +137,8 @@ unsigned long Installer::install(const sfs::path& source,
                                  int options,
                                  const std::string& type,
                                  int root_level,
-                                 const std::vector<std::pair<sfs::path, sfs::path>> fomod_files)
+                                 const std::vector<std::pair<sfs::path, sfs::path>> fomod_files,
+                                 const std::set<sfs::path>& selected_files)
 {
   log(Log::LOG_DEBUG, "Beginning mod installation");
 
@@ -199,6 +203,24 @@ unsigned long Installer::install(const sfs::path& source,
     // directory sources (which extract() handles via rename/copy).
     if(!sfs::is_directory(source))
       storeInCache(source, tmp_dir);
+  }
+
+  // Restrict the extracted tree to the user-selected subset (if any) before the
+  // installer-specific move pipeline runs. The selection is matched against the
+  // archive layout (== the just-extracted tmp_dir), i.e. before root_level
+  // stripping, exactly as returned by getArchiveFileNames. An empty selection
+  // leaves the tree untouched (unchanged default behavior).
+  if(!selected_files.empty())
+  {
+    try
+    {
+      pruneToSelection(tmp_dir, selected_files);
+    }
+    catch(...)
+    {
+      sfs::remove_all(tmp_dir);
+      throw;
+    }
   }
 
   if(type == FOMODINSTALLER)
@@ -460,6 +482,85 @@ std::vector<std::pair<sfs::path, bool>> Installer::getArchiveFileNames(const sfs
   if(archive_read_free(source) != ARCHIVE_OK)
     throw CompressionError("Parsing of archive failed.");
   return file_names;
+}
+
+void Installer::pruneToSelection(const sfs::path& extract_dir,
+                                 const std::set<sfs::path>& selected_files)
+{
+  log(Log::LOG_DEBUG, "Pruning extracted files to selection");
+
+  if(selected_files.empty() || !sfs::is_directory(extract_dir))
+    return;
+
+  // Normalize the selection. Archive directory entries may carry a trailing
+  // slash (e.g. "foo/"), which std::filesystem treats as distinct from "foo";
+  // lexically_normal() collapses these so comparisons against the walked tree
+  // are consistent. Empty/"." entries (e.g. the archive root) are dropped, as
+  // selecting the root means "keep everything".
+  std::set<sfs::path> selection;
+  for(const auto& raw : selected_files)
+  {
+    const auto normalized = raw.lexically_normal();
+    if(normalized.empty() || normalized == ".")
+      return; // root selected -> keep everything, nothing to prune
+    selection.insert(normalized);
+  }
+
+  // Returns true if the given archive-relative path must be kept: it is selected
+  // itself, or it is a descendant of a selected directory.
+  auto is_selected_or_under_selection = [&selection](const sfs::path& rel) -> bool
+  {
+    if(selection.contains(rel))
+      return true;
+    sfs::path ancestor = rel.parent_path();
+    while(!ancestor.empty() && ancestor != ".")
+    {
+      if(selection.contains(ancestor))
+        return true;
+      ancestor = ancestor.parent_path();
+    }
+    return false;
+  };
+
+  // First pass: delete every regular file (and symlink) that is not selected and
+  // not contained in a selected directory. Collect candidate directories for the
+  // second pass. Do not mutate the tree while iterating: gather first, act after.
+  std::vector<sfs::path> files_to_remove;
+  std::vector<sfs::path> directories;
+  for(const auto& dir_entry :
+      sfs::recursive_directory_iterator(extract_dir, sfs::directory_options::none))
+  {
+    const auto rel = sfs::path(pu::getRelativePath(dir_entry.path(), extract_dir)).lexically_normal();
+    if(dir_entry.is_directory() && !dir_entry.is_symlink())
+    {
+      directories.push_back(dir_entry.path());
+      continue;
+    }
+    if(!is_selected_or_under_selection(rel))
+      files_to_remove.push_back(dir_entry.path());
+  }
+  for(const auto& file : files_to_remove)
+    sfs::remove(file);
+
+  // Second pass: remove directories that are neither selected, under a selected
+  // directory, nor an ancestor of a kept file. A directory is an ancestor of a
+  // kept file iff it still contains files after the first pass, so simply drop
+  // any directory that has become empty and is not itself part of the selection.
+  // Process deepest first so parents see their emptied children.
+  std::sort(directories.begin(),
+            directories.end(),
+            [](const sfs::path& a, const sfs::path& b)
+            { return pu::getPathLength(a) > pu::getPathLength(b); });
+  for(const auto& dir : directories)
+  {
+    if(!sfs::exists(dir))
+      continue;
+    const auto rel = sfs::path(pu::getRelativePath(dir, extract_dir)).lexically_normal();
+    if(is_selected_or_under_selection(rel))
+      continue; // explicitly selected directory subtree: keep even if empty
+    if(pu::directoryIsEmpty(dir))
+      sfs::remove_all(dir);
+  }
 }
 
 std::tuple<int, std::string, std::string> Installer::detectInstallerSignature(
