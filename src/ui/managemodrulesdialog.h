@@ -7,6 +7,8 @@
 
 #include "../core/modrule.h"
 #include <QDialog>
+#include <QString>
+#include <unordered_map>
 #include <vector>
 
 namespace Ui
@@ -76,6 +78,8 @@ private:
   std::vector<ModRule> rules_;
   /*! \brief Maps combo box index to mod id for the target selector. */
   std::vector<int> target_ids_;
+  /*! \brief Maps mod id to display name; populated by setupDialog for name resolution in the table. */
+  std::unordered_map<int, QString> id_to_name_;
 
   /*! \brief Rebuilds the rules table from rules_. */
   void refreshTable();

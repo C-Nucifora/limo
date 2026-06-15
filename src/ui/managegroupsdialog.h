@@ -8,6 +8,8 @@
 #include <QDialog>
 #include <QString>
 #include <QStringList>
+#include <map>
+#include <string>
 #include <vector>
 
 namespace Ui
@@ -20,6 +22,10 @@ class ManageGroupsDialog;
  *
  * Allows the user to rename a group, edit its notes, switch the active member,
  * and dissolve (remove) the entire group.
+ *
+ * Rename and notes edits are accumulated locally and only committed — via signals —
+ * when the user clicks OK or Apply.  Cancel discards uncommitted edits.
+ * Set Active and Dissolve take effect immediately (structural changes).
  *
  * The dialog emits signals instead of calling ModdedApplication directly so that
  * it can be connected to ApplicationManager in the normal Limo signal/slot pattern.
@@ -91,17 +97,26 @@ private slots:
   /*! \brief Updates the detail panel when the selected group changes. */
   void on_group_list_currentRowChanged(int row);
 
-  /*! \brief Applies the rename entered in the name field. */
+  /*! \brief Stages a rename for the current group (no signal emitted yet). */
   void on_rename_button_clicked();
 
-  /*! \brief Saves edited notes back to the group. */
+  /*! \brief Stages a notes update for the current group (no signal emitted yet). */
   void on_save_notes_button_clicked();
 
-  /*! \brief Changes the active member to the currently selected member. */
+  /*! \brief Changes the active member to the currently selected member (immediate). */
   void on_set_active_button_clicked();
 
-  /*! \brief Dissolves the currently selected group. */
+  /*! \brief Dissolves the currently selected group (immediate, with confirmation). */
   void on_dissolve_button_clicked();
+
+  /*! \brief Commits all pending edits and closes the dialog. */
+  void on_buttonBox_accepted();
+
+  /*! \brief Commits all pending edits without closing the dialog. */
+  void on_apply_button_clicked();
+
+  /*! \brief Discards all pending edits and closes the dialog. */
+  void on_buttonBox_rejected();
 
 private:
   /*! \brief Auto-generated UI. */
@@ -120,6 +135,23 @@ private:
   std::vector<int> active_members_;
   /*! \brief Mod-id to mod-name map for display. */
   std::map<int, std::string> mod_names_;
+
+  /*!
+   * \brief Pending name edits keyed by group index.
+   *
+   * Only populated when the user clicks Rename; cleared after commit.
+   */
+  std::map<int, std::string> pending_names_;
+
+  /*!
+   * \brief Pending notes edits keyed by group index.
+   *
+   * Only populated when the user clicks Save Notes; cleared after commit.
+   */
+  std::map<int, std::string> pending_notes_;
+
+  /*! \brief Emits signals for all entries in pending_names_ and pending_notes_. */
+  void commitPendingEdits();
 
   /*! \brief Refreshes the detail panel for the current group. */
   void refreshDetailPanel();

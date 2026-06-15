@@ -24,6 +24,10 @@ class ConflictDetailDialog;
  * "Files this mod loses" lists every conflicting file where a later mod overwrites the
  * selected mod, together with the name of that winning mod.
  *
+ * When the mod has no conflicting files at all both lists would be empty; in that case
+ * the lists are hidden and a "This mod has no conflicting files." label is shown instead
+ * (fix for limo-app/limo#36).
+ *
  * The winner is determined by the last element of ConflictInfo::mod_ids, which matches
  * the deployment rule in Deployer::getDeploymentSourceFilesAndModSizes (last mod in load
  * order wins).

@@ -219,10 +219,4 @@ private:
   void appendEnvironmentVariables(std::string& command,
                                   const std::map<std::string, std::string>& environment_variables,
                                   bool is_flatpak) const;
-  /*!
-   * \brief Encloses the given string in quotes, if it is not already enclosed.
-   * \param string String to be enclosed.
-   * \return The enclosed string.
-   */
-  std::string encloseInQuotes(const std::string& string) const;
 };

@@ -114,6 +114,17 @@ private:
   /*! \brief Wrapper for \ref writePluginsPrivate. */
   void writePlugins() const override;
   /*!
+   * \brief Case-insensitive override of updatePlugins().
+   *
+   * OpenMW plugin names in openmw.cfg may differ in case from the actual
+   * filenames on disk (e.g. "MyMod.ESP" vs "MyMod.esp").  The base-class
+   * implementation uses case-sensitive equality, so a plugin whose stored
+   * name case doesn't exactly match the on-disk name is treated as a new
+   * plugin and re-enabled, losing any disabled state.  This override
+   * performs all name comparisons case-insensitively to fix that.
+   */
+  void updatePlugins() override;
+  /*!
    *  \brief Initializes the plugin file, if it does not exist.
    *  \return A bool indicating if the plugin file was created.
    */

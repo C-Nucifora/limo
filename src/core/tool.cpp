@@ -4,6 +4,28 @@
 
 namespace sfs = std::filesystem;
 
+/*!
+ * \brief POSIX single-quote escapes \p s so it is safe to embed in a shell
+ *        command constructed for popen(3).  Every single-quote in the input is
+ *        replaced with the sequence '\'' (end quote, literal single-quote,
+ *        reopen quote) and the whole string is wrapped in single quotes.
+ *        Single-quoting prevents the shell from expanding $, backticks, \, and
+ *        double-quotes inside the value.
+ */
+static std::string shellEscape(const std::string& s)
+{
+  std::string out = "'";
+  for(char c : s)
+  {
+    if(c == '\'')
+      out += "'\\''";
+    else
+      out += c;
+  }
+  out += "'";
+  return out;
+}
+
 
 Tool::Tool(const std::string& name, const sfs::path& icon_path, const std::string& command) :
   name_(name), icon_path_(icon_path), runtime_(native), command_overwrite_(command)
@@ -106,9 +128,9 @@ std::string Tool::getCommand(bool is_flatpak) const
   if(!working_directory_.empty())
   {
     if(is_flatpak)
-      command += "--directory=" + encloseInQuotes(working_directory_.string());
+      command += "--directory=" + shellEscape(working_directory_.string());
     else
-      command += "cd " + encloseInQuotes(working_directory_.string()) + ";";
+      command += "cd " + shellEscape(working_directory_.string()) + ";";
   }
 
   appendEnvironmentVariables(command, environment_variables_, is_flatpak);
@@ -132,7 +154,7 @@ std::string Tool::getCommand(bool is_flatpak) const
 
   if(!command.empty())
     command += " ";
-  command += encloseInQuotes(executable_path_);
+  command += shellEscape(executable_path_.string());
 
   if(!arguments_.empty())
     command += " " + arguments_;
@@ -234,14 +256,7 @@ void Tool::appendEnvironmentVariables(
       command += " ";
     if(is_flatpak)
       command += "--env=";
-    command += variable + "=" + encloseInQuotes(value);
+    command += variable + "=" + shellEscape(value);
   }
 }
 
-std::string Tool::encloseInQuotes(const std::string& string) const
-{
-  if(string.starts_with('"') && string.ends_with('"'))
-    return string;
-
-  return '"' + string + '"';
-}

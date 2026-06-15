@@ -47,6 +47,14 @@ ConflictDetailDialog::ConflictDetailDialog(int mod_id,
                            QString::number(ui->wins_list->count()) + ")");
   ui->losses_group->setTitle("Files this mod loses  (" +
                              QString::number(ui->losses_list->count()) + ")");
+
+  // Fix for limo-app/limo#36: when both lists are empty the dialog showed two
+  // blank panels with no explanation.  Hide the lists and show a plain message
+  // instead so the user knows the mod simply has no conflicting files.
+  const bool has_any = ui->wins_list->count() > 0 || ui->losses_list->count() > 0;
+  ui->no_conflicts_label->setVisible(!has_any);
+  ui->wins_group->setVisible(has_any);
+  ui->losses_group->setVisible(has_any);
 }
 
 ConflictDetailDialog::~ConflictDetailDialog()
