@@ -18,6 +18,30 @@
 class LootDeployer : public PluginDeployer
 {
 public:
+  /*! \brief Severity of a \ref PluginMessage, mirroring loot::MessageType. */
+  enum class MessageSeverity
+  {
+    /*! \brief Informational note (loot 'say'). */
+    say,
+    /*! \brief Warning the user may wish to act on (loot 'warn'). */
+    warn,
+    /*! \brief Error requiring user action (loot 'error'). */
+    error
+  };
+
+  /*!
+   * \brief Holds a single LOOT message or warning attached to a plugin.
+   */
+  struct PluginMessage
+  {
+    /*! \brief File name of the plugin the message belongs to. */
+    std::string plugin_name;
+    /*! \brief Severity of the message. */
+    MessageSeverity severity = MessageSeverity::say;
+    /*! \brief Human readable message text. */
+    std::string text;
+  };
+
   /*!
    * \brief Loads plugins and identifies the app type to be managed.
    * \param source_path Path to the directory containing installed plugins.
@@ -113,6 +137,26 @@ public:
    * \return The tag names mapped to how many plugins of that tag exist.
    */
   virtual std::map<std::string, int> getAutoTagMap() override;
+  /*!
+   * \brief Collects per-plugin messages and warnings from LOOT's evaluated
+   * metadata (masterlist/userlist notes, dirty plugin info, missing
+   * requirements and incompatibilities) for every currently managed plugin.
+   * \details Loads the master-, user- and prelude lists from the target
+   * directory (if present), then queries libloot's evaluated plugin metadata.
+   * Returns an empty vector and logs a warning if anything goes wrong, so
+   * callers never have to handle exceptions.
+   * \return One \ref PluginMessage per collected note, in plugin load order.
+   *
+   * UI hookup (documented follow-up, UI files are out of scope here):
+   *   The plugin view (PluginList / the plugins tab in MainWindow) should call
+   *   getPluginMessages() after a sort/refresh, group the results by
+   *   PluginMessage::plugin_name, and render a per-row icon/tooltip coloured by
+   *   PluginMessage::severity (say = info, warn = yellow, error = red), e.g. via
+   *   a new column delegate or a status icon next to each plugin name. Until
+   *   that lands, the same information is emitted through the log_ callback at
+   *   the end of sortModsByConflicts().
+   */
+  std::vector<PluginMessage> getPluginMessages() const;
 
   // fork #31: LOOT user-metadata (userlist.yaml) editing support.
   /*!
@@ -275,4 +319,16 @@ protected:
    * \return True iff the plugin should be excluded from the written Plugins.txt.
    */
   bool isImplicitlyManagedPlugin(const std::string& plugin_name) const;
+  /*!
+   * \brief Loads the master-, user- and prelude lists into the given database
+   * using the libloot API available in this tree.
+   * \param database The database to load the lists into.
+   * \param master_list_path Path to the masterlist.yaml, may be empty.
+   * \param user_list_path Path to the userlist.yaml, may be empty.
+   * \param prelude_path Path to the prelude.yaml, may be empty.
+   */
+  static void loadLists(loot::DatabaseInterface& database,
+                        const std::filesystem::path& master_list_path,
+                        const std::filesystem::path& user_list_path,
+                        const std::filesystem::path& prelude_path);
 };
