@@ -237,6 +237,8 @@ private:
   QAction* clear_color_action_;
   /*! \brief fork #200: Mod context action: open the per-mod config-file editor. */
   QAction* edit_config_action_;
+  /*! \brief fork #78: checkable View action toggling the Tools pane visibility. */
+  QAction* show_tools_pane_action_ = nullptr;
   /*! \brief Deployer context action: show per-file win/loss conflict detail for the selected mod. */
   QAction* conflict_detail_action_;
   /*! \brief Deployer context action (Witcher 3): merge conflicting WitcherScript files. */
@@ -1324,6 +1326,8 @@ private slots:
   void onEditModConfig();
   /*! \brief fork #203: Builds an instance summary and shows the dashboard dialog. */
   void onShowInstanceDashboard();
+  /*! \brief fork #78: Shows or hides the Tools pane and persists the choice. */
+  void onToggleToolsPane(bool visible);
   /*! \brief fork #208: Confirms then purges and redeploys all deployers from scratch. */
   void onForceRedeploy();
   /*! \brief fork #145: Requests the prunable outdated archive list for the current app. */

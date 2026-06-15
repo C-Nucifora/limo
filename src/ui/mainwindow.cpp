@@ -903,6 +903,13 @@ void MainWindow::setupMenus()
   // fork #145: bulk-remove outdated downloaded archive versions.
   QAction* prune_action = tools_menu->addAction(tr("Remove Old Archive Versions"));
   connect(prune_action, &QAction::triggered, this, &MainWindow::onPruneArchives);
+  // fork #78: a "View" menu with a checkable toggle for the Tools pane.
+  QMenu* view_menu = menuBar()->addMenu(tr("View"));
+  show_tools_pane_action_ = view_menu->addAction(tr("Show Tools Pane"));
+  show_tools_pane_action_->setCheckable(true);
+  show_tools_pane_action_->setChecked(true);
+  connect(
+    show_tools_pane_action_, &QAction::toggled, this, &MainWindow::onToggleToolsPane);
   // fork #1/#2: Add a "Collections" menu with Import/Export actions.
   QMenu* collections_menu = menuBar()->addMenu("Collections");
   QAction* import_collection_action = collections_menu->addAction("Import Collection");
@@ -1568,6 +1575,10 @@ void MainWindow::loadSettings()
   int tab = settings.value("current_tab", 0).toInt();
   if(ui->app_tab_widget->count() > tab)
     ui->app_tab_widget->setCurrentIndex(tab);
+  // fork #78: restore Tools pane visibility (default shown). Setting the action's checked
+  // state triggers onToggleToolsPane via the toggled signal, which applies the visibility.
+  if(show_tools_pane_action_)
+    show_tools_pane_action_->setChecked(settings.value("show_tools_pane", true).toBool());
   ask_remove_from_deployer_ = settings.value("ask_remove_from_deployer", true).toBool();
   ask_remove_mod_ = settings.value("ask_remove_mod", true).toBool();
   ask_remove_profile_ = settings.value("ask_remove_profile", true).toBool();
@@ -4302,6 +4313,15 @@ void MainWindow::onShowInstanceDashboard()
                             .arg(stats.enabled_mods);
   InstanceDashboardDialog dialog(stats, this);
   dialog.exec();
+}
+
+void MainWindow::onToggleToolsPane(bool visible)
+{
+  // fork #78: the Tools pane is the "Tools" header label plus the tool table.
+  ui->label_5->setVisible(visible);
+  ui->info_tool_list->setVisible(visible);
+  QSettings settings = QSettings(QCoreApplication::applicationName());
+  settings.setValue("show_tools_pane", visible);
 }
 
 void MainWindow::onForceRedeploy()
