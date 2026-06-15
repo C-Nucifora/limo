@@ -327,6 +327,19 @@ void PluginDeployer::updatePlugins()
     if(str::find_if(plugin_files, [&it](const auto& s) { return it->first == s; }) !=
        plugin_files.end())
       new_plugins.emplace_back(*it);
+    else
+      // Plugin is listed in the load-order file but has no corresponding file on
+      // disk.  Drop it from the active list and log a warning so users know why
+      // it disappears.  This prevents LOOT's GetPlugin() from returning a null
+      // pointer and crashing when the missing entry is later looked up
+      // (limo-app/limo#185, limo-app/limo#31).
+      log_(Log::LOG_WARNING,
+           std::format("Deployer '{}': Plugin '{}' is listed in '{}' but not found "
+                       "in '{}' — removing from load order.",
+                       name_,
+                       it->first,
+                       plugin_file_name_,
+                       source_path_.string()));
   }
   for(auto it = plugin_files.begin(); it != plugin_files.end(); it++)
   {
