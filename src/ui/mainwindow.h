@@ -1228,6 +1228,13 @@ private slots:
    * \param command The shell command to run.
    */
   void onRunGameCommand(QString name, QString command);
+  /*!
+   * \brief Exports the current deployer's ordered mod list to a CSV or Markdown file.
+   * Opens a save dialog and writes load order index, mod name, version, enabled state,
+   * tags, and Nexus URL for every mod in the active deployer's load order.
+   * Implements fork issue #7.
+   */
+  void on_actionExport_Mod_List_triggered();
 
 signals:
   /*!
