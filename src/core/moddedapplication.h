@@ -822,6 +822,64 @@ public:
    */
   std::string buildRedmodDeployCommand(int deployer);
 
+  /*! \brief Name of the config file contained in an exported instance bundle. */
+  inline static const std::string INSTANCE_BUNDLE_FILE_NAME = "limo_instance.json";
+  /*! \brief Format version written into exported instance bundles. */
+  inline static constexpr int INSTANCE_BUNDLE_VERSION = 1;
+  /*! \brief Token used to mark a stored path as relative to the staging directory. */
+  inline static const std::string STAGING_TOKEN = "$STAGING$";
+
+  /*!
+   * \brief Exports this instance's configuration (app, deployers, profiles, tools, groups,
+   * tags and rules) to a single self-contained, portable JSON bundle.
+   *
+   * The bundle does NOT contain the mod blobs themselves; it only captures the metadata
+   * required to recreate the instance on another machine. Stored paths are generalized
+   * (Steam install / prefix / home paths are tokenized) so that the bundle is relocatable.
+   * The structure mirrors the on-disk settings written by \ref updateSettings, wrapped in a
+   * small header containing a format version and metadata.
+   *
+   * \param target Destination file for the bundle. If it names an existing directory, the
+   * bundle is written inside it using \ref INSTANCE_BUNDLE_FILE_NAME.
+   * \throws std::runtime_error If the target file can not be written.
+   */
+  void exportInstance(const std::filesystem::path& target) const;
+
+  /*!
+   * \brief Parses an exported instance bundle (as produced by \ref exportInstance) and
+   * returns the contained settings object, ready to be written as a config file.
+   *
+   * Steam/home path tokens are left untouched (they are resolved lazily on load, exactly
+   * like the regular config), so the returned object is portable. The caller
+   * (e.g. ApplicationManager / UI) is responsible for choosing a staging directory and
+   * constructing a \ref ModdedApplication from it; see \ref importInstanceInto for a helper
+   * that writes the parsed config into a fresh staging directory.
+   *
+   * \param bundle Path to the bundle file, or a directory containing
+   * \ref INSTANCE_BUNDLE_FILE_NAME.
+   * \return The parsed settings object (the same shape as the on-disk config file).
+   * \throws std::runtime_error If the bundle can not be read.
+   * \throws ParseError If the bundle is not a valid instance bundle.
+   */
+  static Json::Value parseInstanceBundle(const std::filesystem::path& bundle);
+
+  /*!
+   * \brief Imports an exported instance bundle into the given (fresh) staging directory by
+   * writing a config file that a \ref ModdedApplication can subsequently load.
+   *
+   * This is the import counterpart to \ref exportInstance. It does not move any mod blobs;
+   * the resulting instance references mods by id/path exactly as the source did. The caller
+   * is expected to construct a \ref ModdedApplication on \p staging_dir afterwards.
+   *
+   * \param bundle Path to the bundle file (or a directory containing it).
+   * \param staging_dir Target staging directory. Must not already contain a config file.
+   * \throws std::runtime_error If a config file already exists in \p staging_dir or it can
+   * not be written.
+   * \throws ParseError If the bundle is invalid.
+   */
+  static void importInstanceInto(const std::filesystem::path& bundle,
+                                 const std::filesystem::path& staging_dir);
+
 private:
   /*! \brief The subdirectory used to store downloads. */
   static inline constexpr std::string DOWNLOAD_DIR = "_download";
@@ -986,12 +1044,13 @@ private:
    * \param path Path to check.
    * \return If no steam paths are found: The input path, else: The modified path.
    */
-  std::string generalizeSteamPath(const std::string& path);
+  std::string generalizeSteamPath(const std::string& path) const;
   /*! \brief If the icon path is a steam path: Update it to the new format. */
   void updateSteamIconPath();
   /*! \brief If steam_app_id_ == -1: Try to determine the app id. */
   void updateSteamAppId();
   /*!
+<<<<<<< HEAD
    * \brief Builds the set of mod ids that are enabled in at least one deployer for the
    * current profile.
    * \return Set of enabled mod ids.
@@ -1010,4 +1069,24 @@ private:
    * \param mod_id Id of the mod whose staging directory should be scanned.
    */
   void autoAddScriptExtenderTools(int mod_id);
+  /*!
+   * \brief Converts an absolute path into a staging-relative, relocatable form.
+   *
+   * If \p path lies inside the staging directory, the staging prefix is replaced with
+   * \ref STAGING_TOKEN. Otherwise the path is returned unchanged. This keeps configs
+   * portable while remaining a no-op for paths that live outside the instance.
+   * \param path Path to relativize.
+   * \return The relocatable representation.
+   */
+  std::string relativizeToStaging(const std::filesystem::path& path) const;
+  /*!
+   * \brief Resolves a (possibly tokenized) stored path back to an absolute path.
+   *
+   * If \p path starts with \ref STAGING_TOKEN it is resolved against the current staging
+   * directory. Any other value (e.g. legacy absolute paths) is returned unchanged, which
+   * preserves backward compatibility with existing configs.
+   * \param path Stored path, possibly containing \ref STAGING_TOKEN.
+   * \return The resolved path.
+   */
+  std::filesystem::path resolveFromStaging(const std::string& path) const;
 };
