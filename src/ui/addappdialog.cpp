@@ -72,6 +72,12 @@ void AddAppDialog::on_name_field_textChanged(const QString& text)
 
 void AddAppDialog::on_path_field_textChanged(const QString& text)
 {
+  // When adding a new app, try to materialise a missing staging directory (single
+  // missing parent only). On success the path now exists, so the field's own
+  // existence-based validation styling needs refreshing to clear the red tint. (fork #78)
+  if(!edit_mode_ && ensureStagingDirExists())
+    ui->path_field->updateValidation();
+
   if(!pathIsValid())
     enableOkButton(false);
   else if(!ui->name_field->text().isEmpty()) {
@@ -104,6 +110,45 @@ bool AddAppDialog::pathIsValid()
     return false;
   std::error_code ec;
   return std::filesystem::exists(path.toStdString(), ec);
+}
+
+bool AddAppDialog::ensureStagingDirExists() // fork #78
+{
+  // Only auto-create when adding a new application; editing an existing app's
+  // staging dir keeps its previous behaviour.
+  if(edit_mode_)
+    return pathIsValid();
+
+  const QString text = ui->path_field->text();
+  if(text.isEmpty())
+    return false;
+
+  std::error_code ec;
+  const sfs::path path = text.toStdString();
+  if(sfs::exists(path, ec))
+    return true;
+
+  // Safety: only create when the immediate parent already exists, or exactly one
+  // parent level is missing. If more than one ancestor is missing the path most
+  // likely contains a typo, so we leave validation to reject it rather than
+  // silently creating a deep, arbitrary directory tree.
+  const sfs::path parent = path.parent_path();
+  if(parent.empty())
+    return false;
+  if(!sfs::exists(parent, ec) && !sfs::exists(parent.parent_path(), ec))
+    return false;
+
+  // create_directories makes the (at most one) missing parent and the staging dir
+  // itself. Guarded by error_code so a failure simply leaves the field invalid.
+  sfs::create_directories(path, ec);
+  if(ec)
+  {
+    Log::debug("Failed to auto-create staging directory at: " + path.string() +
+               ". Error was: " + ec.message());
+    return false;
+  }
+  Log::debug("Auto-created staging directory at: " + path.string());
+  return true;
 }
 
 bool AddAppDialog::iconIsValid(const QString& path)
