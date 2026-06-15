@@ -31,6 +31,7 @@
 #include <QInputDialog>
 #include <QFile>
 #include <QFileDialog>
+#include <QDockWidget> // fork #8: host the Downloads panel
 #include <QMessageBox>
 #include <QMetaType>
 #include <QPainter>
@@ -79,6 +80,8 @@ Q_DECLARE_METATYPE(ImportModInfo);
 Q_DECLARE_METATYPE(std::vector<ModRule>);
 Q_DECLARE_METATYPE(std::vector<std::string>);
 Q_DECLARE_METATYPE(std::vector<std::vector<int>>);
+// fork #8: queued connections carry the download queue snapshot across threads
+Q_DECLARE_METATYPE(std::vector<DownloadQueueItem>);
 
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWindow)
@@ -105,6 +108,43 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
   setupIpcServer();
   addAction(ui->actionSelect_All);
   setWindowTitle("Limo");
+
+  // ---- fork #8: persistent download queue panel -----------------------------
+  // Host the DownloadsWidget in a dockable panel and wire it to the (worker-thread)
+  // ApplicationManager via queued connections. All queue mutations happen in the
+  // ApplicationManager; the widget is a pure view refreshed by downloadQueueChanged.
+  downloads_widget_ = new DownloadsWidget(this);
+  auto* downloads_dock = new QDockWidget("Downloads", this);
+  downloads_dock->setObjectName("downloads_dock");
+  downloads_dock->setWidget(downloads_widget_);
+  addDockWidget(Qt::BottomDockWidgetArea, downloads_dock);
+  downloads_dock->hide(); // hidden by default; user can show it via the dock toggle
+  qRegisterMetaType<std::vector<DownloadQueueItem>>("std::vector<DownloadQueueItem>");
+  connect(app_manager_,
+          &ApplicationManager::downloadQueueChanged,
+          downloads_widget_,
+          &DownloadsWidget::onDownloadQueueChanged);
+  connect(downloads_widget_,
+          &DownloadsWidget::requestDownloadQueue,
+          app_manager_,
+          &ApplicationManager::requestDownloadQueue);
+  connect(downloads_widget_,
+          &DownloadsWidget::cancelDownload,
+          app_manager_,
+          &ApplicationManager::cancelDownload);
+  connect(downloads_widget_,
+          &DownloadsWidget::retryDownload,
+          app_manager_,
+          &ApplicationManager::retryDownload);
+  connect(downloads_widget_,
+          &DownloadsWidget::removeDownload,
+          app_manager_,
+          &ApplicationManager::removeDownload);
+  // request the initial queue snapshot (marshalled onto the worker thread)
+  QMetaObject::invokeMethod(
+    app_manager_, &ApplicationManager::requestDownloadQueue, Qt::QueuedConnection);
+  // ---- end fork #8 ----------------------------------------------------------
+
   Log::info("Startup complete");
 }
 

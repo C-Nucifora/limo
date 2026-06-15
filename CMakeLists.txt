@@ -406,6 +406,10 @@ set(PROJECT_SOURCES
         src/ui/versionboxdelegate.cpp
         src/ui/versionboxdelegate.h
         src/ui/qmodelindexutils.h
+        # fork #8: persistent download queue with progress and retry
+        src/ui/downloadswidget.cpp
+        src/ui/downloadswidget.h
+        src/ui/downloadswidget.ui
 )
 
 qt_add_resources(QSS_RESOURCES

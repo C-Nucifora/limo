@@ -18,6 +18,8 @@
 #include "backuplistmodel.h"
 #include "backupnamedelegate.h"
 #include "conflictdetaildialog.h"
+// fork #8: persistent download queue panel
+#include "downloadswidget.h"
 #include "conflictsmodel.h"
 #include "core/importmodinfo.h"
 #include "managegroupsdialog.h"
@@ -264,6 +266,8 @@ private:
   std::unique_ptr<ImportMo2Dialog> import_mo2_dialog_;
   /*! \brief Menu action that opens import_mo2_dialog_. */
   QAction* import_mo2_action_;
+  /*! \brief fork #8: Panel showing the persistent download queue (hosted in a dock). */
+  DownloadsWidget* downloads_widget_ = nullptr;
   /*! \brief Stores the index in ui->mod_list of a mod before being added to a group. */
   int last_mod_list_index_ = -1;
   /*!

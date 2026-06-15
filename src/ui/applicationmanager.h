@@ -17,6 +17,66 @@
 #include <QObject>
 #include <QStandardPaths>
 #include <filesystem>
+#include <mutex>
+#include <vector>
+
+
+// fork #8: persistent download queue with progress and retry.
+/*!
+ * \brief A single, serializable entry of the persistent download queue.
+ *
+ * One of these is created for every requested download. They are persisted to a JSON
+ * file (see ApplicationManager::saveDownloadQueue) so that queued or incomplete
+ * downloads survive a restart of the application.
+ */
+struct DownloadQueueItem
+{
+  /*! \brief Lifecycle state of a queued download. */
+  enum Status
+  {
+    /*! \brief Waiting to be started. */
+    queued = 0,
+    /*! \brief Currently downloading. */
+    active = 1,
+    /*! \brief Finished successfully. */
+    done = 2,
+    /*! \brief Failed (network error, bad response, ...). May be retried. */
+    failed = 3,
+    /*! \brief Cancelled by the user. */
+    cancelled = 4
+  };
+
+  /*! \brief Stable id assigned by Limo, unique within a queue file. */
+  int id = -1;
+  /*! \brief Target application id this download belongs to. */
+  int app_id = -1;
+  /*! \brief Remote source URL (mod page url) used to (re)request the download. */
+  std::string remote_source = "";
+  /*! \brief Remote request URL (if the request came from an nxm handler). */
+  std::string remote_request_url = "";
+  /*! \brief Remote mod id, if known. */
+  long remote_mod_id = -1;
+  /*! \brief Remote file id, if known. */
+  long remote_file_id = -1;
+  /*! \brief Directory the file is downloaded into. */
+  std::string target_path = "";
+  /*! \brief Human readable display name (file name or mod name). */
+  std::string name = "";
+  /*! \brief Version overwrite to apply once installed. */
+  std::string version_overwrite = "";
+  /*! \brief Group the download should be added to after installation (-1 = none). */
+  int target_group_id = -1;
+  /*! \brief Current status. */
+  Status status = queued;
+  /*! \brief Bytes downloaded so far. */
+  long long bytes_done = 0;
+  /*! \brief Total bytes to download (0 if unknown). */
+  long long bytes_total = 0;
+  /*! \brief Current download speed in bytes/second (0 if unknown/not active). */
+  double speed = 0.0;
+  /*! \brief Number of times this item has been retried. */
+  int retry_count = 0;
+};
 
 
 /*!
@@ -370,6 +430,57 @@ private:
   /*! \brief If true: Do not catch exceptions. */
   bool throw_exceptions_ = false;
 
+  // ---- fork #8: persistent download queue state ------------------------------
+  /*! \brief All known download queue items (queued/active/done/failed/cancelled). */
+  std::vector<DownloadQueueItem> download_queue_;
+  /*! \brief Guards download_queue_ (download runs off the UI thread). */
+  std::mutex download_queue_mutex_;
+  /*! \brief Next id to assign to a new queue item. */
+  int next_download_id_ = 0;
+  /*! \brief Id of the item currently being downloaded, or -1 if none. */
+  int active_download_id_ = -1;
+  /*! \brief Set to true to request cancellation of the active download. */
+  bool cancel_active_download_ = false;
+  /*! \brief JSON file name used to persist the download queue. */
+  static inline constexpr char DOWNLOAD_QUEUE_FILE_NAME[] = "lmm_queue.json";
+  /*! \brief Subdirectory (relative to staging) used for downloads. */
+  static inline constexpr char DOWNLOAD_DIR_NAME[] = "_download";
+
+  /*!
+   * \brief Returns the path to the download queue JSON file. Uses the first
+   * application's download directory if available, otherwise the user app-data dir.
+   */
+  std::filesystem::path getDownloadQueuePath() const;
+  /*! \brief Writes download_queue_ to disk. Caller must hold download_queue_mutex_. */
+  void saveDownloadQueueLocked();
+  /*! \brief Reads download_queue_ from disk (called on startup). */
+  void loadDownloadQueue();
+  /*! \brief Emits downloadQueueChanged with a copy of download_queue_. */
+  void emitDownloadQueueLocked();
+  /*!
+   * \brief Builds an ImportModInfo for downloading the given queue item.
+   * \param item The queue item.
+   * \return The constructed ImportModInfo.
+   */
+  ImportModInfo importInfoForItem(const DownloadQueueItem& item) const;
+  /*! \brief Runs the download for the item with the given id (worker thread). */
+  void runDownloadForId(int id);
+
+public:
+  /*!
+   * \brief Reports progress for the active download. Called from performDownload.
+   * \param bytes_done Bytes downloaded so far.
+   * \param bytes_total Total bytes (0 if unknown).
+   * \param speed Current speed in bytes/second.
+   * \return False if the active download should abort (cancellation requested).
+   */
+  bool reportDownloadProgress(long long bytes_done, long long bytes_total, double speed);
+  /*! \brief Returns true if cancellation of the active download was requested. */
+  bool downloadCancelRequested();
+
+private:
+  // ---- End fork #8 -----------------------------------------------------------
+
   /*!
    * \brief Updates the settings file with the current state of this object.
    */
@@ -535,6 +646,14 @@ signals:
   void downloadComplete(ImportModInfo info);
   /*! \brief Signals a failed download. */
   void downloadFailed();
+  /*!
+   * \brief fork #8: Emitted whenever the persistent download queue changes
+   * (item added/removed, progress, status change). Carries a full snapshot so the
+   * DownloadsWidget can rebuild itself. Marshalled to the UI thread via a queued
+   * connection.
+   * \param queue Snapshot of all current queue items.
+   */
+  void downloadQueueChanged(std::vector<DownloadQueueItem> queue);
   /*!
    * \brief Signals mod installation has been completed.
    * \param success If true: Installation was successful.
@@ -1035,6 +1154,32 @@ public slots:
    * \param info Contains either a nxm URL or nexus mod and file ids.
    */
   void downloadMod(ImportModInfo info);
+  // ---- fork #8: persistent download queue ------------------------------------
+  /*!
+   * \brief Emits the current state of the persistent download queue via
+   * \ref downloadQueueChanged. Used by the DownloadsWidget to (re)populate itself.
+   */
+  void requestDownloadQueue();
+  /*!
+   * \brief Cancels a queued or active download.
+   *
+   * If the item is currently downloading it is aborted at the next progress callback;
+   * otherwise it is simply marked as cancelled. Cancelled items remain in the queue
+   * (so the user can still retry them) until removed.
+   * \param id Id of the queue item to cancel.
+   */
+  void cancelDownload(int id);
+  /*!
+   * \brief Re-queues a failed/cancelled download and starts it.
+   * \param id Id of the queue item to retry.
+   */
+  void retryDownload(int id);
+  /*!
+   * \brief Removes a finished/failed/cancelled item from the queue.
+   * \param id Id of the queue item to remove.
+   */
+  void removeDownload(int id);
+  // ---- End fork #8 -----------------------------------------------------------
   /*!
    * \brief Checks for available mod updates on NexusMods.
    * \param app_id App for which mod updates are to be checked.
