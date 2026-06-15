@@ -7,9 +7,11 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <fstream>
+#include <optional>
 #include <regex>
 #include <set>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 namespace sfs = std::filesystem;
@@ -129,7 +131,7 @@ void ImportFromSteamDialog::updateTable(sfs::path steam_dir)
       std::smatch match;
       const std::string entry_name = dir_entry.path().filename().string();
       if(std::regex_match(entry_name, match, app_manifest_regex))
-        addTableRow(match[1].str(), library_path);
+        addTableRow(match[1].str(), library_path, library_paths);
     }
   }
   ui->app_table->resizeColumnToContents(0);
@@ -140,32 +142,87 @@ void ImportFromSteamDialog::updateTable(sfs::path steam_dir)
   ui->search_field->setFocus();
 }
 
-bool ImportFromSteamDialog::addTableRow(std::string app_id, sfs::path path)
+std::optional<std::string> ImportFromSteamDialog::parseVdfValue(const std::string& line,
+                                                               const std::string& key) const
+{
+  // Matches a VDF "key" "value" pair tolerant of surrounding whitespace and tabs.
+  // The key is matched case-insensitively and the value may contain anything but a quote.
+  const std::regex key_value_regex(
+    "\\s*\"" + key + "\"\\s*\"([^\"]*)\"", std::regex::icase);
+  std::smatch match;
+  if(std::regex_search(line, match, key_value_regex))
+    return match[1].str();
+  return std::nullopt;
+}
+
+std::optional<sfs::path> ImportFromSteamDialog::locateAppManifest(
+  const std::string& app_id,
+  const sfs::path& preferred_path,
+  const std::vector<sfs::path>& library_paths) const
+{
+  const std::string file_name = std::string("appmanifest_") + app_id + ".acf";
+  // Check the library folder this app was listed under first, then fall back to every
+  // known library folder, since the appmanifest may actually live in a different one.
+  const sfs::path preferred = preferred_path / "steamapps" / file_name;
+  std::error_code ec;
+  if(sfs::is_regular_file(preferred, ec))
+    return preferred;
+  for(const auto& library_path : library_paths)
+  {
+    const sfs::path candidate = library_path / "steamapps" / file_name;
+    if(sfs::is_regular_file(candidate, ec))
+      return candidate;
+  }
+  return std::nullopt;
+}
+
+bool ImportFromSteamDialog::addTableRow(std::string app_id,
+                                        sfs::path path,
+                                        const std::vector<sfs::path>& library_paths)
 {
   // Name | App ID | Prefix | Path
-  std::string file_name = std::string("appmanifest_") + app_id + ".acf";
-  const sfs::path file_path = path / "steamapps" / file_name;
-  std::ifstream file(file_path);
+  const std::optional<sfs::path> file_path = locateAppManifest(app_id, path, library_paths);
+  if(!file_path)
+  {
+    Log::warning(std::string("Could not find appmanifest for app \"") + app_id +
+                 "\" in any Steam library; skipping.");
+    return false;
+  }
+  // Use the library folder that actually contains the appmanifest for all derived paths.
+  path = file_path->parent_path().parent_path();
+  std::ifstream file(*file_path);
   if(!file.is_open())
   {
-    Log::warning(std::string("Could not open ") + file_path.c_str());
+    Log::warning(std::string("Could not open \"") + file_path->string() +
+                 "\"; skipping app \"" + app_id + "\".");
     return false;
   }
   std::string line;
-  std::regex name_regex("\\s*\"name\"\\s*\"([^\"]+)\"");
-  std::regex dir_regex("\\s*\"installdir\"\\s*\"([^\"]+)\"");
   std::string name = "";
   std::string install_dir = "";
-  std::smatch match;
   while(std::getline(file, line))
   {
-    if(std::regex_search(line, match, name_regex))
-      name = match[1].str();
-    else if(std::regex_search(line, match, dir_regex))
-      install_dir = match[1].str();
-    if(name != "" && install_dir != "")
+    if(name.empty())
+    {
+      if(auto value = parseVdfValue(line, "name"))
+        name = *value;
+    }
+    if(install_dir.empty())
+    {
+      if(auto value = parseVdfValue(line, "installdir"))
+        install_dir = *value;
+    }
+    if(!name.empty() && !install_dir.empty())
       break;
   }
+  if(install_dir.empty())
+  {
+    Log::warning(std::string("Appmanifest \"") + file_path->string() +
+                 "\" is missing an \"installdir\" entry; skipping app \"" + app_id + "\".");
+    return false;
+  }
+  if(name.empty())
+    name = install_dir;
   sfs::path full_path = path / "steamapps" / "common" / install_dir;
   QString has_prefix = "False";
   if(sfs::exists(path / "steamapps" / "compatdata" / app_id))

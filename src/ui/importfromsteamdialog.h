@@ -7,6 +7,9 @@
 
 #include <QDialog>
 #include <filesystem>
+#include <optional>
+#include <string>
+#include <vector>
 
 
 namespace Ui
@@ -52,10 +55,39 @@ private:
    * \brief Adds a row to ui->app_table containing information about the app pertaining
    * the given app_id.
    * \param app_id Target app_id.
-   * \param path Path to the apps library folder.
+   * \param path Path to the apps library folder (the library folder that is expected to
+   * contain the app). If the appmanifest is not found there, all paths in library_paths
+   * are searched as well.
+   * \param library_paths All known Steam library folder paths, used as a fallback when
+   * the appmanifest is not located in the expected library folder.
    * \return True if a new row has been added.
    */
-  bool addTableRow(std::string app_id, std::filesystem::path path);
+  bool addTableRow(std::string app_id,
+                   std::filesystem::path path,
+                   const std::vector<std::filesystem::path>& library_paths);
+  /*!
+   * \brief Locates the appmanifest_<app_id>.acf file for the given app by checking the
+   * preferred library folder first, then falling back to every known library folder.
+   * \param app_id Target app_id.
+   * \param preferred_path Library folder that is expected to contain the app.
+   * \param library_paths All known Steam library folder paths.
+   * \return Path to the appmanifest file if one was found, else std::nullopt.
+   */
+  std::optional<std::filesystem::path> locateAppManifest(
+    const std::string& app_id,
+    const std::filesystem::path& preferred_path,
+    const std::vector<std::filesystem::path>& library_paths) const;
+  /*!
+   * \brief Performs a tolerant lookup of a VDF key in a single line.
+   *
+   * The match is case-insensitive for the key and tolerant of surrounding whitespace
+   * (tabs or spaces) between tokens.
+   * \param line Line to be searched.
+   * \param key Key to look for, e.g. "name" or "installdir".
+   * \return The associated value if the key was found on this line, else std::nullopt.
+   */
+  std::optional<std::string> parseVdfValue(const std::string& line,
+                                           const std::string& key) const;
   /*!
    * \brief Shows an error in a QMessageBox with given title and message.
    * \param title Title of the error box.
