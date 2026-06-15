@@ -77,6 +77,15 @@ public:
    */
   void installMod(const ImportModInfo& info);
   /*!
+   * \brief Creates a new, empty mod entry. Allocates a new mod id, creates an empty staging
+   * directory for it and registers the mod so it appears like any other installed mod. The user
+   * can then populate the mod by adding files to its staging directory manually.
+   * \param name Display name for the new mod.
+   * \param version Version string for the new mod. May be empty.
+   * \return The id of the newly created mod.
+   */
+  int createEmptyMod(const std::string& name, const std::string& version = "");
+  /*!
    * \brief Uninstalls the given mods, this includes deleting all installed files.
    * \param mod_id Ids of the mods to be uninstalled.
    * \param installer_type The Installer type used. If an empty string is given, the Installer

@@ -220,6 +220,28 @@ public:
    */
   std::string getCommandOverwrite() const;
 
+  /*!
+   * \brief Attempts to locate the Proton compatibility prefix for the given Steam app.
+   *
+   * Searches the well known Steam library roots (the default install at
+   * \c ~/.steam/steam and \c ~/.local/share/Steam, the flatpak install at
+   * \c ~/.var/app/com.valvesoftware.Steam/.local/share/Steam, plus any additional
+   * libraries listed in each root's \c steamapps/libraryfolders.vdf) for
+   * \c steamapps/compatdata/<appid>/pfx.
+   * \param steam_app_id ID of the steam app whose Proton prefix should be located.
+   * \return The path to the first existing prefix, or an empty path if none is found.
+   */
+  static std::filesystem::path detectProtonPrefix(int steam_app_id);
+  /*!
+   * \brief Returns the Windows user directory inside the Proton prefix of the given Steam app.
+   *
+   * This is the directory under which the Windows user folders (Documents, AppData, ...)
+   * holding per-game config and save files live, i.e. \c <pfx>/drive_c/users/steamuser.
+   * \param steam_app_id ID of the steam app whose Proton prefix should be located.
+   * \return The path to the steamuser directory, or an empty path if the prefix is not found.
+   */
+  static std::filesystem::path protonUserDir(int steam_app_id);
+
 private:
   /*! \brief Name of the tool. */
   std::string name_;

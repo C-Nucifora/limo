@@ -208,6 +208,41 @@ void ModdedApplication::installMod(const ImportModInfo& info)
   updateSettings(true);
 }
 
+int ModdedApplication::createEmptyMod(const std::string& name, const std::string& version)
+{
+  int mod_id = 0;
+  if(!installed_mods_.empty())
+    mod_id = std::max_element(installed_mods_.begin(), installed_mods_.end())->id + 1;
+  while(pu::exists(staging_dir_ / std::to_string(mod_id)) &&
+        mod_id < std::numeric_limits<int>().max())
+    mod_id++;
+  if(mod_id == std::numeric_limits<int>().max())
+    throw std::runtime_error("Error: Could not generate new mod id.");
+  last_mod_id_ = mod_id;
+  sfs::create_directories(staging_dir_ / std::to_string(mod_id));
+  const auto time_now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+  installed_mods_.emplace_back(mod_id,
+                               name,
+                               version,
+                               time_now,
+                               "",
+                               "",
+                               time_now,
+                               0ul,
+                               time_now,
+                               -1l,
+                               -1l,
+                               ImportModInfo::RemoteType::local);
+  installer_map_[mod_id] = Installer::SIMPLEINSTALLER;
+
+  for(auto& tag : auto_tags_)
+    tag.updateMods(staging_dir_, std::vector<int>{ mod_id });
+  updateAutoTagMap();
+
+  updateSettings(true);
+  return mod_id;
+}
+
 void ModdedApplication::uninstallMods(const std::vector<int>& mod_ids,
                                       const std::string& installer_type)
 {
