@@ -358,6 +358,20 @@ private:
   AppInfo app_info_;
   /*! \brief Used to detect root levels during mod installation for the current app. */
   std::vector<RootLevelCondition> root_level_conditions_;
+  /*!
+   * \brief If true: display the application list sorted alphabetically by name.
+   * The underlying app IDs are unaffected; app_combo_id_map_ translates display
+   * index -> real app ID. See limo-app/limo#226.
+   */
+  bool sort_apps_alphabetically_ = false;
+  /*!
+   * \brief Maps each combo-box display index to the real application ID used by
+   * ApplicationManager.  When sort_apps_alphabetically_ is false this is the
+   * identity mapping (index == id). Rebuilt every time the combo is populated.
+   */
+  std::vector<int> app_combo_id_map_;
+  /*! \brief Menu action that toggles alphabetical sorting of the app list. */
+  QAction* sort_apps_alpha_action_;
 
   /*! \brief Creates signal/ slot connections between this and the ApplicationManager. */
   void setupConnections();
@@ -728,6 +742,8 @@ private slots:
   void on_deploy_button_clicked();
   /*! \brief Adds a separator to the deployer for the currently active ModdedApplication. */
   void on_deployer_add_separator_button_clicked();
+  /*! \brief Toggles alphabetical sorting of the application list (limo-app/limo#226). */
+  void onSortAppsAlphaToggled(bool checked);
   /*! \brief Shows a dialog to add a new ModdedApplication. */
   void onAddAppButtonClicked();
   /*! \brief Updates the currently active ModdedApplication. */

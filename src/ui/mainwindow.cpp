@@ -37,6 +37,8 @@
 #include <QSettings>
 #include <QToolButton>
 #include <QtConcurrent/QtConcurrent>
+#include <algorithm>
+#include <numeric>
 #include <ranges>
 #include <regex>
 
@@ -118,6 +120,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
   settings.setValue("main/geometry", saveGeometry());
   settings.setValue("main/state", saveState());
   settings.setValue("current_tab", ui->app_tab_widget->currentIndex());
+  // Save the real app ID so it can be restored correctly regardless of sort order.
   settings.setValue("current_app", currentApp());
   settings.setValue("ask_remove_from_deployer", ask_remove_from_deployer_);
   settings.setValue("ask_remove_mod", ask_remove_mod_);
@@ -127,6 +130,10 @@ void MainWindow::closeEvent(QCloseEvent* event)
   settings.setValue("ask_remove_profile", ask_remove_profile_);
   settings.setValue("ask_remove_backup_target", ask_remove_backup_target_);
   settings.setValue("ask_remove_tool", ask_remove_tool_);
+  settings.setValue("mod_list_sort_column",
+                    ui->mod_list->horizontalHeader()->sortIndicatorSection());
+  settings.setValue("mod_list_sort_order", ui->mod_list->horizontalHeader()->sortIndicatorOrder());
+  settings.setValue("sort_apps_alphabetically", sort_apps_alphabetically_);
   ipc_server_->shutdown();
   event->accept();
 }
@@ -829,7 +836,10 @@ void MainWindow::updateDeployerList(const DeployerInfo& depl_info)
 
 int MainWindow::currentApp()
 {
-  return ui->app_selection_box->currentIndex();
+  const int display_idx = ui->app_selection_box->currentIndex();
+  if(display_idx < 0 || display_idx >= static_cast<int>(app_combo_id_map_.size()))
+    return display_idx; // fallback: identity mapping when map is not yet populated
+  return app_combo_id_map_[display_idx];
 }
 
 int MainWindow::currentDeployer()
@@ -877,9 +887,22 @@ void MainWindow::setupButtons()
   edit_app_action_->setText("Edit");
   edit_app_action_->setIcon(QIcon::fromTheme("editor"));
   connect(edit_app_action_, &QAction::triggered, this, &MainWindow::on_edit_app_button_clicked);
+  // Sort applications alphabetically toggle (limo-app/limo#226).
+  sort_apps_alpha_action_ = new QAction(this);
+  sort_apps_alpha_action_->setToolTip("Sort applications alphabetically by name");
+  sort_apps_alpha_action_->setText("Sort alphabetically");
+  sort_apps_alpha_action_->setCheckable(true);
+  sort_apps_alpha_action_->setIcon(QIcon::fromTheme("view-sort-ascending"));
+  connect(sort_apps_alpha_action_,
+          &QAction::toggled,
+          this,
+          &MainWindow::onSortAppsAlphaToggled);
   QMenu* app_menu = new QMenu(this);
-  app_menu->addActions(
-    QList<QAction*>{ run_app_action_, add_app_action_, remove_app_action_, edit_app_action_ });
+  app_menu->addActions(QList<QAction*>{ run_app_action_,
+                                        add_app_action_,
+                                        remove_app_action_,
+                                        edit_app_action_,
+                                        sort_apps_alpha_action_ });
   ui->app_tool_button->setDefaultAction(run_app_action_);
   ui->app_tool_button->setMenu(app_menu);
 
@@ -1228,6 +1251,8 @@ void MainWindow::loadSettings()
     ui->mod_list->sortByColumn(mod_list_sort_column,
                                static_cast<Qt::SortOrder>(mod_list_sort_order));
   }
+  sort_apps_alphabetically_ = settings.value("sort_apps_alphabetically", false).toBool();
+  sort_apps_alpha_action_->setChecked(sort_apps_alphabetically_);
 }
 
 void MainWindow::setTabWidgetStyleSheet()
@@ -1689,6 +1714,7 @@ void MainWindow::onGetApplicationNames(QStringList names, QStringList icon_paths
   initUiWithoutApps(!names.isEmpty());
   if(names.isEmpty())
   {
+    app_combo_id_map_.clear();
     ui->info_name_label->setText("");
     ui->info_version_label->setText("");
     ui->info_sdir_label->setText("");
@@ -1701,30 +1727,87 @@ void MainWindow::onGetApplicationNames(QStringList names, QStringList icon_paths
     return;
   }
 
+  // Remember which real app_id was selected before rebuilding the combo.
+  const int prev_real_id = currentApp();
+
+  // Build a sorted or identity index mapping (display index -> real app ID).
+  // The sort only reorders how entries appear; the underlying IDs stay the same.
+  // Implements limo-app/limo#226.
+  const int n = names.size();
+  std::vector<int> order(n);
+  std::iota(order.begin(), order.end(), 0);
+  if(sort_apps_alphabetically_)
+  {
+    std::stable_sort(order.begin(), order.end(), [&names](int a, int b) {
+      return names[a].toLower() < names[b].toLower();
+    });
+  }
+  app_combo_id_map_.resize(n);
+  for(int display_idx = 0; display_idx < n; display_idx++)
+    app_combo_id_map_[display_idx] = order[display_idx];
+
   bool block = ui->app_selection_box->signalsBlocked();
   ui->app_selection_box->blockSignals(true);
-  int cur_index = currentApp();
   ui->app_selection_box->clear();
-  for(int i = 0; i < names.size(); i++)
+  for(int display_idx = 0; display_idx < n; display_idx++)
   {
-    if(icon_paths[i] == "")
-      ui->app_selection_box->addItem(names[i]);
+    const int real_id = order[display_idx];
+    if(icon_paths[real_id].isEmpty())
+      ui->app_selection_box->addItem(names[real_id]);
     else
-      ui->app_selection_box->addItem(QIcon(icon_paths[i]), names[i]);
-    ui->app_selection_box->setItemData(
-      ui->app_selection_box->count() - 1, icon_paths[i], Qt::UserRole);
+      ui->app_selection_box->addItem(QIcon(icon_paths[real_id]), names[real_id]);
+    ui->app_selection_box->setItemData(display_idx, icon_paths[real_id], Qt::UserRole);
   }
+
+  // Determine which display index to select.
   if(is_new)
-    ui->app_selection_box->setCurrentIndex(ui->app_selection_box->count() - 1);
-  else if(cur_index < ui->app_selection_box->count() && cur_index >= 0)
-    ui->app_selection_box->setCurrentIndex(cur_index);
-  if(!is_initialized_)
   {
-    const int app_index =
-      QSettings(QCoreApplication::applicationName()).value("current_app", 0).toInt();
-    if(ui->app_selection_box->count() > app_index && app_index >= 0)
-      ui->app_selection_box->setCurrentIndex(app_index);
+    // A new app was just added; it is at the last real index (n-1).
+    // Find its display position.
+    for(int display_idx = 0; display_idx < n; display_idx++)
+    {
+      if(app_combo_id_map_[display_idx] == n - 1)
+      {
+        ui->app_selection_box->setCurrentIndex(display_idx);
+        break;
+      }
+    }
   }
+  else if(!is_initialized_)
+  {
+    // On first load restore by the saved real app ID.
+    const int saved_id =
+      QSettings(QCoreApplication::applicationName()).value("current_app", 0).toInt();
+    bool found = false;
+    for(int display_idx = 0; display_idx < n; display_idx++)
+    {
+      if(app_combo_id_map_[display_idx] == saved_id)
+      {
+        ui->app_selection_box->setCurrentIndex(display_idx);
+        found = true;
+        break;
+      }
+    }
+    if(!found && n > 0)
+      ui->app_selection_box->setCurrentIndex(0);
+  }
+  else
+  {
+    // Normal refresh: keep the same real app selected.
+    bool found = false;
+    for(int display_idx = 0; display_idx < n; display_idx++)
+    {
+      if(app_combo_id_map_[display_idx] == prev_real_id)
+      {
+        ui->app_selection_box->setCurrentIndex(display_idx);
+        found = true;
+        break;
+      }
+    }
+    if(!found && n > 0)
+      ui->app_selection_box->setCurrentIndex(0);
+  }
+
   ui->app_selection_box->blockSignals(block);
 
   emit getDeployerNames(currentApp(), is_new);
@@ -3863,4 +3946,14 @@ void MainWindow::onModActionTriggered(int action)
                       action,
                       ui->deployer_list->currentIndex().data(ModListModel::mod_id_role).toInt());
   emit getDeployerInfo(currentApp(), currentDeployer());
+}
+
+void MainWindow::onSortAppsAlphaToggled(bool checked)
+{
+  // Persist the new setting immediately so it survives a crash as well.
+  sort_apps_alphabetically_ = checked;
+  QSettings(QCoreApplication::applicationName())
+    .setValue("sort_apps_alphabetically", sort_apps_alphabetically_);
+  // Rebuild the combo box in sorted or original order.
+  emit getApplicationNames(false);
 }
