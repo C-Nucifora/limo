@@ -346,6 +346,9 @@ set(PROJECT_SOURCES
         src/ui/healthcheckdialog.cpp
         src/ui/healthcheckdialog.h
         src/ui/healthcheckdialog.ui
+        src/ui/instancedashboarddialog.cpp
+        src/ui/instancedashboarddialog.h
+        src/ui/instancedashboarddialog.ui
         src/ui/editautotagsdialog.cpp
         src/ui/editautotagsdialog.h
         src/ui/editautotagsdialog.ui
