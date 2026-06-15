@@ -950,4 +950,11 @@ private:
    * \return Set of mod ids in any deployer.
    */
   std::unordered_set<int> getDeployedModIds() const;
+  /*!
+   * \brief Scans a freshly installed mod's staging files for well known script extender /
+   * loader executables (e.g. skse64_loader.exe) and, for any not already present as a tool,
+   * adds a best-effort Tool pointing at the executable. Never throws: errors are logged.
+   * \param mod_id Id of the mod whose staging directory should be scanned.
+   */
+  void autoAddScriptExtenderTools(int mod_id);
 };
