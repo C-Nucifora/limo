@@ -894,6 +894,15 @@ void MainWindow::setupDialogs()
           this,
           &MainWindow::onModDownloadRequested);
 
+  // BEGIN feature #33: in-app NexusMods browsing/search.
+  // Route the browser's install signal through the existing download/import slot.
+  nexus_browser_dialog_ = std::make_unique<NexusBrowserDialog>();
+  connect(nexus_browser_dialog_.get(),
+          &NexusBrowserDialog::installModRequested,
+          this,
+          &MainWindow::onModDownloadRequested);
+  // END feature #33.
+
   external_changes_dialog_ = std::make_unique<ExternalChangesDialog>();
   connect(external_changes_dialog_.get(),
           &ExternalChangesDialog::externalChangesDialogCompleted,
@@ -1002,13 +1011,21 @@ void MainWindow::setupButtons()
   import_mo2_action_->setText("Import MO2");
   import_mo2_action_->setIcon(QIcon::fromTheme("document-import"));
   connect(import_mo2_action_, &QAction::triggered, this, &MainWindow::onImportMo2ActionTriggered);
+  // BEGIN feature #33: action opening the in-app NexusMods browser for the current app.
+  browse_nexus_action_ = new QAction(this);
+  browse_nexus_action_->setToolTip("Browse and search mods on NexusMods");
+  browse_nexus_action_->setText("Browse NexusMods");
+  browse_nexus_action_->setIcon(QIcon::fromTheme("globe"));
+  connect(browse_nexus_action_, &QAction::triggered, this, &MainWindow::onBrowseNexusTriggered);
+  // END feature #33.
   QMenu* app_menu = new QMenu(this);
   app_menu->addActions(QList<QAction*>{ run_app_action_,
                                         add_app_action_,
                                         remove_app_action_,
                                         edit_app_action_,
                                         sort_apps_alpha_action_,
-                                        import_mo2_action_ });
+                                        import_mo2_action_,
+                                        browse_nexus_action_ });
   ui->app_tool_button->setDefaultAction(run_app_action_);
   ui->app_tool_button->setMenu(app_menu);
 
@@ -3871,6 +3888,28 @@ void MainWindow::onGetNexusPage(int app_id, int mod_id, nexus::Page page)
   nexus_mod_dialog_->setupDialog(app_id, mod_id, page);
   nexus_mod_dialog_->show();
 }
+
+// BEGIN feature #33: open the in-app NexusMods browser for the current app.
+void MainWindow::onBrowseNexusTriggered()
+{
+  if(!initNexusApiKey())
+    return;
+
+  // The app does not store a NexusMods domain, so derive a best-effort default from the
+  // current application's name (lowercased, alphanumeric only). The browser shows the
+  // domain in its title and the user can refine the search from there.
+  QString domain;
+  for(QChar c : ui->app_selection_box->currentText().toLower())
+  {
+    if(c.isLetterOrNumber())
+      domain.append(c);
+  }
+  nexus_browser_dialog_->setupDialog(currentApp(), domain);
+  nexus_browser_dialog_->show();
+  nexus_browser_dialog_->raise();
+  nexus_browser_dialog_->activateWindow();
+}
+// END feature #33.
 
 void MainWindow::onReceiveIpcMessage(QString message)
 {

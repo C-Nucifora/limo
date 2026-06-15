@@ -31,6 +31,7 @@
 #include "modlistmodel.h"
 #include "modlistproxymodel.h"
 #include "modnamedelegate.h"
+#include "nexusbrowserdialog.h" // feature #33: in-app NexusMods browsing/search
 #include "nexusmoddialog.h"
 #include "overwritebackupdialog.h"
 #include "settingsdialog.h"
@@ -256,6 +257,12 @@ private:
   std::unique_ptr<EditModSourcesDialog> edit_mod_sources_dialog_;
   /*! \brief Reusable dialog for displaying NexusMods data for a mod. */
   std::unique_ptr<NexusModDialog> nexus_mod_dialog_;
+  // BEGIN feature #33: in-app NexusMods browsing/search.
+  /*! \brief Reusable dialog for searching/browsing mods on NexusMods. */
+  std::unique_ptr<NexusBrowserDialog> nexus_browser_dialog_;
+  /*! \brief Toolbar action opening the NexusMods browser for the current app. */
+  QAction* browse_nexus_action_ = nullptr;
+  // END feature #33.
   /*! \brief Reusable dialog for displaying external changes to files. */
   std::unique_ptr<ExternalChangesDialog> external_changes_dialog_;
   /*! \brief Reusable dialog for exporting the configuration of the current app. */
@@ -1088,6 +1095,10 @@ private slots:
                               int file_id,
                               QString mod_url,
                               QString version);
+  // BEGIN feature #33: open the NexusMods browser for the current app.
+  /*! \brief Opens the NexusMods browser dialog for the current application. */
+  void onBrowseNexusTriggered();
+  // END feature #33.
   /*! \brief Cancels installation of the pending mod. */
   void onDownloadFailed();
   /*! \brief Reinstalls the currently selected mod from the local source. */

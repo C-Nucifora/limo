@@ -56,6 +56,34 @@ struct GitRelease
 };
 
 /*!
+ * \brief Sort orders supported by nexus::Api::searchMods.
+ */
+enum class SortOrder
+{
+  /*! \brief Sort by number of endorsements, descending. */
+  endorsements,
+  /*! \brief Sort by total number of downloads, descending. */
+  downloads,
+  /*! \brief Sort by upload/update time, most recent first. */
+  recent
+};
+
+/*!
+ * \brief A single result returned by nexus::Api::searchMods.
+ *
+ * Wraps the existing nexus::Mod (which already carries name, summary, mod_id,
+ * endorsement_count, mod_downloads and picture_url) and adds the NexusMods
+ * domain the mod belongs to so callers can build mod page URLs.
+ */
+struct SearchResult
+{
+  /*! \brief NexusMods domain (game) the mod belongs to. */
+  std::string domain_name;
+  /*! \brief Mod data as returned by the API. */
+  Mod mod;
+};
+
+/*!
  * \brief Provides functions for accessing the NexusMods API.
  */
 class Api
@@ -208,6 +236,28 @@ public:
    * Else: An empty std::optional.
    */
   static std::optional<GitRelease> getLatestGitRelease(const std::string& repo_url);
+  /*!
+   * \brief Searches NexusMods for mods belonging to the given domain.
+   *
+   * The public NexusMods v1 API does not expose a free text search endpoint, so this
+   * fetches the trending/latest/updated mod listings for the domain (depending on the
+   * requested sort order) and, if a query is given, filters the results client-side by
+   * matching the query against the mod name and summary. Optionally filters by a
+   * NexusMods category id.
+   *
+   * Failures (non-200, rate limit 429, premium-only 403, ...) are logged and result in
+   * an empty (or partial) result vector rather than an exception.
+   *
+   * \param domain_name NexusMods domain (game) to search, e.g. "skyrimspecialedition".
+   * \param query Free text query. If empty, all fetched mods are returned.
+   * \param sort_order Determines which listing is fetched and how results are ordered.
+   * \param category_id If >= 0: only mods with this category id are returned.
+   * \return A vector of SearchResult objects. Empty on failure or no matches.
+   */
+  static std::vector<SearchResult> searchMods(const std::string& domain_name,
+                                              const std::string& query,
+                                              SortOrder sort_order = SortOrder::endorsements,
+                                              int category_id = -1);
 
 private:
   /*!
@@ -224,6 +274,15 @@ private:
    * \return The parsed Unix time, or 0 if parsing failed.
    */
   static std::time_t parseIso8601(const std::string& timestamp);
+  /*!
+   * \brief Performs a GET request against the given NexusMods listing endpoint and parses
+   * the returned mods into SearchResult objects. Errors are logged, not thrown.
+   * \param domain_name NexusMods domain the listing belongs to.
+   * \param endpoint Listing endpoint name (e.g. "latest_added", "trending", "updated").
+   * \return Parsed results, or an empty vector on failure.
+   */
+  static std::vector<SearchResult> fetchModListing(const std::string& domain_name,
+                                                   const std::string& endpoint);
 
   /*! \brief The API key used for all operations. */
   inline static std::string api_key_ = "";

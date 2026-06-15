@@ -1,6 +1,9 @@
 #include "api.h"
 #include "../consts.h"
+#include "../log.h"
 #include "../parseerror.h"
+#include <algorithm>
+#include <cctype>
 #include <ctime>
 #include <iostream>
 #include <json/json.h>
@@ -413,6 +416,127 @@ bool Api::initModInfo(ImportModInfo& info)
   info.remote_type = ImportModInfo::RemoteType::nexus;
 
   return true;
+}
+
+std::vector<SearchResult> Api::fetchModListing(const std::string& domain_name,
+                                               const std::string& endpoint)
+{
+  std::vector<SearchResult> results;
+  cpr::Response response = cpr::Get(
+    cpr::Url(std::format(
+      "https://api.nexusmods.com/v1/games/{}/mods/{}.json", domain_name, endpoint)),
+    cpr::Header{ { "apikey", api_key_ },
+                 { "User-Agent", "Limo" },
+                 { "Accept", "application/json" } });
+
+  if(response.status_code == 429)
+  {
+    Log::warning("NexusMods search: rate limit reached (429). Try again later.");
+    return results;
+  }
+  if(response.status_code == 403)
+  {
+    Log::warning("NexusMods search: access forbidden (403). This endpoint may be "
+                 "restricted to premium accounts.");
+    return results;
+  }
+  if(response.status_code != 200)
+  {
+    Log::warning(std::format("NexusMods search: request to \"{}\" failed with code {}.",
+                             endpoint,
+                             response.status_code));
+    return results;
+  }
+
+  Json::Value json_body;
+  Json::Reader reader;
+  if(!reader.parse(response.text.c_str(), json_body))
+  {
+    Log::error("NexusMods search: failed to parse response from NexusMods.");
+    return results;
+  }
+
+  // The listing endpoints return a plain JSON array of mods.
+  for(int i = 0; i < json_body.size(); i++)
+  {
+    try
+    {
+      Mod mod(json_body[i]);
+      std::string mod_domain = mod.domain_name.empty() ? domain_name : mod.domain_name;
+      results.push_back({ mod_domain, mod });
+    }
+    catch(const std::exception& e)
+    {
+      Log::warning(std::format("NexusMods search: skipping malformed entry: {}", e.what()));
+    }
+  }
+  return results;
+}
+
+std::vector<SearchResult> Api::searchMods(const std::string& domain_name,
+                                          const std::string& query,
+                                          SortOrder sort_order,
+                                          int category_id)
+{
+  if(!isInitialized())
+  {
+    Log::warning("NexusMods search: no API key configured.");
+    return {};
+  }
+  if(domain_name.empty())
+  {
+    Log::warning("NexusMods search: no NexusMods domain given.");
+    return {};
+  }
+
+  // The public v1 API has no free text search endpoint. We fetch the listing matching the
+  // requested sort order and filter/sort client-side.
+  const std::string endpoint =
+    sort_order == SortOrder::recent ? "latest_updated" : "trending";
+  std::vector<SearchResult> results = fetchModListing(domain_name, endpoint);
+
+  // Filter by query (case-insensitive substring on name and summary).
+  if(!query.empty())
+  {
+    std::string needle = query;
+    std::ranges::transform(needle, needle.begin(), [](unsigned char c) { return std::tolower(c); });
+    auto contains = [&needle](const std::string& haystack)
+    {
+      std::string lower = haystack;
+      std::ranges::transform(lower, lower.begin(), [](unsigned char c) { return std::tolower(c); });
+      return lower.find(needle) != std::string::npos;
+    };
+    std::erase_if(results,
+                  [&](const SearchResult& r)
+                  { return !contains(r.mod.name) && !contains(r.mod.summary); });
+  }
+
+  // Optional category filter.
+  if(category_id >= 0)
+    std::erase_if(results,
+                  [&](const SearchResult& r) { return r.mod.category_id != category_id; });
+
+  // Sort client-side according to the requested order.
+  switch(sort_order)
+  {
+    case SortOrder::endorsements:
+      std::ranges::sort(results,
+                        [](const SearchResult& a, const SearchResult& b)
+                        { return a.mod.endorsement_count > b.mod.endorsement_count; });
+      break;
+    case SortOrder::downloads:
+      std::ranges::sort(results,
+                        [](const SearchResult& a, const SearchResult& b)
+                        { return a.mod.mod_downloads > b.mod.mod_downloads; });
+      break;
+    case SortOrder::recent:
+      std::ranges::sort(results,
+                        [](const SearchResult& a, const SearchResult& b)
+                        { return a.mod.updated_time > b.mod.updated_time; });
+      break;
+  }
+
+  return results;
 }
 
 std::optional<std::smatch> Api::nxmUrlIsValid(const std::string& nxm_url)

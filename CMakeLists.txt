@@ -383,6 +383,9 @@ set(PROJECT_SOURCES
         src/ui/nexusmoddialog.cpp
         src/ui/nexusmoddialog.h
         src/ui/nexusmoddialog.ui
+        src/ui/nexusbrowserdialog.cpp
+        src/ui/nexusbrowserdialog.h
+        src/ui/nexusbrowserdialog.ui
         src/ui/overwritebackupdialog.cpp
         src/ui/overwritebackupdialog.h
         src/ui/overwritebackupdialog.ui
