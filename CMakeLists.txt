@@ -218,6 +218,8 @@ set(CORE_SOURCES
         src/core/deployerentry.cpp
         src/core/savemanager.cpp
         src/core/savemanager.h
+        src/core/inimanager.cpp
+        src/core/inimanager.h
 )
 
 # The LOOT/OpenMW deployers depend on libloot and are only built on demand.
@@ -375,9 +377,6 @@ set(PROJECT_SOURCES
         src/ui/ipcserver.h
         src/ui/listaction.cpp
         src/ui/listaction.h
-        src/ui/lootuserlistdialog.cpp
-        src/ui/lootuserlistdialog.h
-        src/ui/lootuserlistdialog.ui
         src/ui/mainwindow.cpp
         src/ui/mainwindow.h
         src/ui/mainwindow.ui
@@ -450,6 +449,15 @@ set(PROJECT_SOURCES
 qt_add_resources(QSS_RESOURCES
     styles/styles.qrc
 )
+
+# The LOOT user-metadata editor pulls in lootdeployer.h (loot/api.h), so it is only
+# built when LIMO_WITH_LOOT is enabled (mirrors the core LOOT deployer gating).
+if(LIMO_WITH_LOOT)
+    list(APPEND PROJECT_SOURCES
+            src/ui/lootuserlistdialog.cpp
+            src/ui/lootuserlistdialog.h
+            src/ui/lootuserlistdialog.ui)
+endif()
 
 # Set install target so app config files can be found
 if(NOT DEFINED LIMO_INSTALL_PREFIX)

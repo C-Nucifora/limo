@@ -24,7 +24,9 @@
 #include "healthcheckdialog.h" // fork #50
 #include "editmanualtagsdialog.h"
 #include "enterapipwdialog.h"
+#ifdef LIMO_WITH_LOOT
 #include "lootuserlistdialog.h" // fork #31
+#endif
 #include "modlistproxymodel.h"
 #include "movemoddialog.h"
 #include "settingsdialog.h"
@@ -1092,6 +1094,7 @@ void MainWindow::setupButtons()
           &QAction::triggered,
           this,
           &MainWindow::onHealthCheckDeployerMenuClicked);
+#ifdef LIMO_WITH_LOOT
   // fork #31: action to open the LOOT user-metadata (userlist.yaml) editor.
   edit_loot_userlist_action_ = new QAction(this);
   edit_loot_userlist_action_->setToolTip("Edit LOOT user metadata (groups, load-after rules)");
@@ -1101,14 +1104,17 @@ void MainWindow::setupButtons()
           &QAction::triggered,
           this,
           &MainWindow::onEditLootUserlistMenuClicked);
+#endif
   QMenu* deployer_menu = new QMenu(this);
   deployer_menu->addActions(QList<QAction*>{ add_deployer_action_,
                                              remove_deployer_action_,
                                              edit_deployer_action_,
                                              verify_deployer_action_,
                                              health_check_deployer_action_, // fork #50
-                                             edit_loot_userlist_action_, // fork #31
                                              ui->actionbrowse_deployer_files });
+#ifdef LIMO_WITH_LOOT
+  deployer_menu->addAction(edit_loot_userlist_action_); // fork #31
+#endif
   ui->deployer_tool_button->setDefaultAction(add_deployer_action_);
   ui->deployer_tool_button->setMenu(deployer_menu);
 
@@ -3140,6 +3146,7 @@ void MainWindow::onHealthCheckDeployerMenuClicked()
 // thread has no access to their source/target paths, so we ask the user for the
 // two directories the LootDeployer needs: the plugin source directory and the
 // target directory that holds plugins.txt/loadorder.txt and userlist.yaml.
+#ifdef LIMO_WITH_LOOT
 void MainWindow::onEditLootUserlistMenuClicked()
 {
   const QString source_dir = QFileDialog::getExistingDirectory(
@@ -3161,6 +3168,7 @@ void MainWindow::onEditLootUserlistMenuClicked()
       this, "Error", QString("Could not open the LOOT user metadata editor:\n") + e.what());
   }
 }
+#endif
 
 void MainWindow::on_profile_selection_box_currentIndexChanged(int index)
 {

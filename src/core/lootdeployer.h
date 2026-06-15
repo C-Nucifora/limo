@@ -197,6 +197,43 @@ public:
    */
   void writePluginUserMetadata(const std::vector<PluginUserMetadata>& metadata);
 
+  // fork #72: Archive Invalidation support (Bethesda games).
+  /*!
+   * \brief Enables or disables Archive Invalidation for the managed game.
+   *
+   * Archive Invalidation lets older Bethesda games (Oblivion, Fallout 3 and
+   * Fallout New Vegas) load loose mod files in preference to the assets packed
+   * into the vanilla BSA archives. This is implemented via the well established
+   * "INI method": the game's preferences INI is edited to set the relevant
+   * \c [Archive] keys.
+   *
+   * The preferences INI lives in the game's "My Games" directory inside the
+   * Proton/Wine prefix, which is the very same directory this deployer already
+   * reads/writes plugins.txt / Plugins.txt and loadorder.txt from (its
+   * \c dest_path_). The INI path is therefore derived from \c dest_path_:
+   *   - Oblivion (tes4):        Oblivion.ini
+   *   - Fallout 3 (fo3):        Fallout.ini  and  FalloutPrefs.ini
+   *   - Fallout New Vegas (fonv): Fallout.ini  and  FalloutPrefs.ini
+   *
+   * Keys written when \p enable is true:
+   *   - All applicable games: \c [Archive] bInvalidateOlderFiles=1
+   *   - Oblivion additionally: \c [Archive] bLoadFaceGenHeadEGTFiles=1
+   * When \p enable is false the same keys are set back to 0.
+   *
+   * The edit is idempotent: an existing \c [Archive] section and the keys
+   * within it are reused (their value is updated in place) rather than
+   * duplicated, and all other sections, keys, comments and blank lines are
+   * preserved. If the section or a key is missing it is created. If the INI
+   * file does not exist yet it is created containing only the \c [Archive]
+   * section.
+   *
+   * For game types to which Archive Invalidation does not apply (all games
+   * other than tes4/fo3/fonv) this is a no-op.
+   *
+   * \param enable If true: enable Archive Invalidation. If false: clear it.
+   */
+  void applyArchiveInvalidation(bool enable) const;
+
 protected:
   /*! \brief Name of the file containing plugin load order. */
   static constexpr std::string LOADORDER_FILE_NAME = "loadorder.txt";

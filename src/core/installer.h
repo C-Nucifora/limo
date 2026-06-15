@@ -11,6 +11,7 @@
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <vector>
 
 
@@ -93,6 +94,12 @@ public:
    * \param installer Installer type to use.
    * \param root_level If > 0: Ignore all mod files and path components with depth <
    * root_level.
+   * \param selected_files If non-empty: Only install the archive entries whose
+   * relative path (as returned by \ref getArchiveFileNames) is contained in this
+   * set, plus the children of any selected directory. All other extracted files
+   * are discarded before the move pipeline runs. An empty set installs everything
+   * (unchanged default behavior). Paths are matched against the archive layout
+   * before any root_level stripping.
    * \return The total file size of the installed mod on disk.
    */
   static unsigned long install(
@@ -101,7 +108,8 @@ public:
     int options,
     const std::string& type = SIMPLEINSTALLER,
     int root_level = 0,
-    const std::vector<std::pair<std::filesystem::path, std::filesystem::path>> fomod_files = {});
+    const std::vector<std::pair<std::filesystem::path, std::filesystem::path>> fomod_files = {},
+    const std::set<std::filesystem::path>& selected_files = {});
   /*!
    * \brief Installs the given source as a patch/upgrade by overlaying its files onto an
    * existing mod's staging directory, instead of creating a new mod.
@@ -308,4 +316,14 @@ private:
    */
   static bool decompressBufferWithLibarchive(const std::vector<unsigned char>& input,
                                              std::vector<unsigned char>& output);
+  /*!
+   * \brief Removes everything below the given extraction directory that is not part of
+   * the given selection. A path is kept if it is itself selected, if it is a descendant
+   * of a selected directory, or if it is an ancestor directory of a selected path (so the
+   * selected entry remains reachable). All other files and directories are deleted.
+   * \param extract_dir Directory containing the freshly extracted archive.
+   * \param selected_files Set of archive-relative paths to keep.
+   */
+  static void pruneToSelection(const std::filesystem::path& extract_dir,
+                               const std::set<std::filesystem::path>& selected_files);
 };

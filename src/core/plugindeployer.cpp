@@ -5,9 +5,14 @@
 #include <fstream>
 #include <iostream>
 #include <json/json.h>
+#include <cctype>
+#include <cstdint>
 #include <numeric>
 #include <ranges>
 #include <regex>
+#include <set>
+#include <string>
+#include <vector>
 
 namespace sfs = std::filesystem;
 namespace str = std::ranges;
@@ -599,4 +604,202 @@ std::optional<sfs::path> PluginDeployer::getRootOfTargetDirectory(sfs::path targ
 std::string PluginDeployer::hideFile(const std::string& name)
 {
   return name.starts_with('.') ? name : "." + name;
+}
+
+namespace
+{
+/*! \brief Lower-cases an ASCII string for case-insensitive plugin/master comparison. */
+std::string toLowerAscii(std::string str)
+{
+  for(char& c : str)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return str;
+}
+
+/*! \brief Reads a little-endian unsigned integer of the given byte width from a buffer. */
+uint32_t readLE(const unsigned char* data, int num_bytes)
+{
+  uint32_t value = 0;
+  for(int i = 0; i < num_bytes; i++)
+    value |= static_cast<uint32_t>(data[i]) << (8 * i);
+  return value;
+}
+
+/*!
+ * \brief Extracts the NUL-terminated master name contained in a MAST field payload.
+ * \param payload Pointer to the field data.
+ * \param size Size of the field data in bytes.
+ * \return The master file name with any trailing NUL bytes stripped.
+ */
+std::string parseMastPayload(const unsigned char* payload, uint32_t size)
+{
+  std::string name(reinterpret_cast<const char*>(payload), size);
+  // MAST strings are NUL terminated; drop the terminator and anything past it.
+  const auto nul_pos = name.find('\0');
+  if(nul_pos != std::string::npos)
+    name.resize(nul_pos);
+  return name;
+}
+} // namespace
+
+std::vector<std::string> PluginDeployer::readPluginMasters(const sfs::path& plugin_path) const
+{
+  std::vector<std::string> masters;
+
+  std::error_code ec;
+  if(!sfs::exists(plugin_path, ec) || ec)
+    return masters;
+
+  std::ifstream file(plugin_path, std::ios::binary);
+  if(!file.is_open())
+    return masters;
+
+  // Read the 4 byte record signature, common to both TES3 and TES4 layouts.
+  char signature[4] = { 0, 0, 0, 0 };
+  if(!file.read(signature, 4))
+    return masters;
+  const std::string sig(signature, 4);
+
+  if(sig == "TES3")
+  {
+    // TES3 (Morrowind / OpenMW) header layout:
+    //   "TES3" | uint32 dataSize | uint32 unknown | uint32 flags | <subrecords...>
+    // Each subrecord: 4 byte type | uint32 size | <size bytes payload>.
+    // The data size counts only the subrecord block that follows the 16 byte header.
+    unsigned char header[12];
+    if(!file.read(reinterpret_cast<char*>(header), 12))
+      return masters;
+    const uint32_t data_size = readLE(header, 4);
+
+    std::vector<unsigned char> block(data_size);
+    if(data_size > 0 && !file.read(reinterpret_cast<char*>(block.data()), data_size))
+      return masters;
+
+    uint32_t pos = 0;
+    while(pos + 8 <= data_size)
+    {
+      const std::string type(reinterpret_cast<const char*>(block.data() + pos), 4);
+      const uint32_t size = readLE(block.data() + pos + 4, 4);
+      pos += 8;
+      if(pos + size > data_size) // truncated / inconsistent subrecord -> stop safely
+        break;
+      if(type == "MAST" && size > 0)
+        masters.push_back(parseMastPayload(block.data() + pos, size));
+      pos += size;
+    }
+    return masters;
+  }
+
+  if(sig == "TES4")
+  {
+    // TES4 (Oblivion / FO3 / FNV / Skyrim / FO4) header layout:
+    //   24 byte record header: "TES4" | uint32 dataSize | uint32 flags | ... (rest unused here)
+    //   followed by dataSize bytes of fields (subrecords).
+    // Each field: 4 byte type | uint16 size | <size bytes payload>.
+    // The signature already consumed 4 bytes; read the remaining 20 header bytes.
+    unsigned char header[20];
+    if(!file.read(reinterpret_cast<char*>(header), 20))
+      return masters;
+    const uint32_t data_size = readLE(header, 4); // bytes following the 24 byte record header
+
+    std::vector<unsigned char> block(data_size);
+    if(data_size > 0 && !file.read(reinterpret_cast<char*>(block.data()), data_size))
+      return masters;
+
+    uint32_t pos = 0;
+    while(pos + 6 <= data_size)
+    {
+      const std::string type(reinterpret_cast<const char*>(block.data() + pos), 4);
+      const uint32_t size = readLE(block.data() + pos + 4, 2);
+      pos += 6;
+      if(pos + size > data_size) // truncated / inconsistent field -> stop safely
+        break;
+      if(type == "MAST" && size > 0)
+        masters.push_back(parseMastPayload(block.data() + pos, size));
+      pos += size;
+    }
+    return masters;
+  }
+
+  // Unknown signature: not a recognized plugin header, report no masters.
+  return masters;
+}
+
+std::vector<PluginDeployer::MissingMasterInfo> PluginDeployer::findMissingMasters() const
+{
+  // Build case-insensitive lookups of present plugins and currently enabled plugins.
+  std::set<std::string> present;
+  std::set<std::string> enabled;
+  for(const auto& [name, is_enabled] : plugins_)
+  {
+    const std::string lower = toLowerAscii(name);
+    present.insert(lower);
+    if(is_enabled)
+      enabled.insert(lower);
+  }
+
+  std::vector<MissingMasterInfo> result;
+  for(const auto& [name, is_enabled] : plugins_)
+  {
+    if(!is_enabled) // only enabled plugins can crash the game on load
+      continue;
+
+    std::vector<std::string> masters;
+    try
+    {
+      masters = readPluginMasters(source_path_ / name);
+    }
+    catch(...) // never let a malformed plugin abort the health check
+    {
+      continue;
+    }
+
+    MissingMasterInfo info;
+    info.plugin = name;
+    for(const auto& master : masters)
+    {
+      const std::string lower = toLowerAscii(master);
+      if(!present.contains(lower))
+        info.missing_masters.push_back(master);
+      else if(!enabled.contains(lower))
+        info.disabled_masters.push_back(master);
+    }
+    if(!info.missing_masters.empty() || !info.disabled_masters.empty())
+      result.push_back(std::move(info));
+  }
+
+  // Log a concise summary of the detection result.
+  if(result.empty())
+    log_(Log::LOG_INFO,
+         std::format("Deployer '{}': Master check passed, no missing or disabled masters.", name_));
+  else
+  {
+    log_(Log::LOG_WARNING,
+         std::format("Deployer '{}': {} plugin(s) have unmet master dependencies.",
+                     name_,
+                     result.size()));
+    for(const auto& info : result)
+    {
+      if(!info.missing_masters.empty())
+        log_(Log::LOG_WARNING,
+             std::format("  '{}' is missing master(s): {}",
+                         info.plugin,
+                         std::accumulate(info.missing_masters.begin(),
+                                         info.missing_masters.end(),
+                                         std::string(),
+                                         [](const std::string& a, const std::string& b)
+                                         { return a.empty() ? b : a + ", " + b; })));
+      if(!info.disabled_masters.empty())
+        log_(Log::LOG_WARNING,
+             std::format("  '{}' requires disabled master(s): {}",
+                         info.plugin,
+                         std::accumulate(info.disabled_masters.begin(),
+                                         info.disabled_masters.end(),
+                                         std::string(),
+                                         [](const std::string& a, const std::string& b)
+                                         { return a.empty() ? b : a + ", " + b; })));
+    }
+  }
+
+  return result;
 }
