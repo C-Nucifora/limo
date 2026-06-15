@@ -330,6 +330,9 @@ set(PROJECT_SOURCES
         src/ui/deployverifydialog.cpp
         src/ui/deployverifydialog.h
         src/ui/deployverifydialog.ui
+        src/ui/healthcheckdialog.cpp
+        src/ui/healthcheckdialog.h
+        src/ui/healthcheckdialog.ui
         src/ui/editautotagsdialog.cpp
         src/ui/editautotagsdialog.h
         src/ui/editautotagsdialog.ui

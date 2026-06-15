@@ -114,6 +114,51 @@ public:
     }
   };
 
+  // fork #50: 'Problems' / health-check panel
+  /*!
+   * \brief Aggregates the problems found by \ref runHealthCheck: orphaned deployed files,
+   * broken/incorrect links (reusing \ref VerificationResult) and a summary of files claimed
+   * by more than one enabled mod. Read-only; no disk writes are performed to produce it.
+   */
+  struct HealthCheckResult
+  {
+    /*!
+     * \brief A file that more than one enabled mod would deploy to the same target path.
+     */
+    struct Conflict
+    {
+      /*! \brief Path relative to the deployment target directory. */
+      std::filesystem::path path;
+      /*! \brief Id of the mod which currently wins the path (deepest in the load order). */
+      int winner_mod_id = -1;
+      /*! \brief Ids of all enabled mods which provide this path, including the winner. */
+      std::vector<int> mod_ids;
+    };
+
+    /*! \brief Name of the deployer this result belongs to. */
+    std::string deployer_name;
+    /*!
+     * \brief Files recorded in .lmmfiles which are no longer expected: their owning mod is no
+     * longer part of the enabled load order (so they would not be re-created on deploy).
+     */
+    std::vector<std::filesystem::path> orphaned;
+    /*! \brief Result of \ref verifyDeployment, holding broken/incorrect links and missing files. */
+    VerificationResult verification;
+    /*! \brief Files claimed by more than one enabled mod (derived from the source map). */
+    std::vector<Conflict> conflicts;
+
+    /*! \brief Total number of broken/incorrect links reported by \ref verification. */
+    size_t numBrokenLinks() const
+    {
+      return verification.missing.size() + verification.modified.size() +
+             verification.not_a_link.size() + verification.source_missing.size();
+    }
+    /*! \brief Returns the total number of problems found across all categories. */
+    size_t numProblems() const { return orphaned.size() + numBrokenLinks() + conflicts.size(); }
+    /*! \brief Returns true iff no problems of any kind were found. */
+    bool isHealthy() const { return numProblems() == 0; }
+  };
+
   /*!
    * \brief Constructor.
    * \param source_path Path to directory containing mods installed using the Installer class.
@@ -438,6 +483,24 @@ public:
    */
   virtual VerificationResult verifyDeployment(bool checksum = false,
                                               std::optional<ProgressNode*> progress_node = {}) const;
+  // fork #50: 'Problems' / health-check panel
+  /*!
+   * \brief Runs a read-only health check on the current deployment, aggregating problems into a
+   * single \ref HealthCheckResult. Performs no disk writes.
+   *
+   * Reuses the existing primitives:
+   * - Orphaned files: entries recorded in .lmmfiles (\ref loadDeployedFiles) whose owning mod is
+   *   no longer part of the current enabled load order, so a deploy would not re-create them.
+   * - Broken/incorrect links: the full \ref VerificationResult from \ref verifyDeployment.
+   * - Conflicts: files claimed by more than one enabled mod, derived from the per-mod source
+   *   enumeration used by \ref computeDeploymentPlan / deploy (\ref
+   *   getDeploymentSourceFilesAndModSizes).
+   * \param checksum Forwarded to \ref verifyDeployment (copy mode only): compare file contents.
+   * \param progress_node Used to inform about the current progress.
+   * \return A \ref HealthCheckResult describing all detected problems.
+   */
+  virtual HealthCheckResult runHealthCheck(bool checksum = false,
+                                           std::optional<ProgressNode*> progress_node = {}) const;
   /*!
    * \brief Returns the order in which the deploy function of different
    *  deployers should be called.
