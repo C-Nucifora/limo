@@ -27,7 +27,8 @@ public:
     lower_case = 1 << 0,
     upper_case = 1 << 1,
     preserve_directories = 1 << 2,
-    single_directory = 1 << 3
+    single_directory = 1 << 3,
+    no_extract = 1 << 4
   };
   /*! \brief Every vector represents an exclusive group of flags. */
   inline static const std::vector<std::vector<Flag>> OPTION_GROUPS{
@@ -40,7 +41,8 @@ public:
     { lower_case, "Convert to lower case" },
     { upper_case, "Convert to upper case" },
     { preserve_directories, "Preserve directories" },
-    { single_directory, "Root directory only" }
+    { single_directory, "Root directory only" },
+    { no_extract, "Install archive without extracting" }
   };
   /*! \brief Maps installer flags to brief descriptions of what they do. */
   inline static const std::map<Flag, std::string> OPTION_DESCRIPTIONS{
@@ -48,7 +50,9 @@ public:
     { lower_case, "Convert file and directory names to lower case (FiLe -> file)" },
     { upper_case, "Convert file and directory names to upper case (FiLe -> FILE)" },
     { preserve_directories, "Do not alter directory structure" },
-    { single_directory, "Move files from all sub directories to the mods root directory" }
+    { single_directory, "Move files from all sub directories to the mods root directory" },
+    { no_extract,
+      "Deploy the archive file itself instead of its contents (e.g. Doom .pk3/.pk4)" }
   };
   /*! \brief Simply extracts files */
   inline static const std::string SIMPLEINSTALLER{ "Simple Installer" };
