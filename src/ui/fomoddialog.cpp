@@ -312,4 +312,3 @@ void FomodDialog::on_buttonBox_rejected()
   dialog_completed_ = true;
   emit addModAborted();
 }
-
