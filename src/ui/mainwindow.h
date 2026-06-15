@@ -20,6 +20,7 @@
 #include "conflictdetaildialog.h"
 // fork #8: persistent download queue panel
 #include "downloadswidget.h"
+#include "collectiondialog.h" // fork #1/#2
 #include "conflictsmodel.h"
 #include "core/deployer.h" // fork feature #49: Deployer::DeploymentPlan
 #include "core/importmodinfo.h"
@@ -284,6 +285,8 @@ private:
   QAction* import_mo2_action_;
   /*! \brief fork #8: Panel showing the persistent download queue (hosted in a dock). */
   DownloadsWidget* downloads_widget_ = nullptr;
+  /*! \brief fork #1/#2: Reusable dialog for importing/exporting Nexus Collections. */
+  std::unique_ptr<CollectionDialog> collection_dialog_;
   /*! \brief Stores the index in ui->mod_list of a mod before being added to a group. */
   int last_mod_list_index_ = -1;
   /*!
@@ -836,6 +839,10 @@ private slots:
   void onRemoveDeployerButtonClicked();
   /*! \brief Deletes the currently active ModdedApplication. */
   void onRemoveAppButtonClicked();
+  /*! \brief fork #1: Opens the dialog to import a Nexus Collection. */
+  void onImportCollection();
+  /*! \brief fork #2: Opens the dialog to export a Nexus Collection. */
+  void onExportCollection();
   /*! \brief Shows a dialog to add the currently selected mod to a Deployer. */
   void on_actionadd_to_deployer_triggered();
   /*! \brief Removes the currently selected mod from the current Deployer. */
