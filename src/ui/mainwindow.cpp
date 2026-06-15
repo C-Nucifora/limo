@@ -748,6 +748,12 @@ void MainWindow::setupMenus()
   QAction* repositories_action = tools_menu->addAction(tr("Mod Repositories"));
   connect(
     repositories_action, &QAction::triggered, this, &MainWindow::onOpenRepositoriesDialog);
+  // fork #1/#2: Add a "Collections" menu with Import/Export actions.
+  QMenu* collections_menu = menuBar()->addMenu("Collections");
+  QAction* import_collection_action = collections_menu->addAction("Import Collection");
+  QAction* export_collection_action = collections_menu->addAction("Export Collection");
+  connect(import_collection_action, &QAction::triggered, this, &MainWindow::onImportCollection);
+  connect(export_collection_action, &QAction::triggered, this, &MainWindow::onExportCollection);
 }
 
 void MainWindow::setupDialogs()
@@ -941,6 +947,17 @@ void MainWindow::setupDialogs()
           &ImportMo2Dialog::importAccepted,
           this,
           &MainWindow::onImportMo2DialogAccepted);
+  // fork #1/#2: Nexus Collection import/export dialog. Import reuses the same per-mod
+  // download slot as the NexusMods browser (#33).
+  collection_dialog_ = std::make_unique<CollectionDialog>(this);
+  connect(collection_dialog_.get(),
+          &CollectionDialog::modDownloadRequested,
+          this,
+          &MainWindow::onModDownloadRequested);
+  connect(collection_dialog_.get(),
+          &CollectionDialog::collectionError,
+          this,
+          &MainWindow::onReceiveError);
 }
 
 void MainWindow::updateModList(const std::vector<ModInfo>& mod_info)
@@ -4065,6 +4082,34 @@ void MainWindow::onDownloadFailed()
   mod_import_queue_.pop();
   if(!mod_import_queue_.empty())
     importMod();
+}
+
+// fork #1: Import a Nexus Collection. The dialog parses collection.json and, on accept,
+// emits modDownloadRequested per mod into the existing queued download/import flow.
+void MainWindow::onImportCollection()
+{
+  if(collection_dialog_->setupImport(currentApp()))
+    collection_dialog_->exec();
+}
+
+// fork #2: Export the current app's mods as a Nexus Collection manifest.
+void MainWindow::onExportCollection()
+{
+  const std::vector<ModInfo> mods = mod_list_model_->getModInfo();
+  // Derive the game domain from the first mod that carries a NexusMods source.
+  QString game_domain;
+  for(const ModInfo& info : mods)
+  {
+    const auto domain_and_id = nexus::Api::extractDomainAndModId(info.mod.remote_source);
+    if(domain_and_id)
+    {
+      game_domain = QString::fromStdString(domain_and_id->first);
+      break;
+    }
+  }
+  collection_dialog_->setupExport(
+    currentApp(), game_domain, ui->info_name_label->text(), mods);
+  collection_dialog_->exec();
 }
 
 void MainWindow::on_actionReinstall_From_Local_triggered()

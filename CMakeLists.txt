@@ -184,6 +184,8 @@ set(CORE_SOURCES
         src/core/modinfo.h
         src/core/nexus/api.cpp
         src/core/nexus/api.h
+        src/core/nexus/collection.cpp
+        src/core/nexus/collection.h
         src/core/nexus/file.cpp
         src/core/nexus/file.h
         src/core/nexus/mod.cpp
@@ -310,6 +312,9 @@ set(PROJECT_SOURCES
         src/ui/changelogdialog.cpp
         src/ui/changelogdialog.h
         src/ui/changelogdialog.ui
+        src/ui/collectiondialog.cpp
+        src/ui/collectiondialog.h
+        src/ui/collectiondialog.ui
         src/ui/colors.h
         src/ui/conflictdetaildialog.cpp
         src/ui/conflictdetaildialog.h
