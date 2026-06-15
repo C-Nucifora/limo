@@ -150,6 +150,14 @@ private:
   QString search_term_ = "";
   /*! \brief Context menu for ui->mod_list. */
   QMenu* mod_list_menu_;
+  /*! \brief Bulk action: enables all selected mods in every deployer they belong to. */
+  QAction* bulk_enable_action_ = nullptr;
+  /*! \brief Bulk action: disables all selected mods in every deployer they belong to. */
+  QAction* bulk_disable_action_ = nullptr;
+  /*! \brief Bulk action: adds a manual tag to all selected mods. */
+  QAction* bulk_add_tag_action_ = nullptr;
+  /*! \brief Bulk action: removes a manual tag from all selected mods. */
+  QAction* bulk_remove_tag_action_ = nullptr;
   /*! \brief Context menu for ui->deployer_list. */
   QMenu* deployer_list_menu_;
   /*! \brief Context menu for ui->backup_list. */
@@ -1284,6 +1292,21 @@ private slots:
    * Implements fork issue #7.
    */
   void on_actionExport_Mod_List_triggered();
+  /*!
+   * \brief Sets the status of all currently selected mods in the mod list to the given value.
+   * The status is applied for every deployer each mod belongs to, reusing the per-mod
+   * \ref setModStatus signal.
+   * \param status New status. True enables, false disables.
+   */
+  void setBulkModStatus(bool status);
+  /*! \brief Enables all currently selected mods in every deployer they belong to. */
+  void on_actionBulk_Enable_triggered();
+  /*! \brief Disables all currently selected mods in every deployer they belong to. */
+  void on_actionBulk_Disable_triggered();
+  /*! \brief Prompts for a manual tag and adds it to all currently selected mods. */
+  void on_actionBulk_Add_Tag_triggered();
+  /*! \brief Prompts for a manual tag and removes it from all currently selected mods. */
+  void on_actionBulk_Remove_Tag_triggered();
 
 signals:
   /*!
