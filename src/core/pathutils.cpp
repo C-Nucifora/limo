@@ -2,6 +2,13 @@
 #include <algorithm>
 #include <regex>
 #include <set>
+// For FICLONE reflink support (limo-app/limo#232)
+#include <cerrno>
+#include <cstring>
+#include <fcntl.h>
+#include <linux/fs.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 
 namespace sfs = std::filesystem;
 namespace pu = path_utils;
@@ -205,5 +212,62 @@ void copyOrMoveFiles(const sfs::path& source, const sfs::path& destination, bool
 bool exists(const std::filesystem::path& path)
 {
   return sfs::status(path).type() != sfs::file_type::not_found;
+}
+
+void reflinkOrCopyFile(const sfs::path& source, const sfs::path& dest)
+{
+  // Attempt a reflink (CoW clone) via FICLONE ioctl (limo-app/limo#232).
+  // This is near-instant and uses no extra disk space until the clone is modified.
+  // Supported on btrfs, XFS (≥4.16), bcachefs, and other reflink-capable filesystems.
+  int src_fd = ::open(source.c_str(), O_RDONLY);
+  if(src_fd >= 0)
+  {
+    int dst_fd =
+      ::open(dest.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if(dst_fd >= 0)
+    {
+      int ret = ::ioctl(dst_fd, FICLONE, src_fd);
+      ::close(src_fd);
+      ::close(dst_fd);
+      if(ret == 0)
+        return; // reflink succeeded
+      // EOPNOTSUPP / ENOTTY: filesystem does not support reflinks
+      // EXDEV: source and destination are on different filesystems
+      // EINVAL: source is not a regular file or other constraint violated
+      // For any of these, fall through to a regular copy below.
+      if(errno != EOPNOTSUPP && errno != ENOTTY && errno != EXDEV && errno != EINVAL)
+        throw std::runtime_error(std::string("reflinkOrCopyFile: ioctl FICLONE failed: ") +
+                                 ::strerror(errno));
+      // Remove the (empty) destination file created above before retrying with copy.
+      sfs::remove(dest);
+    }
+    else
+    {
+      ::close(src_fd);
+    }
+  }
+  // Fall back to a regular file copy when reflink is unavailable.
+  sfs::copy_file(source, dest, sfs::copy_options::overwrite_existing);
+}
+
+void reflinkOrCopy(const sfs::path& source, const sfs::path& dest)
+{
+  // Recursively copy source to dest, using reflinks for regular files where supported
+  // (limo-app/limo#232). Symlinks are reproduced as symlinks; directories are created
+  // normally. Falls back to a standard copy on non-CoW filesystems.
+  if(sfs::is_symlink(source))
+  {
+    sfs::copy_symlink(source, dest);
+    return;
+  }
+  if(sfs::is_directory(source))
+  {
+    sfs::create_directories(dest);
+    for(const auto& entry : sfs::directory_iterator(source))
+      reflinkOrCopy(entry.path(), dest / entry.path().filename());
+    return;
+  }
+  // Regular file: attempt reflink, fall back to copy.
+  reflinkOrCopyFile(source, dest);
 }
 }
