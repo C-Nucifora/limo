@@ -2686,7 +2686,8 @@ void MainWindow::onEditDeployerPressed()
 
 void MainWindow::onAddToolClicked()
 {
-  add_tool_dialog_->setAddMode(currentApp());
+  // Pass the current app's Steam App ID so the dialog can default the field (limo-app/limo#69).
+  add_tool_dialog_->setAddMode(currentApp(), app_info_.steam_app_id);
   add_tool_dialog_->exec();
 }
 

@@ -49,8 +49,11 @@ public:
   /*!
    * \brief Initializes the dialog for adding a new tool.
    * \param app_id Id of the app to which the tool is to be added.
+   * \param steam_app_id Steam app ID of the current application, used to pre-fill
+   *        the Steam App ID field for the Protontricks runtime (limo-app/limo#69).
+   *        Pass -1 if not a Steam app.
    */
-  void setAddMode(int app_id);
+  void setAddMode(int app_id, long steam_app_id = -1);
   /*!
    * \brief Initializes the dialog for editing an existing tool.
    * \param app_id Id of the app to which the edited tool belongs.

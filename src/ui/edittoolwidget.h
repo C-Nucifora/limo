@@ -42,6 +42,13 @@ public:
   /*! \brief Initializes the widget with empty fields. */
   void init();
   /*!
+   * \brief Initializes the widget with empty fields and pre-fills the Steam App ID.
+   * Only sets the field when steam_app_id > 0 and the field is otherwise empty.
+   * The user can still override it (limo-app/limo#69).
+   * \param steam_app_id Default Steam app ID from the current application.
+   */
+  void init(long steam_app_id);
+  /*!
    * \brief Initializes the widget with data from given Tool.
    * \param tool Source Tool.
    */
