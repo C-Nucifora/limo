@@ -379,7 +379,31 @@ void ModdedApplication::removeModFromDeployer(int deployer,
 
 void ModdedApplication::setModStatus(int deployer, int mod_id, bool status)
 {
-  deployers_[deployer]->setModStatus(mod_id, status);
+  // Issue #65: A single logical mod can be split across multiple deployers (e.g. a Data
+  // deployer and a plugin/Data-files deployer sharing the same mod id). Toggling its enabled
+  // state should affect every deployer that contains the mod id, so the split mod stays
+  // consistent instead of leaving part of it enabled and part disabled.
+  setModStatusAcrossDeployers(deployer, mod_id, status);
+}
+
+void ModdedApplication::setModStatusAcrossDeployers(int source_deployer, int mod_id, bool status)
+{
+  // Always apply to the deployer the toggle originated from to preserve the previous
+  // single-deployer behavior, even if (for some reason) it does not report hasMod.
+  if(source_deployer >= 0 && source_deployer < static_cast<int>(deployers_.size()))
+    deployers_[source_deployer]->setModStatus(mod_id, status);
+  // Mirror the new status onto every other non-autonomous deployer that contains the same mod
+  // id. Autonomous deployers (e.g. plugin/LOOT/reverse deployers) manage their own mod set and
+  // are intentionally skipped here, mirroring uninstallMods().
+  for(int depl = 0; depl < static_cast<int>(deployers_.size()); depl++)
+  {
+    if(depl == source_deployer)
+      continue;
+    if(deployers_[depl]->isAutonomous())
+      continue;
+    if(deployers_[depl]->hasMod(mod_id))
+      deployers_[depl]->setModStatus(mod_id, status);
+  }
   updateSettings(true);
 }
 
