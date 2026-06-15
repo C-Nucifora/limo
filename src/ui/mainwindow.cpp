@@ -45,6 +45,9 @@
 #include <QPalette>
 #include <QPushButton>
 #include <QColorDialog> // fork #199
+#include <QDragEnterEvent> // fork #16
+#include <QDropEvent> // fork #16
+#include <QMimeData> // fork #16
 #include <QLabel> // fork #25
 #include <QVBoxLayout> // fork #25
 #include <QScrollBar>
@@ -259,6 +262,55 @@ void MainWindow::resizeEvent(QResizeEvent* event)
 {
   QMainWindow::resizeEvent(event);
   updateEmptyStateOverlayGeometry();
+}
+
+// fork #16: returns the local archive files among the dropped URLs (by extension allowlist).
+static QList<QUrl> archiveUrlsFromMime(const QMimeData* mime)
+{
+  QList<QUrl> archives;
+  if(!mime || !mime->hasUrls())
+    return archives;
+  static const QStringList kExtensions{ ".zip", ".7z",  ".rar", ".tar", ".gz",
+                                        ".bz2", ".xz",  ".tgz", ".tbz", ".tbz2",
+                                        ".lzma", ".zst", ".archive", ".fomod" };
+  for(const QUrl& url : mime->urls())
+  {
+    if(!url.isLocalFile())
+      continue;
+    const QString lower = url.toLocalFile().toLower();
+    for(const QString& ext : kExtensions)
+    {
+      if(lower.endsWith(ext))
+      {
+        archives.append(url);
+        break;
+      }
+    }
+  }
+  return archives;
+}
+
+// fork #16: accept drags that contain at least one local archive file, but only when an
+// application is selected so the import target is well defined.
+void MainWindow::dragEnterEvent(QDragEnterEvent* event)
+{
+  if(currentApp() >= 0 && !archiveUrlsFromMime(event->mimeData()).isEmpty())
+    event->acceptProposedAction();
+  else
+    QMainWindow::dragEnterEvent(event);
+}
+
+// fork #16: install the dropped archive(s) via the normal local-import path.
+void MainWindow::dropEvent(QDropEvent* event)
+{
+  const QList<QUrl> archives = archiveUrlsFromMime(event->mimeData());
+  if(currentApp() < 0 || archives.isEmpty())
+  {
+    QMainWindow::dropEvent(event);
+    return;
+  }
+  event->acceptProposedAction();
+  onModAdded(archives);
 }
 
 void MainWindow::setCmdArgument(std::string argument)

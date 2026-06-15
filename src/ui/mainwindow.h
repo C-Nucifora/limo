@@ -114,6 +114,10 @@ public:
   void closeEvent(QCloseEvent* event) override;
   // fork #25: keep the empty-state overlay centered/sized over the central area.
   void resizeEvent(QResizeEvent* event) override;
+  /*! \brief fork #16: accept dragged archive files from the file manager. */
+  void dragEnterEvent(QDragEnterEvent* event) override;
+  /*! \brief fork #16: install archive files dropped onto the window. */
+  void dropEvent(QDropEvent* event) override;
   /*!
    * \brief Checks if the given argument is a NexusMods download link. If True: Downloads the mod.
    * \param argument Potential download link.
