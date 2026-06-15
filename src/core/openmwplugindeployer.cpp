@@ -1,5 +1,6 @@
 #include "openmwplugindeployer.h"
 #include "pathutils.h"
+#include <algorithm>
 #include <format>
 #include <fstream>
 #include <json/json.h>
@@ -160,6 +161,63 @@ void OpenMwPluginDeployer::setProfile(int profile)
 void OpenMwPluginDeployer::writePlugins() const
 {
   writePluginsPrivate();
+}
+
+void OpenMwPluginDeployer::updatePlugins()
+{
+  // Collect all plugin filenames present in the source directory.
+  std::vector<std::string> plugin_files;
+  for(const auto& dir_entry : sfs::directory_iterator(source_path_))
+  {
+    if(dir_entry.is_directory())
+      continue;
+    const std::string file_name = dir_entry.path().filename().string();
+    if(std::regex_match(file_name, plugin_regex_))
+      plugin_files.push_back(file_name);
+  }
+
+  // Helper: ASCII lower-case for case-insensitive comparison.
+  auto to_lower = [](std::string s) -> std::string {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return s;
+  };
+
+  // Re-build the plugin list.
+  // Phase 1: keep existing entries whose on-disk file still exists (case-
+  //          insensitive match so that e.g. "MyMod.ESP" matches "mymod.esp").
+  //          Crucially, the stored name (and therefore enabled/disabled state)
+  //          is preserved; the canonical on-disk spelling replaces it so that
+  //          subsequent writes use the actual filename.
+  std::vector<std::pair<std::string, bool>> new_plugins;
+  for(const auto& existing : plugins_)
+  {
+    const std::string existing_lower = to_lower(existing.first);
+    auto it = str::find_if(plugin_files,
+                           [&](const std::string& disk_name) {
+                             return to_lower(disk_name) == existing_lower;
+                           });
+    if(it != plugin_files.end())
+    {
+      // Use the on-disk spelling but keep the saved enabled/disabled state.
+      new_plugins.emplace_back(*it, existing.second);
+    }
+  }
+
+  // Phase 2: add newly discovered plugins (not already represented) as enabled.
+  for(const auto& disk_name : plugin_files)
+  {
+    const std::string disk_lower = to_lower(disk_name);
+    bool already_present =
+      str::find_if(new_plugins, [&](const auto& p) {
+        return to_lower(p.first) == disk_lower;
+      }) != new_plugins.end();
+    if(!already_present)
+      new_plugins.emplace_back(disk_name, true);
+  }
+
+  plugins_ = new_plugins;
+  writePlugins();
 }
 
 bool OpenMwPluginDeployer::initPluginFile()
