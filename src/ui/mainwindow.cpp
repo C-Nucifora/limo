@@ -490,6 +490,25 @@ void MainWindow::setupLists()
   ui->mod_list->setItemDelegateForColumn(ModListModel::tags_col, mod_list_cell_delegate_);
   mod_list_proxy_->setSourceModel(mod_list_model_);
   ui->mod_list->setModel(mod_list_proxy_);
+  // Highlight mods that conflict with the currently selected one (limo-app/limo#143).
+  connect(ui->mod_list->selectionModel(),
+          &QItemSelectionModel::currentRowChanged,
+          this,
+          [this](const QModelIndex& current, const QModelIndex&)
+          {
+            if(!current.isValid())
+            {
+              mod_list_model_->clearConflictHighlight();
+              return;
+            }
+            const auto src = mod_list_proxy_->mapToSource(current);
+            const int mod_id = mod_list_model_->data(src, ModListModel::mod_id_role).toInt();
+            const auto iter = mod_conflict_groups_.find(mod_id);
+            if(iter == mod_conflict_groups_.end())
+              mod_list_model_->setConflictHighlight(mod_id, {});
+            else
+              mod_list_model_->setConflictHighlight(mod_id, iter->second);
+          });
   ui->mod_list->setColumnWidth(ModListModel::action_col, 55);
   ui->mod_list->setColumnWidth(ModListModel::id_col, 50);
   mod_list_proxy_->setFilterKeyColumn(ModListModel::name_col);
@@ -1764,6 +1783,17 @@ void MainWindow::onGetDeployerInfo(DeployerInfo depl_info)
 
   updateDeployerList(depl_info);
   deployer_list_proxy_->setConflictGroups(depl_info.conflict_groups);
+  // Rebuild the mod-id -> conflicting-mod-ids map used to highlight conflicts on selection (#143).
+  mod_conflict_groups_.clear();
+  for(const auto& group : depl_info.conflict_groups)
+  {
+    for(int id : group)
+    {
+      std::set<int> others(group.begin(), group.end());
+      others.erase(id);
+      mod_conflict_groups_[id] = others;
+    }
+  }
   emit getAppInfo(currentApp());
 }
 
