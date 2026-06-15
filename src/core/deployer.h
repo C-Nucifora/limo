@@ -25,6 +25,54 @@
 class Deployer
 {
 public:
+  /*!
+   * \brief A purely in-memory description of the changes a deployment would make to the
+   * target directory, computed without touching the disk.
+   *
+   * This is the reusable primitive on which the deploy preview (and later verify / restore /
+   * health-check features) are built. It is produced by \ref computeDeploymentPlan by diffing
+   * the source map (what would be deployed for a given load order) against the recorded
+   * deployed files (\ref loadDeployedFiles).
+   */
+  struct DeploymentPlan
+  {
+    /*!
+     * \brief A single file (or directory) change relative to the deployment target directory.
+     */
+    struct Entry
+    {
+      /*! \brief Path relative to the deployment target directory. */
+      std::filesystem::path path;
+      /*! \brief Id of the mod responsible for this path after deployment, or -1 if unknown. */
+      int mod_id = -1;
+      /*!
+       * \brief For overwrites: id of the mod that currently owns this path (the one being
+       * replaced), or -1 if unknown.
+       */
+      int previous_mod_id = -1;
+    };
+
+    /*! \brief Name of the deployer this plan belongs to. */
+    std::string deployer_name;
+    /*! \brief Paths which are not currently deployed and would be newly created. */
+    std::vector<Entry> to_create;
+    /*!
+     * \brief Paths which are currently deployed but would be deployed from a different mod,
+     * i.e. the winning mod for that path changes.
+     */
+    std::vector<Entry> to_overwrite;
+    /*!
+     * \brief Paths which are currently deployed but would no longer be deployed and would
+     * therefore be removed (and any backup restored).
+     */
+    std::vector<Entry> to_remove;
+
+    /*! \brief Returns the total number of changed paths described by this plan. */
+    size_t numChanges() const { return to_create.size() + to_overwrite.size() + to_remove.size(); }
+    /*! \brief Returns true iff this plan would not change anything on disk. */
+    bool empty() const { return numChanges() == 0; }
+  };
+
   /*! \brief Describes how files should be deployed to the target directory. */
   enum DeployMode
   {
@@ -90,6 +138,28 @@ public:
    * \return A map from deployed mod ids to their respective mods total size on disk.
    */
   virtual std::map<int, unsigned long> deploy(std::optional<ProgressNode*> progress_node = {});
+  /*!
+   * \brief Computes a dry-run preview of the changes a deployment would make, without touching
+   * the disk.
+   *
+   * The plan is produced by enumerating the files that would be deployed for the given load
+   * order (via \ref getDeploymentSourceFilesAndModSizes) and diffing them against the files
+   * recorded as currently deployed (via \ref loadDeployedFiles):
+   * - Paths present in the source map but not currently deployed are reported as created.
+   * - Paths present in both but owned by a different mod are reported as overwrites, including
+   *   which mod currently owns the path and which mod would win.
+   * - Paths currently deployed but absent from the source map are reported as removals.
+   * Directory entries are skipped, since they are created/removed implicitly.
+   * \param loadorder A vector of mod ids representing the load order to preview.
+   * \return The computed deployment plan.
+   */
+  virtual DeploymentPlan computeDeploymentPlan(const std::vector<int>& loadorder) const;
+  /*!
+   * \brief Computes a dry-run preview of the changes a deployment would make, without touching
+   * the disk. This overload uses the enabled mods of the internal load order.
+   * \return The computed deployment plan.
+   */
+  virtual DeploymentPlan computeDeploymentPlan() const;
   /*!
    * \brief Removes all deployed mods from the target directory and restores backups.
    * \param progress_node Used to inform about the current progress.

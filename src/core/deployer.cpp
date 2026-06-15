@@ -76,6 +76,58 @@ std::map<int, unsigned long> Deployer::deploy(std::optional<ProgressNode*> progr
   return deploy(loadorder, progress_node);
 }
 
+Deployer::DeploymentPlan Deployer::computeDeploymentPlan(const std::vector<int>& loadorder) const
+{
+  // What would be deployed for this load order (relative path -> winning mod id).
+  // Reuses the exact source enumeration used by deploy() so the preview cannot drift from it.
+  auto [source_files, mod_sizes] = getDeploymentSourceFilesAndModSizes(loadorder);
+  // What is currently recorded as deployed (relative path -> source mod id) from .lmmfiles.
+  const std::map<sfs::path, int> dest_files = loadDeployedFiles();
+
+  DeploymentPlan plan;
+  plan.deployer_name = name_;
+
+  // Walk the source map: every path is either new (create) or already deployed. If already
+  // deployed but owned by a different mod, the winning mod changes -> overwrite.
+  for(const auto& [path, mod_id] : source_files)
+  {
+    // Directories are created implicitly when their files are deployed; skip them.
+    if(sfs::is_directory(source_path_ / std::to_string(mod_id) / path))
+      continue;
+    const auto dest_it = dest_files.find(path);
+    if(dest_it == dest_files.end())
+      plan.to_create.push_back({ path, mod_id, -1 });
+    else if(dest_it->second != mod_id)
+      plan.to_overwrite.push_back({ path, mod_id, dest_it->second });
+  }
+
+  // Walk the recorded deployed files: any path no longer present in the source map would be
+  // removed and any backup of it restored.
+  for(const auto& [path, mod_id] : dest_files)
+  {
+    if(source_files.find(path) != source_files.end())
+      continue;
+    // Skip directory records; they are removed implicitly once empty.
+    if(sfs::is_directory(dest_path_ / path))
+      continue;
+    plan.to_remove.push_back({ path, -1, mod_id });
+  }
+
+  return plan;
+}
+
+Deployer::DeploymentPlan Deployer::computeDeploymentPlan() const
+{
+  std::vector<int> loadorder;
+  for(auto const& lo : *loadorders_[current_profile_])
+  {
+    auto mod_info = std::static_pointer_cast<DeployerModInfo>(lo.lock());
+    if(mod_info && !mod_info->isSeparator && mod_info->enabled)
+      loadorder.push_back(mod_info->id);
+  }
+  return computeDeploymentPlan(loadorder);
+}
+
 void Deployer::unDeploy(std::optional<ProgressNode*> progress_node)
 {
   log_(Log::LOG_DEBUG, "Undeploying...");

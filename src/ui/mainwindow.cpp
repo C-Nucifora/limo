@@ -19,6 +19,7 @@
 #include "core/deployerfactory.h"
 #include "core/installer.h"
 #include "deployerlistview.h"
+#include "deploypreviewdialog.h" // fork feature #49: deploy dry-run / preview
 #include "editmanualtagsdialog.h"
 #include "enterapipwdialog.h"
 #include "modlistproxymodel.h"
@@ -4100,6 +4101,26 @@ void MainWindow::onExternalChangesHandled(int app_id, int deployer, int num_depl
   setBusyStatus(false);
   if(deployer == num_deployers - 1 || !deploy_for_all_)
   {
+    // fork feature #49: deploy dry-run / preview.
+    // Optional confirm step shown immediately before the real deploy is dispatched to the
+    // ApplicationManager worker thread. The DeploymentPlan primitive lives on Deployer
+    // (Deployer::computeDeploymentPlan); the deployer instances are owned by the
+    // ApplicationManager and run on a separate thread, so the fully populated per-deployer
+    // plans must be delivered to this point via an ApplicationManager signal. Wiring that
+    // signal touches applicationmanager, which is out of scope for this change, so the seam is
+    // staged here: when deploy_preview_plans_ is populated (by that future signal) and the
+    // feature is enabled, the preview dialog is shown and deployment only proceeds on OK.
+    if(deploy && show_deploy_preview_ && !deploy_preview_plans_.empty())
+    {
+      DeployPreviewDialog preview(deploy_preview_plans_, this);
+      deploy_preview_plans_.clear();
+      if(preview.exec() != QDialog::Accepted)
+      {
+        setStatusMessage("Deployment cancelled");
+        setBusyStatus(false);
+        return;
+      }
+    }
     const std::string action_string = deploy ? "Deploying" : "Undeploying";
     Log::info(action_string + " mods...");
     setStatusMessage((action_string + " mods").c_str());
