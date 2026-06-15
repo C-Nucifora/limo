@@ -31,7 +31,7 @@ TEST_CASE("State is read", "[openmw]")
     DATA_DIR / "target" / "openmw" / "source", DATA_DIR / "target" / "openmw" / "target", "");
   REQUIRE(a_depl.getNumMods() == 3);
   REQUIRE_THAT(a_depl.getModNames(),
-               Catch::Matchers::Equals(std::vector<std::string>{ "Morrowind.bsa", "b.bsa", "a.bsa" }));
+               Catch::Matchers::Equals(std::vector<std::string>{ "Morrowind.bsa", "a.bsa", "b.bsa" }));
   REQUIRE_THAT(a_depl.getLoadorder(),
                Catch::Matchers::Equals(
                  std::vector<std::tuple<int, bool>>{ { -1, true }, { -1, true }, { -1, true } }));

@@ -6,14 +6,19 @@
 
 void resetFiles()
 {
-  const sfs::path plugin_target = DATA_DIR / "target" / "loot" / "target" / "plugins.txt";
+  const sfs::path target_dir = DATA_DIR / "target" / "loot" / "target";
   const sfs::path plugin_source = DATA_DIR / "source" / "loot" / "plugins.txt";
-  const sfs::path load_order_target = DATA_DIR / "target" / "loot" / "target" / "loadorder.txt";
   const sfs::path load_order_source = DATA_DIR / "source" / "loot" / "loadorder.txt";
-  for(const auto& dir_entry : sfs::directory_iterator(DATA_DIR / "target" / "loot" / "target"))
+  const sfs::path initial_source = DATA_DIR / "source" / "loot" / "initial_target";
+  // Remove all files in the target directory.
+  for(const auto& dir_entry : sfs::directory_iterator(target_dir))
     sfs::remove(dir_entry.path());
-  sfs::copy(plugin_source, plugin_target);
-  sfs::copy(load_order_source, load_order_target);
+  // Restore base plugin/loadorder files.
+  sfs::copy(plugin_source, target_dir / "plugins.txt");
+  sfs::copy(load_order_source, target_dir / "loadorder.txt");
+  // Restore initial profile state (hidden files: .lmmconfig, .lmmprof* etc.).
+  for(const auto& dir_entry : sfs::directory_iterator(initial_source))
+    sfs::copy(dir_entry.path(), target_dir / dir_entry.path().filename());
 }
 
 
@@ -24,7 +29,7 @@ TEST_CASE("State is read", "[loot]")
     DATA_DIR / "target" / "loot" / "source", DATA_DIR / "target" / "loot" / "target", "", false);
   REQUIRE(depl.getNumMods() == 4);
   REQUIRE_THAT(depl.getModNames(),
-               Catch::Matchers::Equals(std::vector<std::string>{ "a.esp", "c.esp", "Morrowind.esm", "d.esp" }));
+               Catch::Matchers::Equals(std::vector<std::string>{ "a.esp", "c.esp", "d.esp", "Morrowind.esm" }));
   REQUIRE_THAT(depl.getLoadorder(),
                Catch::Matchers::Equals(
                  std::vector<std::tuple<int, bool>>{ { -1, true }, { -1, false }, { -1, true }, { -1, true } }));
@@ -40,7 +45,7 @@ TEST_CASE("Load order can be edited", "[loot]")
   depl.setModStatus(0, false);
   depl.changeLoadorder(2, 1);
   REQUIRE_THAT(depl.getModNames(),
-               Catch::Matchers::Equals(std::vector<std::string>{ "c.esp", "a.esp", "Morrowind.esm", "d.esp" }));
+               Catch::Matchers::Equals(std::vector<std::string>{ "c.esp", "a.esp", "d.esp", "Morrowind.esm" }));
   REQUIRE_THAT(depl.getLoadorder(),
                Catch::Matchers::Equals(
                  std::vector<std::tuple<int, bool>>{ { -1, false }, { -1, true }, { -1, true }, { -1, true } }));

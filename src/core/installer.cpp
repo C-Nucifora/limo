@@ -3,11 +3,15 @@
 #include "pathutils.h"
 #include <archive.h>
 #include <archive_entry.h>
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <ranges>
 #include <regex>
+#ifdef LIMO_WITH_UNRAR
 #define _UNIX
 #include <dll.hpp>
+#endif
 
 namespace sfs = std::filesystem;
 namespace pu = path_utils;
@@ -40,6 +44,7 @@ void Installer::extract(const sfs::path& source_path,
                    extension.end(),
                    extension.begin(),
                    [](unsigned char c) { return std::tolower(c); });
+#ifdef LIMO_WITH_UNRAR
     if(extension == ".rar")
     {
       sfs::remove_all(dest_path);
@@ -47,6 +52,9 @@ void Installer::extract(const sfs::path& source_path,
     }
     else
       throw error;
+#else
+    throw error;
+#endif
   }
   for(const auto& dir_entry : sfs::recursive_directory_iterator(dest_path))
   {
@@ -422,6 +430,7 @@ void Installer::extractWithProgress(const sfs::path& source_path,
   sfs::current_path(working_dir);
 }
 
+#ifdef LIMO_WITH_UNRAR
 void Installer::extractRarArchive(const sfs::path& source_path, const sfs::path& dest_path)
 {
   log(Log::LOG_DEBUG, "Using fallback rar extraction");
@@ -453,3 +462,4 @@ void Installer::extractRarArchive(const sfs::path& source_path, const sfs::path&
     throw CompressionError("Failed to extract RAR archive.");
   RARCloseArchive(hArcData);
 }
+#endif

@@ -3,12 +3,17 @@
 #include <iostream>
 
 
+// DATA_DIR is initialized at runtime by initTestDataDir().
+sfs::path DATA_DIR;
+
+
 std::vector<std::string> getFiles(sfs::path dir, bool get_contents = false)
 {
   std::vector<std::string> files;
   for(const auto& dir_entry : sfs::recursive_directory_iterator(dir))
   {
-    if(dir_entry.path().filename() == ".lmmfiles" || dir_entry.path().filename() == ".lmm_managed_dir")
+    if(dir_entry.path().filename() == ".lmmfiles" || dir_entry.path().filename() == ".lmm_managed_dir"
+       || dir_entry.path().filename() == ".gitkeep")
       continue;
     std::string entry = dir_entry.path().string().erase(0, dir.string().size());
     if(get_contents && dir_entry.is_regular_file())
@@ -64,4 +69,17 @@ void verifyFilesAreEqual(sfs::path first_file, sfs::path second_file)
                              std::istreambuf_iterator<char>());
   file.close();
   REQUIRE(content_first_file == content_second_file);
+}
+
+void initTestDataDir()
+{
+  // Create a unique temporary working directory for this test run.
+  sfs::path tmp_base = sfs::temp_directory_path() / "limo_tests";
+  sfs::remove_all(tmp_base);
+  sfs::create_directories(tmp_base);
+
+  // Copy the entire immutable fixture tree into the temp dir.
+  sfs::copy(FIXTURE_DIR, tmp_base, sfs::copy_options::recursive);
+
+  DATA_DIR = tmp_base;
 }
