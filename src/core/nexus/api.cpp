@@ -109,6 +109,135 @@ std::vector<Mod> Api::getTrackedMods()
   return mods;
 }
 
+bool Api::endorseMod(const std::string& domain,
+                     long mod_id,
+                     bool endorse,
+                     const std::string& mod_version)
+{
+  if(api_key_.empty())
+  {
+    std::cerr << "NexusMods: cannot endorse mod, no API key set." << std::endl;
+    return false;
+  }
+
+  const std::string action = endorse ? "endorse" : "abstain";
+  const cpr::Url url(std::format(
+    "https://api.nexusmods.com/v1/games/{}/mods/{}/{}.json", domain, mod_id, action));
+
+  // NexusMods requires the mod's version in the body when endorsing.
+  Json::Value body;
+  if(endorse)
+    body["version"] = mod_version;
+  Json::FastWriter writer;
+  const std::string body_str = writer.write(body);
+
+  const cpr::Response response = cpr::Post(url,
+                                           cpr::Header{ { "apikey", api_key_ },
+                                                        { "Content-Type", "application/json" } },
+                                           cpr::Body{ body_str });
+
+  if(response.status_code == 429)
+  {
+    std::cerr << std::format(
+                   "NexusMods: rate limited while trying to {} mod {} for \"{}\".",
+                   action,
+                   mod_id,
+                   domain)
+              << std::endl;
+    return false;
+  }
+  if(response.status_code < 200 || response.status_code >= 300)
+  {
+    std::cerr << std::format(
+                   "NexusMods: failed to {} mod {} for \"{}\". Response code was {}.",
+                   action,
+                   mod_id,
+                   domain,
+                   response.status_code)
+              << std::endl;
+    return false;
+  }
+  return true;
+}
+
+bool Api::trackMod(const std::string& domain, long mod_id, bool track)
+{
+  if(api_key_.empty())
+  {
+    std::cerr << "NexusMods: cannot (un)track mod, no API key set." << std::endl;
+    return false;
+  }
+
+  const cpr::Url url("https://api.nexusmods.com/v1/user/tracked_mods.json");
+  const cpr::Header header{ { "apikey", api_key_ } };
+  const cpr::Parameters params{ { "domain_name", domain } };
+  const cpr::Payload payload{ { "mod_id", std::to_string(mod_id) } };
+
+  cpr::Response response = track ? cpr::Post(url, header, params, payload)
+                                 : cpr::Delete(url, header, params, payload);
+
+  const std::string action = track ? "track" : "untrack";
+  if(response.status_code == 429)
+  {
+    std::cerr << std::format(
+                   "NexusMods: rate limited while trying to {} mod {} for \"{}\".",
+                   action,
+                   mod_id,
+                   domain)
+              << std::endl;
+    return false;
+  }
+  if(response.status_code < 200 || response.status_code >= 300)
+  {
+    std::cerr << std::format(
+                   "NexusMods: failed to {} mod {} for \"{}\". Response code was {}.",
+                   action,
+                   mod_id,
+                   domain,
+                   response.status_code)
+              << std::endl;
+    return false;
+  }
+  return true;
+}
+
+std::vector<std::pair<std::string, long>> Api::getTrackedModIds()
+{
+  if(api_key_.empty())
+  {
+    std::cerr << "NexusMods: cannot get tracked mods, no API key set." << std::endl;
+    return {};
+  }
+
+  cpr::Response response = cpr::Get(cpr::Url("https://api.nexusmods.com/v1/user/tracked_mods.json"),
+                                    cpr::Header{ { "apikey", api_key_ } });
+  if(response.status_code == 429)
+  {
+    std::cerr << "NexusMods: rate limited while fetching tracked mods." << std::endl;
+    return {};
+  }
+  if(response.status_code != 200)
+  {
+    std::cerr << std::format("NexusMods: failed to get tracked mods. Response code was {}.",
+                             response.status_code)
+              << std::endl;
+    return {};
+  }
+
+  Json::Value json_body;
+  Json::Reader reader;
+  if(!reader.parse(response.text.c_str(), json_body))
+  {
+    std::cerr << "NexusMods: failed to parse tracked mods response." << std::endl;
+    return {};
+  }
+
+  std::vector<std::pair<std::string, long>> mods;
+  for(int i = 0; i < json_body.size(); i++)
+    mods.emplace_back(json_body[i]["domain_name"].asString(), json_body[i]["mod_id"].asInt64());
+  return mods;
+}
+
 std::vector<File> Api::getModFiles(const std::string& mod_url)
 {
   auto domain_and_mod = extractDomainAndModId(mod_url);

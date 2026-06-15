@@ -127,10 +127,41 @@ public:
    */
   static void untrackMod(const std::string& mod_url);
   /*!
+   * \brief Endorses or abstains from endorsing the given mod for the account belonging to the
+   * API key.
+   *
+   * Endorsing requires the mod's version to be sent to NexusMods. Abstaining does not.
+   *
+   * \param domain The NexusMods domain (game) containing the mod.
+   * \param mod_id Target mod id.
+   * \param endorse If true: endorse the mod. If false: abstain from endorsing it.
+   * \param mod_version The mod's version. Required by NexusMods when endorsing, ignored when
+   * abstaining.
+   * \return True if the operation succeeded, false otherwise.
+   */
+  static bool endorseMod(const std::string& domain,
+                         long mod_id,
+                         bool endorse,
+                         const std::string& mod_version = "");
+  /*!
+   * \brief Tracks or untracks the given mod for the account belonging to the API key.
+   * \param domain The NexusMods domain (game) containing the mod.
+   * \param mod_id Target mod id.
+   * \param track If true: track the mod. If false: untrack it.
+   * \return True if the operation succeeded, false otherwise.
+   */
+  static bool trackMod(const std::string& domain, long mod_id, bool track);
+  /*!
    * \brief Fetches data for all mods tracked by the account belonging to the API key.
    * \return A vector of Mod objects with the received data.
    */
   static std::vector<Mod> getTrackedMods();
+  /*!
+   * \brief Fetches the domain/mod id pairs of all mods tracked by the account belonging to the
+   * API key, without resolving full mod data.
+   * \return A vector of (domain_name, mod_id) pairs. Empty on failure.
+   */
+  static std::vector<std::pair<std::string, long>> getTrackedModIds();
   /*!
    * \brief Fetches data for all available files for the given mod.
    * \param mod_url URL to the mod on NexusMods.
