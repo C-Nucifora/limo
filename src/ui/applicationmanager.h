@@ -16,6 +16,7 @@
 #include <QDebug>
 #include <QObject>
 #include <QStandardPaths>
+#include <QTimer>
 #include <filesystem>
 #include <mutex>
 #include <vector>
@@ -108,6 +109,36 @@ public:
    * the internal state from that file. Else: Creates a new settings file.
    */
   void init();
+  // ---- fork #47: scheduled / startup automatic mod-update checks --------------
+  /*!
+   * \brief Enables or disables automatic mod-update checks and persists the configuration.
+   *
+   * When enabled, a periodic timer re-runs the existing NexusMods update check
+   * (\ref checkForModUpdates) for the active app every \p interval_hours hours, reusing
+   * the normal "updates available" signalling. The setting is stored via QSettings under
+   * the keys \c auto_update_check_enabled and \c auto_update_check_interval_hours. Disabled
+   * by default.
+   *
+   * Safe to call from any thread: the actual timer (re)configuration is marshalled onto the
+   * thread that owns this object, so the periodic check runs on the worker thread (the
+   * existing async path) rather than blocking the caller.
+   * \param enabled Whether automatic update checks should run.
+   * \param interval_hours Hours between checks. Values below 1 are clamped to 1.
+   */
+  void setAutoUpdateCheck(bool enabled, int interval_hours);
+  /*! \brief Returns whether automatic update checks are currently enabled. */
+  bool autoUpdateCheckEnabled() const;
+  /*! \brief Returns the configured interval, in hours, between automatic update checks. */
+  int autoUpdateCheckIntervalHours() const;
+  /*!
+   * \brief Sets the app whose mods are targeted by automatic update checks.
+   *
+   * This is normally the currently active app in the UI. If never set, automatic checks
+   * default to app 0.
+   * \param app_id Target app id.
+   */
+  void setAutoUpdateCheckApp(int app_id);
+  // ---- End fork #47 ----------------------------------------------------------
   /*!
    * \brief Sends a log message to the logging window.
    * \param log_level Type of message.
@@ -540,8 +571,49 @@ private:
    */
   void handleParseError(std::string path, std::string message);
 
+  // ---- fork #47: scheduled / startup automatic mod-update checks --------------
+  /*!
+   * \brief Loads the persisted auto-update-check configuration from QSettings and,
+   * if enabled, starts the periodic timer. Called from \ref init.
+   *
+   * If enabled, an initial startup check is scheduled (deferred onto the owning thread's
+   * event loop) so the active app is checked shortly after launch without blocking init.
+   */
+  void initAutoUpdateCheck();
+  /*!
+   * \brief (Re)configures the periodic update-check timer to match the current
+   * enabled flag and interval. Must run on the thread that owns this object.
+   */
+  void applyAutoUpdateCheckConfig();
+  /*!
+   * \brief Timer callback: runs the existing update check for the configured app.
+   *
+   * This executes on the worker thread that owns the timer, i.e. the same async path used
+   * by the manual update check, and reuses \ref checkForModUpdates so the regular
+   * "updates available" signalling fires. It does nothing while another check is in flight.
+   */
+  void runScheduledUpdateCheck();
+  // ---- End fork #47 ----------------------------------------------------------
+
   /*! \brief Counter for the number of instances of this class. */
   inline static int number_of_instances_ = 0;
+  // ---- fork #47: scheduled / startup automatic mod-update checks --------------
+  /*! \brief Drives the periodic automatic update check. Owned by, and fires on, this
+   *  object's thread; null until \ref init. */
+  QTimer* auto_update_timer_ = nullptr;
+  /*! \brief Whether automatic update checks are enabled. */
+  bool auto_update_check_enabled_ = false;
+  /*! \brief Hours between automatic update checks (minimum 1). */
+  int auto_update_check_interval_hours_ = 24;
+  /*! \brief App targeted by automatic update checks (the active app). */
+  int auto_update_check_app_id_ = 0;
+  /*! \brief Guards against overlapping scheduled checks. */
+  bool auto_update_check_in_progress_ = false;
+  /*! \brief QSettings key: auto-update-check enabled flag. */
+  static constexpr auto AUTO_UPDATE_ENABLED_KEY = "auto_update_check_enabled";
+  /*! \brief QSettings key: auto-update-check interval in hours. */
+  static constexpr auto AUTO_UPDATE_INTERVAL_KEY = "auto_update_check_interval_hours";
+  // ---- End fork #47 ----------------------------------------------------------
 
 private:
   /*!

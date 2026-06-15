@@ -332,6 +332,9 @@ set(PROJECT_SOURCES
         src/ui/deployerlistproxymodel.h
         src/ui/deployerlistview.cpp
         src/ui/deployerlistview.h
+        src/ui/deployedfilestreedialog.cpp
+        src/ui/deployedfilestreedialog.h
+        src/ui/deployedfilestreedialog.ui
         src/ui/deployverifydialog.cpp
         src/ui/deployverifydialog.h
         src/ui/deployverifydialog.ui

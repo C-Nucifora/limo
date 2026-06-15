@@ -1,10 +1,14 @@
 #include "openmwplugindeployer.h"
 #include "pathutils.h"
 #include <algorithm>
+#include <cctype>
 #include <format>
 #include <fstream>
 #include <json/json.h>
+#include <map>
+#include <queue>
 #include <ranges>
+#include <unordered_map>
 
 namespace sfs = std::filesystem;
 namespace str = std::ranges;
@@ -191,6 +195,11 @@ void OpenMwPluginDeployer::sortModsByConflicts(std::optional<ProgressNode*> prog
                      name_,
                      e.what()));
   }
+
+  // Optional PLOX/mlox rules-based ordering step. When a rules file is present this
+  // reorders plugins to satisfy its [Order]/[Near] constraints; otherwise it is a
+  // no-op and the LOOT-derived order above is kept.
+  applyPloxRules();
 
   // Always enforce OpenMW's grouping: scripts, then groundcover, then regular plugins.
   auto groups = getConflictGroups();
@@ -564,4 +573,210 @@ void OpenMwPluginDeployer::writePluginsPrivate() const
                                return plugins_[i].second &&
                                       groundcover_plugins_.contains(plugins_[i].first);
                              });
+}
+
+std::optional<sfs::path> OpenMwPluginDeployer::findPloxRulesFile() const
+{
+  for(const auto& name : PLOX_RULES_FILE_NAMES)
+  {
+    const sfs::path candidate = dest_path_ / std::string(name);
+    if(sfs::exists(candidate) && sfs::is_regular_file(candidate))
+      return candidate;
+  }
+  return {};
+}
+
+std::vector<std::pair<std::string, std::string>> OpenMwPluginDeployer::parsePloxOrderRules(
+  const sfs::path& rules_path) const
+{
+  std::vector<std::pair<std::string, std::string>> constraints;
+
+  std::ifstream in_file(rules_path);
+  if(!in_file.is_open())
+  {
+    log_(Log::LOG_WARNING,
+         std::format("Deployer '{}': Could not open PLOX rules file '{}'.",
+                     name_,
+                     rules_path.string()));
+    return constraints;
+  }
+
+  // Build a case-insensitive lookup of currently present plugin names so that rules
+  // referencing absent plugins can be dropped, while still mapping to the exact
+  // casing used in plugins_.
+  std::unordered_map<std::string, std::string> present_plugins;
+  const auto to_lower = [](std::string s)
+  {
+    for(char& c : s)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+  };
+  for(const auto& [plugin, _] : plugins_)
+    present_plugins.emplace(to_lower(plugin), plugin);
+
+  const auto trim = [](const std::string& s)
+  {
+    const auto begin = s.find_first_not_of(" \t\r\n");
+    if(begin == std::string::npos)
+      return std::string();
+    const auto end = s.find_last_not_of(" \t\r\n");
+    return s.substr(begin, end - begin + 1);
+  };
+
+  // Active block: 1 == [Order], 2 == [Near], 0 == ignored/other.
+  int active_block = 0;
+  // Last plugin seen within the current ordering block (resolved to plugins_ casing).
+  std::string previous_plugin;
+
+  std::string raw_line;
+  while(std::getline(in_file, raw_line))
+  {
+    std::string line = trim(raw_line);
+    if(line.empty() || line[0] == ';')
+      continue;
+
+    // Section headers, e.g. [Order], [Near], [Conflict], [Requires], ...
+    if(line.front() == '[')
+    {
+      const auto close = line.find(']');
+      std::string header =
+        close == std::string::npos ? line.substr(1) : line.substr(1, close - 1);
+      const std::string header_lc = to_lower(trim(header));
+      if(header_lc == "order")
+        active_block = 1;
+      else if(header_lc == "near")
+        active_block = 2;
+      else
+        active_block = 0;
+      previous_plugin.clear();
+      continue;
+    }
+
+    if(active_block == 0)
+      continue;
+
+    // Skip rule messages / annotations which start with an mlox operator character
+    // rather than a plugin name.
+    const char first = line.front();
+    if(first == '>' || first == '<' || first == '!' || first == '|' || first == '&' ||
+       first == '@' || first == '%' || first == '=')
+      continue;
+
+    // Within an [Order]/[Near] block each non-empty, non-comment line is a plugin name.
+    // Strip any trailing inline comment.
+    const auto comment_pos = line.find(" ;");
+    if(comment_pos != std::string::npos)
+      line = trim(line.substr(0, comment_pos));
+    if(line.empty())
+      continue;
+
+    auto iter = present_plugins.find(to_lower(line));
+    if(iter == present_plugins.end())
+    {
+      // Plugin not installed; it still breaks the chain so we don't create a
+      // spurious constraint across a gap.
+      previous_plugin.clear();
+      continue;
+    }
+    const std::string& current_plugin = iter->second;
+
+    if(!previous_plugin.empty() && previous_plugin != current_plugin)
+      constraints.emplace_back(previous_plugin, current_plugin);
+    previous_plugin = current_plugin;
+  }
+
+  return constraints;
+}
+
+bool OpenMwPluginDeployer::applyPloxRules()
+{
+  const auto rules_path = findPloxRulesFile();
+  if(!rules_path)
+  {
+    log_(Log::LOG_DEBUG,
+         std::format("Deployer '{}': No PLOX/mlox rules file found; skipping rules-based "
+                     "sort and keeping existing order.",
+                     name_));
+    return false;
+  }
+
+  log_(Log::LOG_INFO,
+       std::format("Deployer '{}': Applying PLOX/mlox rules from '{}'.",
+                   name_,
+                   rules_path->string()));
+
+  const auto constraints = parsePloxOrderRules(*rules_path);
+  if(constraints.empty())
+  {
+    log_(Log::LOG_INFO,
+         std::format("Deployer '{}': PLOX rules file contained no applicable ordering "
+                     "constraints for the installed plugins.",
+                     name_));
+    return false;
+  }
+
+  // Map plugin name -> current index, to preserve the existing order as a stable
+  // tie-breaker during the topological sort.
+  std::unordered_map<std::string, int> index_of;
+  for(const auto& [i, pair] : str::enumerate_view(plugins_))
+    index_of.emplace(pair.first, static_cast<int>(i));
+
+  // Build adjacency (a -> b means a before b) and in-degrees.
+  std::map<int, std::vector<int>> adjacency;
+  std::vector<int> in_degree(plugins_.size(), 0);
+  std::set<std::pair<int, int>> seen_edges;
+  for(const auto& [a, b] : constraints)
+  {
+    auto ia = index_of.find(a);
+    auto ib = index_of.find(b);
+    if(ia == index_of.end() || ib == index_of.end())
+      continue;
+    const std::pair<int, int> edge{ ia->second, ib->second };
+    if(!seen_edges.insert(edge).second)
+      continue;
+    adjacency[edge.first].push_back(edge.second);
+    in_degree[edge.second]++;
+  }
+
+  // Kahn's algorithm with a tie-break on original index for stability.
+  const auto cmp = [](int lhs, int rhs) { return lhs > rhs; };
+  std::priority_queue<int, std::vector<int>, decltype(cmp)> ready(cmp);
+  for(int i = 0; i < static_cast<int>(plugins_.size()); i++)
+  {
+    if(in_degree[i] == 0)
+      ready.push(i);
+  }
+
+  std::vector<std::pair<std::string, bool>> sorted;
+  sorted.reserve(plugins_.size());
+  while(!ready.empty())
+  {
+    const int node = ready.top();
+    ready.pop();
+    sorted.push_back(plugins_[node]);
+    auto adj_iter = adjacency.find(node);
+    if(adj_iter == adjacency.end())
+      continue;
+    for(int next : adj_iter->second)
+    {
+      if(--in_degree[next] == 0)
+        ready.push(next);
+    }
+  }
+
+  if(sorted.size() != plugins_.size())
+  {
+    // Cycle detected among the constraints; conservatively keep the existing order.
+    log_(Log::LOG_WARNING,
+         std::format("Deployer '{}': PLOX rules contain a cycle; keeping existing order.",
+                     name_));
+    return false;
+  }
+
+  plugins_ = std::move(sorted);
+  log_(Log::LOG_INFO,
+       std::format("Deployer '{}': Applied {} PLOX ordering constraint(s).",
+                   name_,
+                   constraints.size()));
+  return true;
 }

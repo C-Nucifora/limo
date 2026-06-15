@@ -187,6 +187,8 @@ private:
   QAction* edit_deployer_action_;
   // fork #53: action used to verify deployment integrity for the current deployer.
   QAction* verify_deployer_action_;
+  // fork #11: action showing the deployed file tree with per-file mod origin.
+  QAction* deployed_files_tree_action_;
   // fork #50: action used to run a health check for the current deployer.
   QAction* health_check_deployer_action_;
 #ifdef LIMO_WITH_LOOT
@@ -882,6 +884,8 @@ private slots:
   void onEditDeployerMenuClicked();
   // fork #53: runs deployment integrity verification for the current deployer and shows the result.
   void onVerifyDeployerMenuClicked();
+  // fork #11: shows the deployed file tree with per-file mod origin for the current deployer.
+  void onDeployedFilesTreeMenuClicked();
   // fork #50: runs a health check for the current deployer and shows the aggregated problems.
   void onHealthCheckDeployerMenuClicked();
 #ifdef LIMO_WITH_LOOT
