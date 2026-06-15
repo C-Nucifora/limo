@@ -311,7 +311,10 @@ void LootDeployer::writePlugins() const
     throw std::runtime_error("Could not open " + app_plugin_file_name_ + "!");
   for(const auto& [name, enabled] : plugins_)
   {
-    if(enabled)
+    // Skip base-game/DLC masters and Creation Club plugins for games that load these implicitly
+    // (e.g. Skyrim SE, Fallout 4). Listing them in Plugins.txt can break the load order, while the
+    // game manages them itself regardless. See https://github.com/limo-app/limo/issues/64.
+    if(enabled && !isImplicitlyManagedPlugin(name))
       plugins_file << name << "\n";
   }
   plugins_file.close();
@@ -337,6 +340,31 @@ void LootDeployer::writePlugins() const
       }
     }
   }
+}
+
+bool LootDeployer::isImplicitlyManagedPlugin(const std::string& plugin_name) const
+{
+  // Only filter for games which load their base-game/DLC masters and Creation Club content
+  // implicitly. Any other game keeps writing every enabled plugin to its load order file.
+  const auto iter = IMPLICIT_BASE_PLUGINS.find(app_type_);
+  if(iter == IMPLICIT_BASE_PLUGINS.end())
+    return false;
+
+  // Strip any directory components and lower case the name for case insensitive comparison, since
+  // plugin file names may be stored with arbitrary casing on case insensitive game file systems.
+  std::string name = sfs::path(plugin_name).filename().string();
+  for(char& c : name)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+  // Creation Club plugins use a "cc" prefix (e.g. ccBGSSSE001-Fish.esl). Be conservative and only
+  // treat names following the known Creation Club naming scheme as managed: the "cc" prefix
+  // followed by a publisher/index tag of at least two alphanumerics and a plugin extension.
+  std::regex cc_regex(R"(^cc[a-z0-9]{2,}.*\.es[lmp]$)");
+  if(std::regex_match(name, cc_regex))
+    return true;
+
+  // Exclude the hardcoded set of well known vanilla master plugin names for this game.
+  return iter->second.contains(name);
 }
 
 void LootDeployer::saveSettings() const
