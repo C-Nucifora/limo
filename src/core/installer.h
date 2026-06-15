@@ -234,4 +234,58 @@ private:
   static void extractRarArchive(const std::filesystem::path& source_path,
                                 const std::filesystem::path& dest_path);
 #endif
+
+  /*!
+   * \brief Returns true if the given path has the ".omod" extension (case
+   * insensitive).
+   * \param source_path Path to check.
+   */
+  static bool sourceIsOmod(const std::filesystem::path& source_path);
+  /*!
+   * \brief Best-effort extraction of an Oblivion Mod Manager (.omod) archive.
+   *
+   * An .omod is a 7-zip container holding member streams (config, data,
+   * data.crc, plugins, plugins.crc, ...). The 'data'/'plugins' members are
+   * single blobs containing all mod files concatenated and compressed with
+   * either zlib (deflate) or 7-zip/LZMA, as indicated by the 'config' member.
+   * The accompanying '*.crc' members list the contained files and their sizes.
+   *
+   * This function extracts the actual mod files into dest_path. The OBMM
+   * install script (the 'script' member) is intentionally ignored, as
+   * executing OBMM scripts would require a full OBMM scripting interpreter
+   * which is out of scope. Malformed input never crashes: it logs and throws
+   * a CompressionError instead.
+   * \param source_path Path to the .omod file.
+   * \param dest_path Destination directory for the extracted mod files.
+   */
+  static void extractOmodArchive(const std::filesystem::path& source_path,
+                                 const std::filesystem::path& dest_path);
+  /*!
+   * \brief Reads a single named member stream out of a 7-zip/zip container
+   * into a byte buffer using libarchive.
+   * \param archive_path Path to the container.
+   * \param member_name Name of the member to read (case insensitive).
+   * \param out_data Receives the raw member bytes on success.
+   * \return True if the member was found and read.
+   */
+  static bool readOmodMember(const std::filesystem::path& archive_path,
+                             const std::string& member_name,
+                             std::vector<unsigned char>& out_data);
+  /*!
+   * \brief Inflates a zlib (deflate) compressed buffer.
+   * \param input Compressed input bytes.
+   * \param output Receives the decompressed bytes.
+   * \return True on success.
+   */
+  static bool inflateZlibBuffer(const std::vector<unsigned char>& input,
+                                std::vector<unsigned char>& output);
+  /*!
+   * \brief Decompresses an in-memory buffer using libarchive (used for the
+   * 7-zip/LZMA compressed OMOD data blob).
+   * \param input Compressed input bytes.
+   * \param output Receives the decompressed bytes.
+   * \return True on success.
+   */
+  static bool decompressBufferWithLibarchive(const std::vector<unsigned char>& input,
+                                             std::vector<unsigned char>& output);
 };
