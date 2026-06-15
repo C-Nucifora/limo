@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <map>
 #include <optional>
+#include <string>
 #include <unordered_set>
 #include <vector>
 
@@ -396,6 +397,29 @@ public:
    * \param The new safe sorting state.
    */
   void setEnableUnsafeSorting(bool enable);
+  /*!
+   * \brief Getter for the list of file name patterns which are excluded from deployment.
+   * \return The ignore list.
+   */
+  std::vector<std::string> getIgnoredFiles() const;
+  /*!
+   * \brief Setter for the list of file name patterns which are excluded from deployment.
+   * Matching is performed case-insensitively on a file's basename.
+   * \param ignored_files The new ignore list. Each entry is either an exact basename
+   * (e.g. "readme.md") or a simple glob using '*' wildcards (e.g. "*.txt").
+   */
+  void setIgnoredFiles(const std::vector<std::string>& ignored_files);
+  /*!
+   * \brief Checks whether the given file should be excluded from deployment.
+   *
+   * Only the file's basename is considered and the comparison is case-insensitive.
+   * Each entry in \ref ignored_files_ is treated as a pattern: a literal basename for an
+   * exact match, or a simple glob in which '*' matches any (possibly empty) sequence of
+   * characters. Any other characters must match literally. Directories are never ignored.
+   * \param path The file (relative or absolute) to check.
+   * \return True iff the file's basename matches any ignore pattern.
+   */
+  bool isIgnoredFile(const std::filesystem::path& path) const;
 
 protected:
   /*! \brief Type of this deployer, e.g. Simple Deployer. */
@@ -429,6 +453,21 @@ protected:
   bool auto_update_conflict_groups_ = false;
   /*! \brief Determines whether sorting mods can affect overwrite behavior. */
   bool enable_unsafe_sorting_ = false;
+  /*!
+   * \brief File name patterns which are excluded from deployment.
+   *
+   * These commonly ship inside mod archives but should not be linked/copied into the
+   * target directory. Matching is done case-insensitively on a file's basename via
+   * \ref isIgnoredFile. Entries may use '*' as a wildcard (see \ref isIgnoredFile).
+   * The default value is \ref default_ignored_files_.
+   */
+  std::vector<std::string> ignored_files_ = default_ignored_files_;
+  /*! \brief Default set of junk file names excluded from deployment. */
+  static inline const std::vector<std::string> default_ignored_files_{
+    "readme.md", "readme.txt", "readme", "codes.txt", "license",
+    "license.txt", "license.md", "changelog.txt", "changelog.md", "thumbs.db",
+    ".ds_store"
+  };
 
   /*!
    * \brief Creates a pair of maps. One maps relative file paths to the mod id from which that
