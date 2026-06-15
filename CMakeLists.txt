@@ -214,6 +214,8 @@ set(CORE_SOURCES
         src/core/treeitem.h
         src/core/deployerentry.hpp
         src/core/deployerentry.cpp
+        src/core/savemanager.cpp
+        src/core/savemanager.h
 )
 
 # The LOOT/OpenMW deployers depend on libloot and are only built on demand.
@@ -425,6 +427,10 @@ set(PROJECT_SOURCES
         src/ui/deploypreviewdialog.cpp
         src/ui/deploypreviewdialog.h
         src/ui/deploypreviewdialog.ui
+        # fork #24: save-game manager tab
+        src/ui/savemanagerwidget.cpp
+        src/ui/savemanagerwidget.h
+        src/ui/savemanagerwidget.ui
 )
 
 qt_add_resources(QSS_RESOURCES

@@ -109,6 +109,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
   setupIcons();
   setupIpcServer();
   addAction(ui->actionSelect_All);
+  // fork #24: add the save-game manager as a new tab in the main tab widget.
+  save_manager_widget_ = new SaveManagerWidget(this);
+  ui->app_tab_widget->addTab(save_manager_widget_, "Saves");
   setWindowTitle("Limo");
 
   // ---- fork #8: persistent download queue panel -----------------------------
@@ -2367,6 +2370,10 @@ void MainWindow::onGetAppInfo(AppInfo app_info)
   connect(button, &QPushButton::clicked, this, &MainWindow::onAddToolClicked);
   ui->info_tool_list->setCellWidget(ui->info_tool_list->rowCount() - 1, 0, button);
   ignore_tool_changes_ = false;
+
+  // fork #24: keep the save-game manager pointed at the current app, suggesting its staging dir.
+  if(save_manager_widget_)
+    save_manager_widget_->setAppContext(currentApp(), app_info.staging_dir.c_str());
 
   initRootLevelConditions();
 }

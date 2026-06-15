@@ -188,6 +188,14 @@ int ApplicationManager::getNumApplications() const
   return apps_.size();
 }
 
+// fork #24: minimal synchronous passthrough for the save-game manager.
+std::string ApplicationManager::getStagingDir(int app_id) const
+{
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return "";
+  return apps_[app_id].getStagingDir().string();
+}
+
 int ApplicationManager::getNumProfiles(int app_id) const
 {
   if(app_id >= 0 && app_id < apps_.size())
