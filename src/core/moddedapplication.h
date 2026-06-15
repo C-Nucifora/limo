@@ -771,6 +771,11 @@ public:
    */
   void addModToIgnoreList(int deployer, int mod_id);
   /*!
+   * \brief fork #81: Re-scans every ReverseDeployer's target directory so externally
+   * produced files become visible without a deploy/undeploy cycle.
+   */
+  void refreshReverseDeployers();
+  /*!
    * \brief Applies the given mod action to the given mod.
    * \param deployer Target deployer.
    * \param action Action to be applied.

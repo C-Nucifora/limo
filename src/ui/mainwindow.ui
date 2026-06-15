@@ -904,6 +904,19 @@
                  </property>
                 </widget>
                </item>
+               <item row="0" column="6">
+                <widget class="QPushButton" name="refresh_button">
+                 <property name="toolTip">
+                  <string>Re-scan reverse-deployer files (e.g. tool output) without a deploy/undeploy cycle</string>
+                 </property>
+                 <property name="text">
+                  <string>Refresh</string>
+                 </property>
+                 <property name="icon">
+                  <iconset theme="view-refresh"/>
+                 </property>
+                </widget>
+               </item>
               </layout>
              </widget>
             </item>

@@ -2403,6 +2403,19 @@ void ModdedApplication::addModToIgnoreList(int deployer, int mod_id)
   depl->addModToIgnoreList(mod_id);
 }
 
+// fork #81: re-scan every ReverseDeployer's target directory so externally produced files
+// (e.g. tool output picked up by a reverse deployer) become visible without a deploy cycle.
+void ModdedApplication::refreshReverseDeployers()
+{
+  for(const auto& deployer : deployers_)
+  {
+    if(deployer->getType() != DeployerFactory::REVERSEDEPLOYER)
+      continue;
+    auto depl = static_cast<ReverseDeployer*>(deployer.get());
+    depl->updateManagedFiles(true);
+  }
+}
+
 void ModdedApplication::applyModAction(int deployer, int action, int mod_id)
 {
   deployers_[deployer]->applyModAction(action, mod_id);

@@ -485,6 +485,10 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::setModColor);
   connect(this, &MainWindow::setModCategory, // fork #198
           app_manager_, &ApplicationManager::setModCategory);
+  connect(this, &MainWindow::mergeMods, // fork #148
+          app_manager_, &ApplicationManager::mergeMods);
+  connect(this, &MainWindow::refreshReverseDeployers, // fork #81
+          app_manager_, &ApplicationManager::refreshReverseDeployers);
   connect(this, &MainWindow::setModPinned,
           app_manager_, &ApplicationManager::setModPinned);
   connect(this, &MainWindow::getModRulesFor,
@@ -806,6 +810,12 @@ void MainWindow::setupMenus()
   set_category_action_ = new QAction("Set Category...", this); // fork #198
   set_category_action_->setToolTip("Assign an organisational category to the selected mod(s)");
   connect(set_category_action_, &QAction::triggered, this, &MainWindow::onSetModCategory);
+  merge_mods_action_ = new QAction("Merge into...", this); // fork #148
+  merge_mods_action_->setToolTip("Merge the selected mods' files into one of them, removing the others");
+  connect(merge_mods_action_, &QAction::triggered, this, &MainWindow::onMergeMods);
+  preview_files_action_ = new QAction("Preview Files...", this); // fork #209
+  preview_files_action_->setToolTip("Preview textures, text and other asset files shipped by this mod");
+  connect(preview_files_action_, &QAction::triggered, this, &MainWindow::onPreviewModFiles);
   QList<QAction*> mod_list_actions{ ui->actionadd_to_deployer,      ui->actionAdd_to_Group,
                                     ui->actionbrowse_mod_files,     ui->actionRemove_from_Group,
                                     ui->actionRemove_Mods,          ui->actionRemove_Other_Versions,
@@ -816,7 +826,8 @@ void MainWindow::setupMenus()
                                     pin_version_action_,            unpin_version_action_,
                                     mod_rules_action_,               manage_groups_action_,
                                     set_color_action_,               clear_color_action_,
-                                    edit_config_action_,             set_category_action_ };
+                                    edit_config_action_,             set_category_action_,
+                                    merge_mods_action_,              preview_files_action_ };
   std::sort(mod_list_actions.begin(), mod_list_actions.end(), sort_actions);
   mod_list_menu_->addActions(mod_list_actions);
 
@@ -4362,6 +4373,84 @@ void MainWindow::onOpenBsaBrowser()
   auto* dialog = new BsaBrowserDialog(this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   dialog->show();
+}
+
+void MainWindow::onMergeMods()
+{
+  // fork #148: merge the selected mods' files into one chosen target mod.
+  auto mod_ids = ui->mod_list->getSelectedModIds();
+  if(mod_ids.size() < 2)
+  {
+    QMessageBox::information(
+      this, "Merge mods", "Select two or more mods to merge into one entry.");
+    return;
+  }
+  // Offer the selected mods as merge targets (the kept entry).
+  QStringList names;
+  std::vector<int> id_by_index;
+  for(const auto& info : mod_list_model_->getModInfo())
+  {
+    if(std::find(mod_ids.begin(), mod_ids.end(), info.mod.id) != mod_ids.end())
+    {
+      names << QString::fromStdString(info.mod.name);
+      id_by_index.push_back(info.mod.id);
+    }
+  }
+  if(id_by_index.size() < 2)
+    return;
+  bool ok = false;
+  const QString chosen = QInputDialog::getItem(
+    this, "Merge into", "Keep all merged files under which mod?", names, 0, false, &ok);
+  if(!ok)
+    return;
+  const int idx = names.indexOf(chosen);
+  if(idx < 0)
+    return;
+  const int target = id_by_index[idx];
+  const auto reply = QMessageBox::question(
+    this,
+    "Merge mods?",
+    QString("Merge %1 mods into \"%2\"? The other selected mods will be removed.")
+      .arg(mod_ids.size())
+      .arg(chosen),
+    QMessageBox::Yes | QMessageBox::No,
+    QMessageBox::No);
+  if(reply != QMessageBox::Yes)
+    return;
+  setStatusMessage("Merging mods");
+  setBusyStatus(true);
+  emit mergeMods(currentApp(), mod_ids, target);
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onPreviewModFiles()
+{
+  // fork #209: open the asset preview dialog on the selected mod's staging directory.
+  const auto index = mod_list_proxy_->mapToSource(ui->mod_list->selectionModel()->currentIndex());
+  if(!index.isValid())
+    return;
+  const int mod_id = mod_list_model_->data(index, ModListModel::mod_id_role).toInt();
+  const QString mod_name = index.data(ModListModel::mod_name_role).toString();
+  const QString path = ui->info_sdir_label->text() + "/" + QString::number(mod_id);
+  if(!sfs::exists(path.toStdString()))
+  {
+    Log::error(("Could not preview files: '" + path + "' does not exist").toStdString());
+    return;
+  }
+  auto* dialog = new AssetPreviewDialog(path, mod_name, this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->show();
+}
+
+void MainWindow::on_refresh_button_clicked()
+{
+  // fork #81: re-scan reverse deployers so externally produced files become visible.
+  if(currentApp() < 0)
+    return;
+  setStatusMessage("Refreshing files");
+  setBusyStatus(true);
+  emit refreshReverseDeployers(currentApp());
+  emit getDeployerInfo(currentApp(), currentDeployer());
 }
 
 void MainWindow::onForceRedeploy()

@@ -1339,6 +1339,11 @@ public slots:
    */
   void updateIgnoredFiles(int app_id, int deployer);
   /*!
+   * \brief fork #81: Re-scans reverse deployers so externally produced files appear.
+   * \param app_id Target app.
+   */
+  void refreshReverseDeployers(int app_id);
+  /*!
    * \brief Adds the given mod to the ignore list of the given ReverseDeployer.
    * \param app_id Target app.
    * \param deployer Target deployer.

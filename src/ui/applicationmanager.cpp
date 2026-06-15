@@ -1718,6 +1718,14 @@ void ApplicationManager::updateIgnoredFiles(int app_id, int deployer)
   emit completedOperations("Ignore list updated");
 }
 
+// fork #81: re-scan reverse deployers so externally produced files become visible.
+void ApplicationManager::refreshReverseDeployers(int app_id)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::refreshReverseDeployers>(app_id);
+  emit completedOperations("Files refreshed");
+}
+
 void ApplicationManager::addModToIgnoreList(int app_id, int deployer, int mod_id)
 {
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
