@@ -120,7 +120,8 @@ public:
    */
   std::vector<std::pair<QString, bool>> getTagFilters() const;
   /*!
-   * \brief Sets the string to use for filtering.
+   * \brief Sets the string to use for filtering. The string is matched case-insensitively
+   *  against a mod's name, tags and note, as well as its id (fork #205).
    * \param filter_string The new filter string.
    */
   void setFilterString(const QString& filter_string);

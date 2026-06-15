@@ -61,6 +61,24 @@ bool ModListProxyModel::filterAcceptsRow(int source_row, const QModelIndex& sour
 {
   bool show = true;
   const auto index = sourceModel()->index(source_row, 0, source_parent);
+  // fork #205: matches the search string against a mod's name, tags and note so the global
+  // search bar filters on more than just the name (case-insensitive substring).
+  const auto matches_text = [&index](const QString& filter)
+  {
+    if(index.data(ModListModel::mod_name_role).toString().contains(filter, Qt::CaseInsensitive))
+      return true;
+    if(index.data(ModListModel::mod_note_role).toString().contains(filter, Qt::CaseInsensitive))
+      return true;
+    const auto manual_tags = index.data(ModListModel::manual_tags_role).toStringList();
+    const auto auto_tags = index.data(ModListModel::auto_tags_role).toStringList();
+    for(const auto& tag : manual_tags)
+      if(tag.contains(filter, Qt::CaseInsensitive))
+        return true;
+    for(const auto& tag : auto_tags)
+      if(tag.contains(filter, Qt::CaseInsensitive))
+        return true;
+    return false;
+  };
   if(filter_string_targets_id_)
   {
     show *=
@@ -70,15 +88,11 @@ bool ModListProxyModel::filterAcceptsRow(int source_row, const QModelIndex& sour
   {
     show *=
       QString::number(index.data(ModListModel::mod_id_role).toInt()).contains(filter_string_);
-    show |= index.data(ModListModel::mod_name_role)
-              .toString()
-              .contains(filter_string_, Qt::CaseInsensitive);
+    show |= matches_text(filter_string_); // fork #205: also match name/tags/note
   }
   else
   {
-    show *= index.data(ModListModel::mod_name_role)
-              .toString()
-              .contains(filter_string_, Qt::CaseInsensitive);
+    show *= matches_text(filter_string_); // fork #205: match name, tags and note
   }
   if(filter_mode_ & filter_groups)
     show *= index.data(ModListModel::mod_group_role).toInt() >= 0;
