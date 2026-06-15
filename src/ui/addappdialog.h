@@ -95,6 +95,11 @@ private:
   bool is_flatpak_;
   /*! \brief Reusable dialog for importing data from installed Steam apps. */
   std::unique_ptr<ImportFromSteamDialog> import_from_steam_dialog_;
+  /*!
+   * \brief Maps display names shown in the GOG template combo box to their config file paths.
+   * Populated by populateGogTemplateCombo(). (issue #74 / limo-app/limo#51)
+   */
+  QStringList gog_template_paths_;
 
   /*!
    * \brief Set the enabled state of this dialogs OK button.
@@ -118,6 +123,23 @@ private:
    *  if present, it's prefix directory.
    */
   void initDefaultAppConfig();
+  /*!
+   * \brief Populates the GOG template combo box with names from all bundled steam_app_configs.
+   * Also fills gog_template_paths_ with the corresponding file paths. (issue #74)
+   */
+  void populateGogTemplateCombo();
+  /*!
+   * \brief Applies the selected GOG game template. Uses the staging directory as
+   * $STEAM_INSTALL_PATH$ and the optional prefix field as $STEAM_PREFIX_PATH$.
+   * Deployers whose resolved paths do not exist are logged and skipped rather than
+   * aborting the whole import. (issue #74 / limo-app/limo#51)
+   * \param install_path Path to the game's installation directory.
+   * \param prefix_path  Optional prefix path; may be empty.
+   * \param config_path  Path to the JSON config file.
+   */
+  void initConfigForGog(const QString& install_path,
+                        const QString& prefix_path,
+                        const QString& config_path);
 
 public:
   /*!
@@ -181,6 +203,15 @@ private slots:
    * \param path The new path.
    */
   void onIconPathDialogComplete(const QString& path);
+  /*! \brief Applies the currently selected GOG game template. (issue #74 / limo-app/limo#51) */
+  void on_gog_apply_button_clicked();
+  /*! \brief Shows a file dialog for the GOG prefix directory. */
+  void on_gog_prefix_picker_button_clicked();
+  /*!
+   * \brief Updates the GOG prefix path field with the selected directory.
+   * \param path The chosen directory path.
+   */
+  void onGogPrefixDialogAccepted(const QString& path);
 
 signals:
   /*!
