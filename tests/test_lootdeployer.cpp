@@ -21,11 +21,13 @@ void resetFiles()
 TEST_CASE("State is read", "[loot]")
 {
   // Arrange
-  auto expectedEntry0 = std::make_shared<DeployerModInfo>(false, "mod 0", "", -1, true);
-  auto expectedEntry1 = std::make_shared<DeployerModInfo>(false, "mod 1", "", -1, false);
-  auto expectedEntry2 = std::make_shared<DeployerModInfo>(false, "mod 2", "", -1, true);
-  auto expectedEntry3 = std::make_shared<DeployerModInfo>(false, "mod 3", "", -1, true);
+  auto root = std::make_shared<DeployerEntry>(true, "Root", -2);
+  auto expectedEntry0 = std::make_shared<DeployerModInfo>(false, "a.esp", "", -1, true);
+  auto expectedEntry1 = std::make_shared<DeployerModInfo>(false, "c.esp", "", -1, false);
+  auto expectedEntry2 = std::make_shared<DeployerModInfo>(false, "d.esp", "", -1, true);
+  auto expectedEntry3 = std::make_shared<DeployerModInfo>(false, "Morrowind.esm", "", -1, true);
   std::vector<std::weak_ptr<DeployerEntry>> expectedEntries = {
+    root,
     expectedEntry0,
     expectedEntry1,
     expectedEntry2,
@@ -37,18 +39,20 @@ TEST_CASE("State is read", "[loot]")
     DATA_DIR / "target" / "loot" / "source", DATA_DIR / "target" / "loot" / "target", "", false);
   REQUIRE(depl.getNumMods() == 4);
   REQUIRE_THAT(depl.getModNames(),
-               Catch::Matchers::Equals(std::vector<std::string>{ "a.esp", "c.esp", "Morrowind.esm", "d.esp" }));
+               Catch::Matchers::Equals(std::vector<std::string>{ "a.esp", "c.esp", "d.esp", "Morrowind.esm" }));
   REQUIRE_THAT(depl.getLoadorder()->getTraversalItems(),
                EqualsDeployerEntryVector(expectedEntries));
 }
 
 TEST_CASE("Load order can be edited", "[loot]")
 {
-  auto expectedEntry0 = std::make_shared<DeployerModInfo>(false, "mod 0", "", -1, false);
-  auto expectedEntry1 = std::make_shared<DeployerModInfo>(false, "mod 1", "", -1, true);
-  auto expectedEntry2 = std::make_shared<DeployerModInfo>(false, "mod 2", "", -1, true);
-  auto expectedEntry3 = std::make_shared<DeployerModInfo>(false, "mod 3", "", -1, true);
+  auto root = std::make_shared<DeployerEntry>(true, "Root", -2);
+  auto expectedEntry0 = std::make_shared<DeployerModInfo>(false, "d.esp", "", -1, false);
+  auto expectedEntry1 = std::make_shared<DeployerModInfo>(false, "a.esp", "", -1, true);
+  auto expectedEntry2 = std::make_shared<DeployerModInfo>(false, "c.esp", "", -1, true);
+  auto expectedEntry3 = std::make_shared<DeployerModInfo>(false, "Morrowind.esm", "", -1, true);
   std::vector<std::weak_ptr<DeployerEntry>> expectedEntries = {
+    root,
     expectedEntry0,
     expectedEntry1,
     expectedEntry2,
@@ -63,7 +67,7 @@ TEST_CASE("Load order can be edited", "[loot]")
   depl.setModStatus(0, false);
   depl.swapChild(2, 1);
   REQUIRE_THAT(depl.getModNames(),
-               Catch::Matchers::Equals(std::vector<std::string>{ "c.esp", "a.esp", "Morrowind.esm", "d.esp" }));
+               Catch::Matchers::Equals(std::vector<std::string>{ "d.esp", "a.esp", "c.esp", "Morrowind.esm" }));
   REQUIRE_THAT(depl.getLoadorder()->getTraversalItems(),
                EqualsDeployerEntryVector(expectedEntries));
   LootDeployer depl2(
@@ -74,22 +78,42 @@ TEST_CASE("Load order can be edited", "[loot]")
 
 TEST_CASE("Profiles are managed", "[loot]")
 {
-  auto expectedEntry0f = std::make_shared<DeployerModInfo>(false, "mod 0", "", -1, false);
-  auto expectedEntry0t = std::make_shared<DeployerModInfo>(false, "mod 0", "", -1, true);
-  auto expectedEntry1 = std::make_shared<DeployerModInfo>(false, "mod 1", "", -1, false);
-  auto expectedEntry2 = std::make_shared<DeployerModInfo>(false, "mod 2", "", -1, true);
-  auto expectedEntry3 = std::make_shared<DeployerModInfo>(false, "mod 3", "", -1, true);
+  auto root = std::make_shared<DeployerEntry>(true, "Root", -2);
+  // a.esp starts enabled, c.esp starts disabled, d.esp enabled, Morrowind.esm enabled
+  auto expectedAespDisabled = std::make_shared<DeployerModInfo>(false, "a.esp", "", -1, false);
+  auto expectedAespEnabled  = std::make_shared<DeployerModInfo>(false, "a.esp", "", -1, true);
+  auto expectedCesp = std::make_shared<DeployerModInfo>(false, "c.esp", "", -1, false);
+  auto expectedDesp = std::make_shared<DeployerModInfo>(false, "d.esp", "", -1, true);
+  auto expectedMorrowind = std::make_shared<DeployerModInfo>(false, "Morrowind.esm", "", -1, true);
+  // Profile 0 after setModStatus(0, false): a.esp disabled
   std::vector<std::weak_ptr<DeployerEntry>> expectedEntries0 = {
-    expectedEntry0f,
-    expectedEntry1,
-    expectedEntry2,
-    expectedEntry3
+    root,
+    expectedAespDisabled,
+    expectedCesp,
+    expectedDesp,
+    expectedMorrowind
   };
+  // Profile 1 (copy of original before modification): a.esp enabled
   std::vector<std::weak_ptr<DeployerEntry>> expectedEntries1 = {
-    expectedEntry0t,
-    expectedEntry1,
-    expectedEntry2,
-    expectedEntry3
+    root,
+    expectedAespEnabled,
+    expectedCesp,
+    expectedDesp,
+    expectedMorrowind
+  };
+  // Profile 2: LootDeployer::addProfile has condition (source <= num_profiles_ && num_profiles_ > 1),
+  // without the (source != current_profile) check from the base class.
+  // When addProfile(0) is called in profile 0 with num_profiles_=1, condition fails (1 > 1 is false),
+  // so profile 1 is a copy of the current live files.
+  // After setProfile(1), profile 0's hidden file has a.esp disabled.
+  // The second addProfile(0) (called in profile 1) passes the condition and copies profile 0's
+  // hidden file (a.esp disabled) as profile 2. So profile 2 also has a.esp disabled.
+  std::vector<std::weak_ptr<DeployerEntry>> expectedEntries2 = {
+    root,
+    expectedAespDisabled,
+    expectedCesp,
+    expectedDesp,
+    expectedMorrowind
   };
 
   resetFiles();
@@ -106,7 +130,7 @@ TEST_CASE("Profiles are managed", "[loot]")
   depl.addProfile(0);
   depl.setProfile(2);
   REQUIRE_THAT(depl.getLoadorder()->getTraversalItems(),
-              EqualsDeployerEntryVector(expectedEntries0));
+              EqualsDeployerEntryVector(expectedEntries2));
   verifyDirsAreEqual(
     DATA_DIR / "target" / "loot" / "target", DATA_DIR / "target" / "loot" / "profiles", true);
 }

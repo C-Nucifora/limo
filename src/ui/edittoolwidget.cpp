@@ -259,6 +259,15 @@ void EditToolWidget::init()
   emit inputValidityChanged(has_valid_input_);
 }
 
+void EditToolWidget::init(long steam_app_id)
+{
+  init();
+  // Pre-fill the Steam App ID from the current application (limo-app/limo#69).
+  // Only default it; never overwrite a value the user already typed.
+  if(steam_app_id > 0 && app_id_field_->text().isEmpty())
+    app_id_field_->setText(QString::number(steam_app_id));
+}
+
 void EditToolWidget::init(const Tool& tool)
 {
   init();

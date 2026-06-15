@@ -174,6 +174,8 @@ private:
    * \param source_path Path to the archive.
    * \param dest_path Destination directory for extraction.
    */
+#ifdef LIMO_WITH_UNRAR
   static void extractRarArchive(const std::filesystem::path& source_path,
                                 const std::filesystem::path& dest_path);
+#endif
 };

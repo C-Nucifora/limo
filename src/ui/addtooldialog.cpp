@@ -23,12 +23,16 @@ void AddToolDialog::toolWidgetInputValidityChanged(bool is_valid)
   ui->buttonBox->button(QDialogButtonBox::Ok)->setEnabled(is_valid);
 }
 
-void AddToolDialog::setAddMode(int app_id)
+void AddToolDialog::setAddMode(int app_id, long steam_app_id)
 {
   setWindowTitle("New Tool");
   is_edit_mode_ = false;
   app_id_ = app_id;
-  ui->tool_widget->init();
+  // Pre-fill Steam App ID from the current application when available (limo-app/limo#69).
+  if(steam_app_id > 0)
+    ui->tool_widget->init(steam_app_id);
+  else
+    ui->tool_widget->init();
   dialog_completed_ = false;
 }
 

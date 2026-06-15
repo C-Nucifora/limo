@@ -15,6 +15,7 @@ option(IS_FLATPAK "Whether this is being built for a flatpak." OFF)
 option(USE_SYSTEM_LIBUNRAR "Whether to use the system version of libunrar." OFF)
 option(LIMO_WITH_LOOT "Build the LOOT/OpenMW deployers (Bethesda/Morrowind support; requires libloot)." OFF)
 option(LIMO_WITH_UNRAR "Build RAR-archive extraction support (requires libunrar)." OFF)
+option(LIMO_BUILD_TESTS "Build the Catch2 test suite." OFF)
 
 # jsoncpp
 find_package(PkgConfig REQUIRED)
@@ -201,6 +202,7 @@ set(CORE_SOURCES
         src/core/deployerentry.cpp
 )
 
+# The LOOT/OpenMW deployers depend on libloot and are only built on demand.
 if(LIMO_WITH_LOOT)
     list(APPEND CORE_SOURCES
             src/core/lootdeployer.cpp
@@ -441,7 +443,8 @@ else()
             DESTINATION ${LIMO_INSTALL_PREFIX}/share/limo)
 endif()
 
-if (BUILD_TESTING)
-  enable_testing()
-  add_subdirectory(tests)
+# Tests are built when LIMO_BUILD_TESTS is set (or the standard BUILD_TESTING flag).
+if(LIMO_BUILD_TESTS OR BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
 endif()

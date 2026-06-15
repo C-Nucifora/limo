@@ -37,6 +37,8 @@
 #include <QSettings>
 #include <QToolButton>
 #include <QtConcurrent/QtConcurrent>
+#include <algorithm>
+#include <numeric>
 #include <ranges>
 #include <regex>
 
@@ -118,6 +120,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
   settings.setValue("main/geometry", saveGeometry());
   settings.setValue("main/state", saveState());
   settings.setValue("current_tab", ui->app_tab_widget->currentIndex());
+  // Save the real app ID so it can be restored correctly regardless of sort order.
   settings.setValue("current_app", currentApp());
   settings.setValue("ask_remove_from_deployer", ask_remove_from_deployer_);
   settings.setValue("ask_remove_mod", ask_remove_mod_);
@@ -127,6 +130,12 @@ void MainWindow::closeEvent(QCloseEvent* event)
   settings.setValue("ask_remove_profile", ask_remove_profile_);
   settings.setValue("ask_remove_backup_target", ask_remove_backup_target_);
   settings.setValue("ask_remove_tool", ask_remove_tool_);
+  settings.setValue("mod_list_sort_column", ui->mod_list->header()->sortIndicatorSection());
+  settings.setValue("mod_list_sort_order", ui->mod_list->header()->sortIndicatorOrder());
+  settings.setValue("sort_apps_alphabetically", sort_apps_alphabetically_);
+  // Persist column widths and sort indicator for both lists (fork #142 / Vortex#23247).
+  settings.setValue("mod_list_header_state", ui->mod_list->header()->saveState());
+  settings.setValue("deployer_list_header_state", ui->deployer_list->header()->saveState());
   ipc_server_->shutdown();
   event->accept();
 }
@@ -484,6 +493,11 @@ void MainWindow::setupLists()
   mod_list_proxy_->setSortRole(ModListModel::sort_role);
   mod_list_proxy_->setSortCaseSensitivity(Qt::CaseInsensitive);
   ui->mod_list->sortByColumn(ModListModel::time_col, Qt::SortOrder::DescendingOrder);
+  // Make all mod list columns interactively resizable (fork #142 / Vortex#23247).
+  // The name column keeps its natural width from resizeColumnToContents; the user
+  // can drag any header border to override it.  Column widths are persisted via
+  // QHeaderView::saveState / restoreState in closeEvent / loadSettings.
+  ui->mod_list->header()->setSectionResizeMode(QHeaderView::Interactive);
 
   // deployer list
   deployer_model_ = new DeployerListModel(this);
@@ -504,6 +518,8 @@ void MainWindow::setupLists()
   ui->deployer_list->setDragEnabled(true);
   ui->deployer_list->setDropIndicatorShown(true);
   ui->deployer_list->setEnableDragReorder(true);
+  // Make deployer list columns interactively resizable (fork #142 / Vortex#23247).
+  ui->deployer_list->header()->setSectionResizeMode(QHeaderView::Interactive);
 
   // backup list
   ui->backup_list->setStyleSheet("QTableView{margin-top:6}");
@@ -829,7 +845,10 @@ void MainWindow::updateDeployerList(const DeployerInfo& depl_info)
 
 int MainWindow::currentApp()
 {
-  return ui->app_selection_box->currentIndex();
+  const int display_idx = ui->app_selection_box->currentIndex();
+  if(display_idx < 0 || display_idx >= static_cast<int>(app_combo_id_map_.size()))
+    return display_idx; // fallback: identity mapping when map is not yet populated
+  return app_combo_id_map_[display_idx];
 }
 
 int MainWindow::currentDeployer()
@@ -877,9 +896,22 @@ void MainWindow::setupButtons()
   edit_app_action_->setText("Edit");
   edit_app_action_->setIcon(QIcon::fromTheme("editor"));
   connect(edit_app_action_, &QAction::triggered, this, &MainWindow::on_edit_app_button_clicked);
+  // Sort applications alphabetically toggle (limo-app/limo#226).
+  sort_apps_alpha_action_ = new QAction(this);
+  sort_apps_alpha_action_->setToolTip("Sort applications alphabetically by name");
+  sort_apps_alpha_action_->setText("Sort alphabetically");
+  sort_apps_alpha_action_->setCheckable(true);
+  sort_apps_alpha_action_->setIcon(QIcon::fromTheme("view-sort-ascending"));
+  connect(sort_apps_alpha_action_,
+          &QAction::toggled,
+          this,
+          &MainWindow::onSortAppsAlphaToggled);
   QMenu* app_menu = new QMenu(this);
-  app_menu->addActions(
-    QList<QAction*>{ run_app_action_, add_app_action_, remove_app_action_, edit_app_action_ });
+  app_menu->addActions(QList<QAction*>{ run_app_action_,
+                                        add_app_action_,
+                                        remove_app_action_,
+                                        edit_app_action_,
+                                        sort_apps_alpha_action_ });
   ui->app_tool_button->setDefaultAction(run_app_action_);
   ui->app_tool_button->setMenu(app_menu);
 
@@ -1217,17 +1249,37 @@ void MainWindow::loadSettings()
   const bool has_nexus_account = settings.value("info_is_valid", false).toBool();
   ui->check_mod_updates_button->setVisible(has_nexus_account);
   settings.endGroup();
-  const int mod_list_sort_column =
-    settings.value("mod_list_sort_column", ModListModel::time_col).toInt();
-  const int mod_list_sort_order =
-    settings.value("mod_list_sort_order", Qt::SortOrder::DescendingOrder).toInt();
-  if(mod_list_sort_column >= 0 && mod_list_sort_column < mod_list_model_->columnCount() &&
-     (mod_list_sort_order == Qt::SortOrder::DescendingOrder ||
-      mod_list_sort_order == Qt::SortOrder::AscendingOrder))
+  // Restore column widths for both lists (fork #142 / Vortex#23247).
+  // saveState / restoreState also encodes the sort indicator, so prefer it;
+  // fall back to the legacy mod_list_sort_column/order keys only when no
+  // header state has been saved yet.
+  const QByteArray mod_list_header_state =
+    settings.value("mod_list_header_state").toByteArray();
+  if(!mod_list_header_state.isEmpty())
   {
-    ui->mod_list->sortByColumn(mod_list_sort_column,
-                               static_cast<Qt::SortOrder>(mod_list_sort_order));
+    ui->mod_list->header()->restoreState(mod_list_header_state);
   }
+  else
+  {
+    // Legacy fallback: explicit sort column / order (pre-#142 settings).
+    const int mod_list_sort_column =
+      settings.value("mod_list_sort_column", ModListModel::time_col).toInt();
+    const int mod_list_sort_order =
+      settings.value("mod_list_sort_order", Qt::SortOrder::DescendingOrder).toInt();
+    if(mod_list_sort_column >= 0 && mod_list_sort_column < mod_list_model_->columnCount() &&
+       (mod_list_sort_order == Qt::SortOrder::DescendingOrder ||
+        mod_list_sort_order == Qt::SortOrder::AscendingOrder))
+    {
+      ui->mod_list->sortByColumn(mod_list_sort_column,
+                                 static_cast<Qt::SortOrder>(mod_list_sort_order));
+    }
+  }
+  const QByteArray deployer_list_header_state =
+    settings.value("deployer_list_header_state").toByteArray();
+  if(!deployer_list_header_state.isEmpty())
+    ui->deployer_list->header()->restoreState(deployer_list_header_state);
+  sort_apps_alphabetically_ = settings.value("sort_apps_alphabetically", false).toBool();
+  sort_apps_alpha_action_->setChecked(sort_apps_alphabetically_);
 }
 
 void MainWindow::setTabWidgetStyleSheet()
@@ -1689,6 +1741,7 @@ void MainWindow::onGetApplicationNames(QStringList names, QStringList icon_paths
   initUiWithoutApps(!names.isEmpty());
   if(names.isEmpty())
   {
+    app_combo_id_map_.clear();
     ui->info_name_label->setText("");
     ui->info_version_label->setText("");
     ui->info_sdir_label->setText("");
@@ -1701,30 +1754,87 @@ void MainWindow::onGetApplicationNames(QStringList names, QStringList icon_paths
     return;
   }
 
+  // Remember which real app_id was selected before rebuilding the combo.
+  const int prev_real_id = currentApp();
+
+  // Build a sorted or identity index mapping (display index -> real app ID).
+  // The sort only reorders how entries appear; the underlying IDs stay the same.
+  // Implements limo-app/limo#226.
+  const int n = names.size();
+  std::vector<int> order(n);
+  std::iota(order.begin(), order.end(), 0);
+  if(sort_apps_alphabetically_)
+  {
+    std::stable_sort(order.begin(), order.end(), [&names](int a, int b) {
+      return names[a].toLower() < names[b].toLower();
+    });
+  }
+  app_combo_id_map_.resize(n);
+  for(int display_idx = 0; display_idx < n; display_idx++)
+    app_combo_id_map_[display_idx] = order[display_idx];
+
   bool block = ui->app_selection_box->signalsBlocked();
   ui->app_selection_box->blockSignals(true);
-  int cur_index = currentApp();
   ui->app_selection_box->clear();
-  for(int i = 0; i < names.size(); i++)
+  for(int display_idx = 0; display_idx < n; display_idx++)
   {
-    if(icon_paths[i] == "")
-      ui->app_selection_box->addItem(names[i]);
+    const int real_id = order[display_idx];
+    if(icon_paths[real_id].isEmpty())
+      ui->app_selection_box->addItem(names[real_id]);
     else
-      ui->app_selection_box->addItem(QIcon(icon_paths[i]), names[i]);
-    ui->app_selection_box->setItemData(
-      ui->app_selection_box->count() - 1, icon_paths[i], Qt::UserRole);
+      ui->app_selection_box->addItem(QIcon(icon_paths[real_id]), names[real_id]);
+    ui->app_selection_box->setItemData(display_idx, icon_paths[real_id], Qt::UserRole);
   }
+
+  // Determine which display index to select.
   if(is_new)
-    ui->app_selection_box->setCurrentIndex(ui->app_selection_box->count() - 1);
-  else if(cur_index < ui->app_selection_box->count() && cur_index >= 0)
-    ui->app_selection_box->setCurrentIndex(cur_index);
-  if(!is_initialized_)
   {
-    const int app_index =
-      QSettings(QCoreApplication::applicationName()).value("current_app", 0).toInt();
-    if(ui->app_selection_box->count() > app_index && app_index >= 0)
-      ui->app_selection_box->setCurrentIndex(app_index);
+    // A new app was just added; it is at the last real index (n-1).
+    // Find its display position.
+    for(int display_idx = 0; display_idx < n; display_idx++)
+    {
+      if(app_combo_id_map_[display_idx] == n - 1)
+      {
+        ui->app_selection_box->setCurrentIndex(display_idx);
+        break;
+      }
+    }
   }
+  else if(!is_initialized_)
+  {
+    // On first load restore by the saved real app ID.
+    const int saved_id =
+      QSettings(QCoreApplication::applicationName()).value("current_app", 0).toInt();
+    bool found = false;
+    for(int display_idx = 0; display_idx < n; display_idx++)
+    {
+      if(app_combo_id_map_[display_idx] == saved_id)
+      {
+        ui->app_selection_box->setCurrentIndex(display_idx);
+        found = true;
+        break;
+      }
+    }
+    if(!found && n > 0)
+      ui->app_selection_box->setCurrentIndex(0);
+  }
+  else
+  {
+    // Normal refresh: keep the same real app selected.
+    bool found = false;
+    for(int display_idx = 0; display_idx < n; display_idx++)
+    {
+      if(app_combo_id_map_[display_idx] == prev_real_id)
+      {
+        ui->app_selection_box->setCurrentIndex(display_idx);
+        found = true;
+        break;
+      }
+    }
+    if(!found && n > 0)
+      ui->app_selection_box->setCurrentIndex(0);
+  }
+
   ui->app_selection_box->blockSignals(block);
 
   emit getDeployerNames(currentApp(), is_new);
@@ -2603,7 +2713,8 @@ void MainWindow::onEditDeployerPressed()
 
 void MainWindow::onAddToolClicked()
 {
-  add_tool_dialog_->setAddMode(currentApp());
+  // Pass the current app's Steam App ID so the dialog can default the field (limo-app/limo#69).
+  add_tool_dialog_->setAddMode(currentApp(), app_info_.steam_app_id);
   add_tool_dialog_->exec();
 }
 
@@ -2805,8 +2916,17 @@ void MainWindow::on_actionbrowse_mod_files_triggered()
   }
   else
     return;
-  QDesktopServices::openUrl(
-    QUrl::fromLocalFile(ui->info_sdir_label->text() + "/" + QString::number(mod_id)));
+  const QString path = ui->info_sdir_label->text() + "/" + QString::number(mod_id);
+  if(!sfs::exists(path.toStdString()))
+  {
+    Log::error(("Could not browse files: '" + path + "' does not exist").toStdString());
+    return;
+  }
+  if(!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+    Log::error(("Could not open '" + path +
+                "' in a file manager. Check that a file manager is installed and (on Flatpak) that "
+                "Limo is allowed to open files.")
+                 .toStdString());
 }
 
 void MainWindow::on_actionbrowse_deployer_files_triggered()
@@ -3854,4 +3974,14 @@ void MainWindow::onModActionTriggered(int action)
                       action,
                       ui->deployer_list->currentIndex().data(ModListModel::mod_id_role).toInt());
   emit getDeployerInfo(currentApp(), currentDeployer());
+}
+
+void MainWindow::onSortAppsAlphaToggled(bool checked)
+{
+  // Persist the new setting immediately so it survives a crash as well.
+  sort_apps_alphabetically_ = checked;
+  QSettings(QCoreApplication::applicationName())
+    .setValue("sort_apps_alphabetically", sort_apps_alphabetically_);
+  // Rebuild the combo box in sorted or original order.
+  emit getApplicationNames(false);
 }

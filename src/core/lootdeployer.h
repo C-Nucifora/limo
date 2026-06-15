@@ -36,26 +36,26 @@ public:
   /*! \brief Maps game type to a URL pointing to the masterlist.yaml for that type. */
   static inline const std::map<loot::GameType, std::string> DEFAULT_LIST_URLS = {
     { loot::GameType::fo3,
-      "https://raw.githubusercontent.com/loot/fallout3/v0.21/masterlist.yaml" },
+      "https://raw.githubusercontent.com/loot/fallout3/v0.29/masterlist.yaml" },
     { loot::GameType::fo4,
-      "https://raw.githubusercontent.com/loot/fallout4/v0.21/masterlist.yaml" },
+      "https://raw.githubusercontent.com/loot/fallout4/v0.29/masterlist.yaml" },
     { loot::GameType::fo4vr,
       "https://raw.githubusercontent.com/loot/fallout4vr/v0.21/masterlist.yaml" },
     { loot::GameType::fonv,
-      "https://raw.githubusercontent.com/loot/falloutnv/v0.21/masterlist.yaml" },
+      "https://raw.githubusercontent.com/loot/falloutnv/v0.29/masterlist.yaml" },
     // there is no dedicated OpenMW masterlist, so we use the morrowind one
     { loot::GameType::openmw,
-      "https://raw.githubusercontent.com/loot/morrowind/v0.21/masterlist.yaml" },
+      "https://raw.githubusercontent.com/loot/morrowind/v0.29/masterlist.yaml" },
     { loot::GameType::starfield,
-      "https://raw.githubusercontent.com/loot/starfield/v0.21/masterlist.yaml" },
+      "https://raw.githubusercontent.com/loot/starfield/v0.29/masterlist.yaml" },
     { loot::GameType::tes3,
-      "https://raw.githubusercontent.com/loot/morrowind/v0.21/masterlist.yaml" },
+      "https://raw.githubusercontent.com/loot/morrowind/v0.29/masterlist.yaml" },
     { loot::GameType::tes4,
-      "https://raw.githubusercontent.com/loot/oblivion/v0.21/masterlist.yaml" },
+      "https://raw.githubusercontent.com/loot/oblivion/v0.29/masterlist.yaml" },
     { loot::GameType::tes5,
-      "https://raw.githubusercontent.com/loot/skyrim/v0.21/masterlist.yaml" },
+      "https://raw.githubusercontent.com/loot/skyrim/v0.29/masterlist.yaml" },
     { loot::GameType::tes5se,
-      "https://raw.githubusercontent.com/loot/skyrimse/v0.21/masterlist.yaml" },
+      "https://raw.githubusercontent.com/loot/skyrimse/v0.29/masterlist.yaml" },
     { loot::GameType::tes5vr,
       "https://raw.githubusercontent.com/loot/skyrimvr/v0.21/masterlist.yaml" }
   };
@@ -63,7 +63,7 @@ public:
   static inline std::map<loot::GameType, std::string> LIST_URLS;
   /*! \brief Default URL used to download the masterlist prelude. */
   static inline const std::string DEFAULT_PRELUDE_URL =
-    "https://raw.githubusercontent.com/loot/prelude/v0.21/prelude.yaml";
+    "https://raw.githubusercontent.com/loot/prelude/v0.29/prelude.yaml";
   /*! \brief URL actually used to download the prelude.yaml file. Has to be initialized. */
   static inline std::string PRELUDE_URL;
 

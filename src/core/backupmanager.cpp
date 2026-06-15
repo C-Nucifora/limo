@@ -69,9 +69,9 @@ void BackupManager::addBackup(int target_id, const std::string& name, int source
     source_path = getBackupPath(target_id, source);
   else
     source_path = getBackupPath(target_id, target.active_members[cur_profile_]);
-  sfs::copy(source_path,
-            getBackupPath(target.path, target.backup_names.size()),
-            sfs::copy_options::recursive | sfs::copy_options::copy_symlinks);
+  // Use reflink (CoW clone) where the filesystem supports it, falling back to a regular
+  // recursive copy otherwise (limo-app/limo#232).
+  pu::reflinkOrCopy(source_path, getBackupPath(target.path, target.backup_names.size()));
   target.backup_names.push_back(name);
   updateSettings();
 }
@@ -151,7 +151,7 @@ void BackupManager::setProfile(int profile)
                   profile,
                   num_profiles_));
 
-  for(int target_id = 0; target_id < targets_.size(); target_id++)
+  for(size_t target_id = 0; target_id < targets_.size(); target_id++)
   {
     auto& target = targets_[target_id];
     int old_id = target.active_members[cur_profile_];
@@ -185,13 +185,19 @@ void BackupManager::removeProfile(int profile)
                   profile,
                   num_profiles_));
 
+  // If the currently active profile is being removed, switch away from it *before* erasing its
+  // per-target entries. Erasing first would leave cur_profile_ pointing at a now-deleted slot,
+  // and the subsequent setProfile() would read target.active_members[cur_profile_] out of bounds.
+  if(profile == cur_profile_ && num_profiles_ > 1)
+    setProfile(profile == 0 ? 1 : 0);
+
   num_profiles_--;
   for(auto& target : targets_)
     target.active_members.erase(target.active_members.begin() + profile);
-  if(profile == cur_profile_)
-    setProfile(0);
+  if(num_profiles_ <= 0)
+    cur_profile_ = -1;
   else if(cur_profile_ > profile)
-    setProfile(cur_profile_ - 1);
+    cur_profile_--;
   updateSettings();
 }
 
@@ -238,8 +244,9 @@ void BackupManager::overwriteBackup(int target_id, int source_backup, int dest_b
   const auto source_path = getBackupPath(target_id, source_backup);
   const auto dest_path = getBackupPath(target_id, dest_backup);
   sfs::remove_all(dest_path);
-  sfs::copy(
-    source_path, dest_path, sfs::copy_options::recursive | sfs::copy_options::overwrite_existing);
+  // Use reflink (CoW clone) where the filesystem supports it, falling back to a regular
+  // recursive copy otherwise (limo-app/limo#232).
+  pu::reflinkOrCopy(source_path, dest_path);
 }
 
 void BackupManager::setLog(const std::function<void(Log::LogLevel, const std::string&)>& new_log)

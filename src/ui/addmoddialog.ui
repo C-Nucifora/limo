@@ -139,19 +139,36 @@
     </layout>
    </item>
    <item row="7" column="0">
-    <widget class="QTreeWidget" name="content_tree">
-     <property name="toolTip">
-      <string>Mod contents</string>
-     </property>
-     <property name="headerHidden">
-      <bool>true</bool>
-     </property>
-     <column>
-      <property name="text">
-       <string notr="true">1</string>
-      </property>
-     </column>
-    </widget>
+    <layout class="QVBoxLayout" name="content_tree_layout">
+     <item>
+      <widget class="QLineEdit" name="content_filter">
+       <property name="toolTip">
+        <string>Filter archive contents by name (case-insensitive substring match). Issue #146 / NexusMods.App#3815.</string>
+       </property>
+       <property name="placeholderText">
+        <string>Filter contents...</string>
+       </property>
+       <property name="clearButtonEnabled">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QTreeWidget" name="content_tree">
+       <property name="toolTip">
+        <string>Mod contents</string>
+       </property>
+       <property name="headerHidden">
+        <bool>true</bool>
+       </property>
+       <column>
+        <property name="text">
+         <string notr="true">1</string>
+        </property>
+       </column>
+      </widget>
+     </item>
+    </layout>
    </item>
    <item row="6" column="0">
     <layout class="QGridLayout" name="gridLayout_4">

@@ -1,4 +1,5 @@
 #include "api.h"
+#include "../consts.h"
 #include "../parseerror.h"
 #include <iostream>
 #include <json/json.h>
@@ -7,6 +8,24 @@
 
 using namespace nexus;
 namespace str = std::ranges;
+
+namespace
+{
+/*!
+ * \brief Builds the standard header set for Nexus API requests. A real User-Agent (and the
+ * Nexus-recommended Application-Name/Version) is required so requests are not rejected by
+ * Cloudflare's bot challenge, which blocks the default libcurl agent (limo-app/limo#220).
+ */
+cpr::Header authHeader(const std::string& key)
+{
+  return cpr::Header{
+    { "apikey", key },
+    { "User-Agent", std::string("Limo/") + APP_VERSION + " (+https://github.com/limo-app/limo)" },
+    { "Application-Name", "Limo" },
+    { "Application-Version", APP_VERSION },
+  };
+}
+}
 
 
 void Api::setApiKey(const std::string& api_key)
@@ -32,7 +51,7 @@ Mod Api::getMod(const std::string& domain_name, long mod_id)
   cpr::Response response =
     cpr::Get(cpr::Url(std::format(
                "https://api.nexusmods.com/v1/games/{}/mods/{}.json", domain_name, mod_id)),
-             cpr::Header{ { "apikey", api_key_ } });
+             authHeader(api_key_));
   if(response.status_code != 200)
     throw std::runtime_error(
       std::format("Failed to get data for mod with id {} from NexusMods. Response code was {}",
@@ -48,7 +67,7 @@ void Api::trackMod(const std::string& mod_url)
     throw std::runtime_error(std::format("Could not parse mod URL: \"{}\".", mod_url));
   const cpr::Response response =
     cpr::Post(cpr::Url("https://api.nexusmods.com/v1/user/tracked_mods.json"),
-              cpr::Header{ { "apikey", api_key_ } },
+              authHeader(api_key_),
               cpr::Parameters{ { "domain_name", domain_and_mod->first },
                                { "mod_id", std::to_string(domain_and_mod->second) } });
 }
@@ -60,7 +79,7 @@ void Api::untrackMod(const std::string& mod_url)
     throw std::runtime_error(std::format("Could not parse mod URL: \"{}\".", mod_url));
   const cpr::Response response =
     cpr::Delete(cpr::Url("https://api.nexusmods.com/v1/user/tracked_mods.json"),
-                cpr::Header{ { "apikey", api_key_ } },
+                authHeader(api_key_),
                 cpr::Parameters{ { "domain_name", domain_and_mod->first },
                                  { "mod_id", std::to_string(domain_and_mod->second) } });
 }
@@ -68,7 +87,7 @@ void Api::untrackMod(const std::string& mod_url)
 std::vector<Mod> Api::getTrackedMods()
 {
   cpr::Response response = cpr::Get(cpr::Url("https://api.nexusmods.com/v1/user/tracked_mods.json"),
-                                    cpr::Header{ { "apikey", api_key_ } });
+                                    authHeader(api_key_));
   if(response.status_code != 200)
     throw std::runtime_error(std::format(
       "Failed to get tracked mods from NexusMods. Response code was: {}", response.status_code));
@@ -96,7 +115,7 @@ std::vector<File> Api::getModFiles(const std::string& mod_url)
   cpr::Response response =
     cpr::Get(cpr::Url(std::format(
                "https://api.nexusmods.com/v1/games/{}/mods/{}/files.json", domain_name, mod_id)),
-             cpr::Header{ { "apikey", api_key_ } });
+             authHeader(api_key_));
   if(response.status_code != 200)
     throw std::runtime_error(
       std::format("Failed to get mod files for mod with id {} from NexusMods. Response code was {}",
@@ -128,7 +147,7 @@ std::string Api::getDownloadUrl(const std::string& mod_url, long file_id)
                domain_name,
                mod_id,
                file_id)),
-             cpr::Header{ { "apikey", api_key_ } });
+             authHeader(api_key_));
   if(response.status_code == 403)
     throw std::runtime_error(
       "Generation of download links for NexusMods is restricted to premium accounts."
@@ -171,7 +190,7 @@ std::string Api::getDownloadUrl(const std::string& nxm_url)
                domain_name,
                mod_id,
                file_id)),
-             cpr::Header{ { "apikey", api_key_ } },
+             authHeader(api_key_),
              cpr::Parameters{ { "game_domain_name", domain_name },
                               { "id", file_id },
                               { "mod_id", mod_id },
@@ -216,7 +235,7 @@ std::vector<std::pair<std::string, std::vector<std::string>>> Api::getChangelogs
   cpr::Response response = cpr::Get(
     cpr::Url(std::format(
       "https://api.nexusmods.com/v1/games/{}/mods/{}/changelogs.json", domain_name, mod_id)),
-    cpr::Header{ { "apikey", api_key_ } });
+    authHeader(api_key_));
   if(response.status_code != 200)
     throw std::runtime_error(std::format(
       "Failed to get changelogs for mod with id {} from NexusMods. Response code was {}",
@@ -301,7 +320,7 @@ Page Api::getNexusPage(const std::string& mod_url)
 std::optional<std::pair<std::string, bool>> Api::validateKey(const std::string& api_key)
 {
   cpr::Response response = cpr::Get(cpr::Url("https://api.nexusmods.com/v1/users/validate.json"),
-                                    cpr::Header{ { "apikey", api_key } });
+                                    authHeader(api_key));
   if(response.status_code != 200)
     return {};
 
@@ -340,6 +359,26 @@ std::optional<std::pair<std::string, int>> Api::extractDomainAndModId(const std:
 bool Api::initModInfo(ImportModInfo& info)
 {
   std::vector<File> files;
+
+  // The built-in Nexus "Files" tab populates remote_source + remote_file_id directly and never sets
+  // an nxm:// request URL. Without this branch initModInfo would bail on the empty request URL below,
+  // silently aborting the download (see limo-app/limo#261, #41).
+  if(info.remote_request_url.empty() && modUrlIsValid(info.remote_source) && info.remote_file_id >= 0)
+  {
+    files = getModFiles(info.remote_source);
+    auto iter = str::find_if(files, [&info](File& f) { return f.file_id == info.remote_file_id; });
+    if(iter == files.end())
+      return false;
+    auto domain_and_mod = extractDomainAndModId(info.remote_source);
+    if(!domain_and_mod)
+      return false;
+    info.remote_mod_id = (*domain_and_mod).second;
+    info.remote_file_name = iter->name;
+    info.remote_file_version = iter->version;
+    info.remote_type = ImportModInfo::RemoteType::nexus;
+    return true;
+  }
+
   auto match = nxmUrlIsValid(info.remote_request_url);
   if(!match)
     return false;
