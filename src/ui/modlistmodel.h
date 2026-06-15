@@ -9,7 +9,12 @@
 #include "modlistproxymodel.h"
 #include <QAbstractTableModel>
 #include <QComboBox>
+#include <QPixmap>
 #include <set>
+#include <unordered_map>
+
+class QNetworkAccessManager;
+class QNetworkReply;
 
 
 /*!
@@ -224,6 +229,23 @@ private:
   /*! \brief Ids of all mods which conflict with the currently selected mod. */
   std::set<int> highlight_conflicting_mod_ids_;
 
+  /*! \brief Edge length, in pixels, of the preview thumbnails shown in the name column. */
+  static constexpr int thumbnail_size = 40;
+  /*!
+   * \brief In-memory cache mapping mod ids to their (downscaled) preview thumbnail.
+   *
+   * Mutable because thumbnails are populated lazily from within the const \ref data method.
+   */
+  mutable std::unordered_map<int, QPixmap> thumbnail_cache_;
+  /*! \brief Mod ids whose thumbnail is currently being fetched, to avoid duplicate requests. */
+  mutable std::set<int> thumbnail_pending_;
+  /*! \brief Mod ids whose thumbnail could not be loaded, to avoid hammering on every repaint. */
+  mutable std::set<int> thumbnail_failed_;
+  /*! \brief Network manager used to fetch thumbnails off the UI thread. Created on demand. */
+  mutable QNetworkAccessManager* network_manager_ = nullptr;
+  /*! \brief Directory used to persist thumbnails between runs. */
+  QString thumbnail_dir_;
+
   /*!
    * \brief Checks if the mod at the given mod has an update.
    * \param row Row of the mod.
@@ -236,4 +258,36 @@ private:
    * \return The mods status.
    */
   ModStatus modStatus(int row) const;
+  /*!
+   * \brief Returns the NexusMods preview thumbnail URL for the given mod, if any.
+   *
+   * The local \ref Mod struct does not currently persist a dedicated picture URL (only the
+   * nexus::Mod API response exposes picture_url), so this derives a URL from the mod's
+   * remote_source when it points at a NexusMods image. Returns an empty string if unavailable.
+   * \param mod The mod to inspect.
+   * \return The thumbnail URL, or an empty string.
+   */
+  QString thumbnailUrl(const Mod& mod) const;
+  /*!
+   * \brief Returns the on-disk cache path for the given mod's thumbnail.
+   * \param mod_id The mod's id.
+   * \return Absolute path to the cached thumbnail file.
+   */
+  QString thumbnailCachePath(int mod_id) const;
+  /*!
+   * \brief Returns a cached thumbnail for the given mod if available, otherwise kicks off a
+   * background fetch and returns an empty pixmap.
+   *
+   * Never blocks: only memory/disk caches are consulted synchronously; missing thumbnails are
+   * fetched asynchronously, after which \ref dataChanged is emitted for the mod's name cell.
+   * \param row The mod's row.
+   * \return The thumbnail pixmap, or an empty/null QVariant if not (yet) available.
+   */
+  QVariant thumbnailForRow(int row) const;
+  /*!
+   * \brief Starts an asynchronous network fetch of the given mod's thumbnail.
+   * \param mod_id The mod's id.
+   * \param url The thumbnail URL.
+   */
+  void fetchThumbnail(int mod_id, const QString& url) const;
 };
