@@ -26,8 +26,23 @@ public:
     /*! \brief Tool is to be run through proton by calling protontricks. */
     protontricks,
     /*! \brief Tool is a steam app. */
-    steam
+    steam,
+    /*!
+     * \brief Tool is to be run through Proton via umu-launcher (umu-run).
+     * \note Added after the original runtimes; kept last to preserve the
+     * integer values used for JSON (de)serialization of existing runtimes.
+     */
+    umu
   };
+
+  /*!
+   * \brief Checks whether umu-launcher (umu-run) is available on this system.
+   *
+   * The executable is searched for on PATH and in a few common install
+   * locations using std::filesystem. The result is cached after the first call.
+   * \return True if umu-run was found, else false.
+   */
+  static bool umuLauncherAvailable();
 
   /*! \brief Default constructor */
   Tool() = default;
@@ -67,6 +82,25 @@ public:
        const std::filesystem::path& icon_path,
        const std::filesystem::path& executable_path,
        const std::filesystem::path& prefix_path,
+       const std::filesystem::path& working_directory,
+       const std::map<std::string, std::string>& environment_variables,
+       const std::string& arguments);
+  /*!
+   * \brief Constructs a tool using the umu-launcher runtime.
+   * \param name Name of the tool.
+   * \param icon_path Path to the tool's icon.
+   * \param executable_path Path to the tool's executable.
+   * \param prefix_path Path to the Proton prefix used by umu-launcher.
+   * \param game_id Value passed to umu-launcher as GAMEID (use "0" if unknown).
+   * \param working_directory Working directory in which to run the command.
+   * \param environment_variables Maps environment variables to their values.
+   * \param arguments Arguments to be passed to the executable.
+   */
+  Tool(const std::string& name,
+       const std::filesystem::path& icon_path,
+       const std::filesystem::path& executable_path,
+       const std::filesystem::path& prefix_path,
+       const std::string& game_id,
        const std::filesystem::path& working_directory,
        const std::map<std::string, std::string>& environment_variables,
        const std::string& arguments);
@@ -175,6 +209,11 @@ public:
    */
   std::string getProtontricksArguments() const;
   /*!
+   * \brief Returns the GAMEID passed to umu-launcher.
+   * \return The GAMEID.
+   */
+  std::string getUmuGameId() const;
+  /*!
    * \brief Returns the overwrite command.
    * If this is not empty: Ignore all other settings and run this command directly.
    * \return The overwrite command.
@@ -207,6 +246,8 @@ private:
   std::string arguments_;
   /*! \brief Arguments to be passed to protontricks. */
   std::string protontricks_arguments_;
+  /*! \brief If runtime is umu: Value passed to umu-launcher as GAMEID. */
+  std::string umu_game_id_ = "0";
   /*! \brief If not empty: Ignore all other settings and run this command directly. */
   std::string command_overwrite_ = "";
 

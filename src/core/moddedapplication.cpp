@@ -187,6 +187,8 @@ void ModdedApplication::installMod(const ImportModInfo& info)
     tag.updateMods(staging_dir_, std::vector<int>{ mod_id });
   updateAutoTagMap();
 
+  autoAddScriptExtenderTools(mod_id);
+
   updateSettings(true);
 }
 
@@ -2818,4 +2820,102 @@ std::string ModdedApplication::buildRedmodDeployCommand(int deployer)
     return {};
   cyberpunk_redmod::layoutRedMods(redmod_sources, game_root);
   return cyberpunk_redmod::redmodDeployCommand(game_root, names, {});
+}
+
+void ModdedApplication::autoAddScriptExtenderTools(int mod_id)
+{
+  // Well known script extender / launcher executables (lower case for case insensitive match).
+  static const std::vector<std::string> loader_names{ "skse64_loader.exe", "skse_loader.exe",
+                                                      "f4se_loader.exe",   "fnvse_loader.exe",
+                                                      "fose_loader.exe",   "obse_loader.exe",
+                                                      "obse64_loader.exe", "nvse_loader.exe" };
+  try
+  {
+    const sfs::path mod_dir = staging_dir_ / std::to_string(mod_id);
+    if(!sfs::exists(mod_dir))
+      return;
+
+    for(const auto& entry : sfs::recursive_directory_iterator(mod_dir))
+    {
+      if(!entry.is_regular_file())
+        continue;
+      std::string file_name = entry.path().filename().string();
+      std::string lower_name = file_name;
+      std::transform(
+        lower_name.begin(), lower_name.end(), lower_name.begin(), [](unsigned char c) {
+          return std::tolower(c);
+        });
+      if(str::find(loader_names, lower_name) == loader_names.end())
+        continue;
+
+      const sfs::path exe_path = entry.path();
+
+      // Avoid adding the same executable twice (compare by file name, case insensitive).
+      bool already_present = false;
+      for(const auto& tool : tools_)
+      {
+        std::string existing = tool.getExecutablePath().filename().string();
+        std::transform(existing.begin(), existing.end(), existing.begin(), [](unsigned char c) {
+          return std::tolower(c);
+        });
+        if(existing == lower_name)
+        {
+          already_present = true;
+          break;
+        }
+      }
+      if(already_present)
+        continue;
+
+      // Mirror the configuration of an existing tool for this app where possible so the new
+      // tool uses the correct runtime / wine prefix / proton app id. The required wine prefix
+      // is only known to the UI, so fall back to a best effort wine tool with an empty prefix
+      // (the user can adjust the prefix afterwards if needed).
+      const Tool* template_tool = nullptr;
+      for(const auto& tool : tools_)
+      {
+        if(tool.getRuntime() == Tool::wine || tool.getRuntime() == Tool::protontricks)
+        {
+          template_tool = &tool;
+          break;
+        }
+      }
+
+      const std::string tool_name = exe_path.stem().string();
+      if(template_tool != nullptr && template_tool->getRuntime() == Tool::protontricks)
+      {
+        tools_.emplace_back(tool_name,
+                            icon_path_,
+                            exe_path,
+                            template_tool->usesFlatpakRuntime(),
+                            template_tool->getSteamAppId(),
+                            exe_path.parent_path(),
+                            std::map<std::string, std::string>{},
+                            std::string{},
+                            template_tool->getProtontricksArguments());
+      }
+      else
+      {
+        const sfs::path prefix_path =
+          template_tool != nullptr ? template_tool->getPrefixPath() : sfs::path{};
+        tools_.emplace_back(tool_name,
+                            icon_path_,
+                            exe_path,
+                            prefix_path,
+                            exe_path.parent_path(),
+                            std::map<std::string, std::string>{},
+                            std::string{});
+      }
+      log_(Log::LOG_INFO,
+           std::format("Automatically added script extender tool '{}' for '{}'.",
+                       tool_name,
+                       file_name));
+    }
+  }
+  catch(const std::exception& e)
+  {
+    // Never let tool detection break a successful mod install.
+    log_(Log::LOG_WARNING,
+         std::format("Failed to auto-add script extender tools: {}", e.what()));
+  }
 }
