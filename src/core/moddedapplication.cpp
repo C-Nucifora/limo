@@ -1561,8 +1561,10 @@ void ModdedApplication::checkForModUpdates()
   std::vector<int> target_mod_indices;
   for(const auto& [i, mod] : str::enumerate_view(installed_mods_))
   {
-    if(nexus::Api::modUrlIsValid(mod.remote_source) && mod.remote_update_time <= mod.install_time &&
-       mod.pinned_version.empty())
+    // Pinned mods are included too: performUpdateCheck only suppresses the notification while the
+    // remote version still equals the pin, so a strictly newer remote version still surfaces
+    // (limo-app/limo: pinned mods were ignored forever).
+    if(nexus::Api::modUrlIsValid(mod.remote_source) && mod.remote_update_time <= mod.install_time)
       target_mod_indices.push_back(i);
   }
   performUpdateCheck(target_mod_indices);
@@ -1574,8 +1576,7 @@ void ModdedApplication::checkModsForUpdates(const std::vector<int>& mod_ids)
   for(const auto& [i, mod] : str::enumerate_view(installed_mods_))
   {
     if(str::find(mod_ids, mod.id) != mod_ids.end() &&
-       nexus::Api::modUrlIsValid(mod.remote_source) && mod.remote_update_time <= mod.install_time &&
-       mod.pinned_version.empty())
+       nexus::Api::modUrlIsValid(mod.remote_source) && mod.remote_update_time <= mod.install_time)
       target_mod_indices.push_back(i);
   }
   performUpdateCheck(target_mod_indices);
@@ -2364,8 +2365,14 @@ void ModdedApplication::performUpdateCheck(const std::vector<int>& target_mod_in
   int num_available_updates = 0;
   for(int i : target_mod_indices)
   {
-    installed_mods_[i].remote_update_time =
-      nexus::Api::getNexusPage(installed_mods_[i].remote_source).mod.updated_time;
+    const auto remote_mod = nexus::Api::getNexusPage(installed_mods_[i].remote_source).mod;
+    installed_mods_[i].remote_update_time = remote_mod.updated_time;
+    // A pinned mod stays quiet while the remote version still matches the pin; once the remote
+    // publishes a different (newer) version the normal timestamp gate surfaces it again
+    // (limo-app/limo: pins must not silence genuinely newer releases).
+    if(!installed_mods_[i].pinned_version.empty() &&
+       remote_mod.version == installed_mods_[i].pinned_version)
+      installed_mods_[i].remote_update_time = installed_mods_[i].install_time;
     if(installed_mods_[i].remote_update_time > installed_mods_[i].install_time)
       num_available_updates++;
     node.advance();
