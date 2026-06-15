@@ -21,6 +21,7 @@
 #include "deployerlistview.h"
 #include "deploypreviewdialog.h" // fork feature #49: deploy dry-run / preview
 #include "deployverifydialog.h" // fork #53
+#include "deployedfilestreedialog.h" // fork #11
 #include "healthcheckdialog.h" // fork #50
 #include "editmanualtagsdialog.h"
 #include "enterapipwdialog.h"
@@ -1085,6 +1086,15 @@ void MainWindow::setupButtons()
   verify_deployer_action_->setIcon(QIcon::fromTheme("emblem-checked"));
   connect(
     verify_deployer_action_, &QAction::triggered, this, &MainWindow::onVerifyDeployerMenuClicked);
+  // fork #11: action showing the deployed file tree with per-file mod origin.
+  deployed_files_tree_action_ = new QAction(this);
+  deployed_files_tree_action_->setToolTip("Show deployed files and their origin mod");
+  deployed_files_tree_action_->setText("Deployed Files");
+  deployed_files_tree_action_->setIcon(QIcon::fromTheme("view-list-tree"));
+  connect(deployed_files_tree_action_,
+          &QAction::triggered,
+          this,
+          &MainWindow::onDeployedFilesTreeMenuClicked);
   // fork #50: health-check action.
   health_check_deployer_action_ = new QAction(this);
   health_check_deployer_action_->setToolTip("Check the deployment for problems");
@@ -1110,6 +1120,7 @@ void MainWindow::setupButtons()
                                              remove_deployer_action_,
                                              edit_deployer_action_,
                                              verify_deployer_action_,
+                                             deployed_files_tree_action_, // fork #11
                                              health_check_deployer_action_, // fork #50
                                              ui->actionbrowse_deployer_files });
 #ifdef LIMO_WITH_LOOT
@@ -3102,6 +3113,58 @@ void MainWindow::onVerifyDeployerMenuClicked()
   catch(const std::exception& error)
   {
     onReceiveError("Error", QString("Could not verify deployment: ") + error.what());
+  }
+}
+
+// fork #11: show the deployed file tree with per-file mod origin for the current deployer.
+// Mirrors onVerifyDeployerMenuClicked: builds a transient Deployer from the displayed
+// source/target paths and deploy mode. getDeployedFileOrigins performs no disk writes.
+void MainWindow::onDeployedFilesTreeMenuClicked()
+{
+  const int deployer = currentDeployer();
+  if(deployer < 0 || deployer >= static_cast<int>(deployer_source_paths_.size()) ||
+     deployer >= static_cast<int>(deployer_target_paths_.size()))
+    return;
+
+  const QString name =
+    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Name"))->text();
+  const QString deploy_mode_string =
+    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Mode"))->text();
+  Deployer::DeployMode deploy_mode = Deployer::hard_link;
+  if(deploy_mode_string == deploy_mode_sym_link)
+    deploy_mode = Deployer::sym_link;
+  else if(deploy_mode_string == deploy_mode_copy)
+    deploy_mode = Deployer::copy;
+
+  // Build an id -> name map from the currently displayed deployer mod list so the tree can show
+  // human readable origins. Falls back to the bare id when no name is available.
+  std::map<int, QString> mod_names;
+  for(int row = 0; row < deployer_model_->rowCount(); row++)
+  {
+    const QVariant id_value = deployer_model_->data(
+      deployer_model_->index(row, DeployerListModel::id_col, QModelIndex()));
+    bool ok = false;
+    const int id = id_value.toInt(&ok);
+    if(!ok)
+      continue;
+    mod_names[id] = deployer_model_
+                      ->data(deployer_model_->index(row, DeployerListModel::name_col, QModelIndex()))
+                      .toString();
+  }
+
+  try
+  {
+    Deployer reader(deployer_source_paths_[deployer].toStdString(),
+                    deployer_target_paths_[deployer].toStdString(),
+                    name.toStdString(),
+                    deploy_mode);
+    const std::vector<Deployer::FileOrigin> origins = reader.getDeployedFileOrigins(true);
+    DeployedFilesTreeDialog dialog(name, origins, mod_names, this);
+    dialog.exec();
+  }
+  catch(const std::exception& error)
+  {
+    onReceiveError("Error", QString("Could not list deployed files: ") + error.what());
   }
 }
 

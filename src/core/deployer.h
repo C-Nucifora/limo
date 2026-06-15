@@ -114,6 +114,22 @@ public:
     }
   };
 
+  // fork #11: virtual deployed-file tree with per-file mod origin
+  /*!
+   * \brief Describes one currently deployed file and which mod provides it.
+   * The path is relative to the deployment target directory.
+   */
+  struct FileOrigin
+  {
+    /*! \brief Path of the deployed file, relative to the deployment target. */
+    std::filesystem::path path;
+    /*! \brief Id of the mod which currently provides this file (the winner). */
+    int mod_id = -1;
+    /*! \brief Ids of all other mods which also contain this file but were overwritten.
+     *  May be empty. Does not include \ref mod_id. */
+    std::vector<int> conflicting_mod_ids;
+  };
+
   // fork #50: 'Problems' / health-check panel
   /*!
    * \brief Aggregates the problems found by \ref runHealthCheck: orphaned deployed files,
@@ -483,6 +499,21 @@ public:
    */
   virtual VerificationResult verifyDeployment(bool checksum = false,
                                               std::optional<ProgressNode*> progress_node = {}) const;
+  // fork #11: virtual deployed-file tree with per-file mod origin
+  /*!
+   * \brief Reads the .lmmfiles deployment record and reports, for every currently deployed
+   * file, which mod provides it (the winner) and, optionally, which other mods also contain
+   * that file (the overwritten conflicts). Performs no disk writes.
+   *
+   * The winning mod id is taken directly from the on-disk deployment record, so this works on
+   * a transient, read-only Deployer built only from the source and target paths. Conflicts are
+   * determined by checking the staged mod directories under the source path for the same
+   * relative path; directories recorded in the file list are skipped.
+   * \param include_conflicts If true: also collect the ids of other mods which contain each
+   *  deployed file. Off by default as it requires extra stat calls per mod per file.
+   * \return One \ref FileOrigin per deployed file, ordered by path.
+   */
+  virtual std::vector<FileOrigin> getDeployedFileOrigins(bool include_conflicts = false) const;
   // fork #50: 'Problems' / health-check panel
   /*!
    * \brief Runs a read-only health check on the current deployment, aggregating problems into a

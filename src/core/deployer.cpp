@@ -1065,6 +1065,63 @@ Deployer::VerificationResult Deployer::verifyDeployment(
   return result;
 }
 
+// fork #11: virtual deployed-file tree with per-file mod origin
+std::vector<Deployer::FileOrigin> Deployer::getDeployedFileOrigins(bool include_conflicts) const
+{
+  log_(Log::LOG_INFO,
+       std::format("Deployer '{}': Building deployed file origin map{}...",
+                   name_,
+                   include_conflicts ? " (with conflicts)" : ""));
+
+  const auto deployed_files = loadDeployedFiles();
+
+  // When conflicts are requested, enumerate the staged mod directories once so that each
+  // deployed file only needs a cheap existence check per candidate mod.
+  std::vector<int> mod_dirs;
+  if(include_conflicts && sfs::exists(source_path_))
+  {
+    for(const auto& dir_entry : sfs::directory_iterator(source_path_))
+    {
+      if(!dir_entry.is_directory())
+        continue;
+      const std::string dir_name = dir_entry.path().filename().string();
+      if(!dir_name.empty() &&
+         str::all_of(dir_name, [](unsigned char c) { return std::isdigit(c); }))
+        mod_dirs.push_back(std::stoi(dir_name));
+    }
+    str::sort(mod_dirs);
+  }
+
+  std::vector<FileOrigin> origins;
+  origins.reserve(deployed_files.size());
+  for(const auto& [path, mod_id] : deployed_files)
+  {
+    // Directories are recorded but are not files provided by a single mod; skip them.
+    if(sfs::is_directory(source_path_ / std::to_string(mod_id) / path))
+      continue;
+
+    FileOrigin origin;
+    origin.path = path;
+    origin.mod_id = mod_id;
+
+    if(include_conflicts)
+    {
+      for(int candidate : mod_dirs)
+      {
+        if(candidate == mod_id)
+          continue;
+        if(sfs::exists(source_path_ / std::to_string(candidate) / path))
+          origin.conflicting_mod_ids.push_back(candidate);
+      }
+    }
+
+    origins.push_back(std::move(origin));
+  }
+
+  // deployed_files is a std::map, so origins is already ordered by path.
+  return origins;
+}
+
 // fork #50: 'Problems' / health-check panel
 Deployer::HealthCheckResult Deployer::runHealthCheck(
   bool checksum,
