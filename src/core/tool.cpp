@@ -1,9 +1,12 @@
 #include "tool.h"
 #include <cstdlib>
 #include <format>
+#include <fstream>
 #include <ranges>
 #include <string_view>
 #include <system_error>
+#include <string>
+#include <vector>
 
 namespace sfs = std::filesystem;
 
@@ -122,6 +125,78 @@ Tool::Tool(const Json::Value& json_object)
       umu_game_id_ = json_object["umu_game_id"].asString();
     command_overwrite_ = json_object["command"].asString();
   }
+}
+
+sfs::path Tool::detectProtonPrefix(int steam_app_id)
+{
+  const char* home_env = std::getenv("HOME");
+  if(home_env == nullptr || *home_env == '\0')
+    return {};
+  const sfs::path home(home_env);
+
+  // Well known Steam library roots (a "root" is a directory containing a steamapps/ subdir).
+  std::vector<sfs::path> library_roots{
+    home / ".steam" / "steam",
+    home / ".local" / "share" / "Steam",
+    home / ".var" / "app" / "com.valvesoftware.Steam" / ".local" / "share" / "Steam"
+  };
+
+  // Cheaply parse each root's libraryfolders.vdf for additional library paths.
+  // The relevant lines look like:   "path"   "/some/library"
+  const std::size_t base_root_count = library_roots.size();
+  for(std::size_t i = 0; i < base_root_count; i++)
+  {
+    const sfs::path vdf_path = library_roots[i] / "steamapps" / "libraryfolders.vdf";
+    std::error_code ec;
+    if(!sfs::exists(vdf_path, ec))
+      continue;
+    std::ifstream vdf(vdf_path);
+    if(!vdf)
+      continue;
+    std::string line;
+    while(std::getline(vdf, line))
+    {
+      const auto key_start = line.find("\"path\"");
+      if(key_start == std::string::npos)
+        continue;
+      const auto value_open = line.find('"', key_start + 6);
+      if(value_open == std::string::npos)
+        continue;
+      const auto value_close = line.find('"', value_open + 1);
+      if(value_close == std::string::npos)
+        continue;
+      std::string value = line.substr(value_open + 1, value_close - value_open - 1);
+      // VDF escapes backslashes; convert "\\" to "\".
+      std::string unescaped;
+      for(std::size_t c = 0; c < value.size(); c++)
+      {
+        if(value[c] == '\\' && c + 1 < value.size())
+          c++;
+        unescaped += value[c];
+      }
+      if(!unescaped.empty())
+        library_roots.emplace_back(unescaped);
+    }
+  }
+
+  for(const auto& root : library_roots)
+  {
+    const sfs::path pfx =
+      root / "steamapps" / "compatdata" / std::to_string(steam_app_id) / "pfx";
+    std::error_code ec;
+    if(sfs::exists(pfx, ec))
+      return pfx;
+  }
+
+  return {};
+}
+
+sfs::path Tool::protonUserDir(int steam_app_id)
+{
+  const sfs::path pfx = detectProtonPrefix(steam_app_id);
+  if(pfx.empty())
+    return {};
+  return pfx / "drive_c" / "users" / "steamuser";
 }
 
 std::string Tool::getCommand(bool is_flatpak) const
