@@ -277,6 +277,9 @@ private:
   DeployerListModel* deployer_model_;
   /*! \brief Model used by the mod list. */
   ModListModel* mod_list_model_;
+  /*! \brief Maps a mod id to the set of mod ids it conflicts with, for selection highlighting
+   *  (limo-app/limo#143). Rebuilt from DeployerInfo::conflict_groups on each deployer refresh. */
+  std::map<int, std::set<int>> mod_conflict_groups_;
   /*! \brief Used to edit mod versions in the mod list. */
   VersionBoxDelegate* version_deledate_;
   /*! \brief Used to edit mod names in the mod list. */

@@ -83,7 +83,8 @@ void Installer::extract(const sfs::path& source_path,
     throw error;
 #endif
   }
-  for(const auto& dir_entry : sfs::recursive_directory_iterator(dest_path))
+  for(const auto& dir_entry :
+      sfs::recursive_directory_iterator(dest_path, sfs::directory_options::none))
   {
     auto permissions = sfs::perms::owner_read | sfs::perms::owner_write | sfs::perms::group_read |
                        sfs::perms::group_write | sfs::perms::others_read;
@@ -209,13 +210,26 @@ unsigned long Installer::install(const sfs::path& source,
       pu::renameFiles(tmp_dir, tmp_dir, [](unsigned char c) { return std::toupper(c); });
     if(options & single_directory)
     {
+      // Collect all entries before mutating the tree. Renaming files into tmp_dir while a
+      // recursive_directory_iterator is still walking tmp_dir is undefined behaviour and can
+      // cause the iterator to re-encounter the moved files, resulting in an infinite loop for
+      // archives with a top-level folder plus a sub directory (e.g. F4SE/SKSE: extender exe at
+      // the root and a Data subtree). Do not follow symlinks to avoid cyclic traversal.
+      std::vector<sfs::path> files;
       std::vector<sfs::path> directories;
-      for(const auto& dir_entry : sfs::recursive_directory_iterator(tmp_dir))
+      for(const auto& dir_entry :
+          sfs::recursive_directory_iterator(tmp_dir, sfs::directory_options::none))
       {
-        if(!dir_entry.is_directory())
-          sfs::rename(dir_entry.path(), tmp_dir / dir_entry.path().filename());
-        else
+        if(dir_entry.is_directory() && !dir_entry.is_symlink())
           directories.push_back(dir_entry.path());
+        else
+          files.push_back(dir_entry.path());
+      }
+      for(const auto& file : files)
+      {
+        const auto target = tmp_dir / file.filename();
+        if(file != target)
+          sfs::rename(file, target);
       }
       for(const auto& dir : directories)
         sfs::remove_all(dir);
@@ -243,7 +257,8 @@ unsigned long Installer::install(const sfs::path& source,
     }
   }
   unsigned long size = 0;
-  for(const auto& dir_entry : sfs::recursive_directory_iterator(destination))
+  for(const auto& dir_entry :
+      sfs::recursive_directory_iterator(destination, sfs::directory_options::none))
     if(dir_entry.is_regular_file())
       size += dir_entry.file_size();
   return size;
@@ -260,7 +275,8 @@ std::vector<std::pair<sfs::path, bool>> Installer::getArchiveFileNames(const sfs
   std::vector<std::pair<sfs::path, bool>> file_names;
   if(sfs::is_directory(path))
   {
-    for(const auto& dir_entry : sfs::recursive_directory_iterator(path))
+    for(const auto& dir_entry :
+        sfs::recursive_directory_iterator(path, sfs::directory_options::none))
       file_names.emplace_back(pu::getRelativePath(dir_entry.path(), path), dir_entry.is_directory());
     return file_names;
   }
