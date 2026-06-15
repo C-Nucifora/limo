@@ -96,3 +96,7 @@ local_scripts
 
 # Nix
 result
+repro-captures/
+build-repro/
+build-fix/
+build-clean/
