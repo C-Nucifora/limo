@@ -68,6 +68,16 @@ private:
   constexpr static inline std::string JSON_AUTO_TAGS_GROUP = "auto_tags";
   /*! \brief Name of the key used to identify the apps name in the apps config file. */
   constexpr static inline std::string JSON_NAME = "name";
+  /*! \brief Name of the key used to group the deploy hooks in the apps config file. */
+  constexpr static inline std::string JSON_HOOKS_GROUP = "hooks";
+  /*! \brief Name of the key used to identify the pre-deploy hook in the apps config file. */
+  constexpr static inline std::string JSON_HOOK_PRE_DEPLOY = "pre_deploy";
+  /*! \brief Name of the key used to identify the post-deploy hook in the apps config file. */
+  constexpr static inline std::string JSON_HOOK_POST_DEPLOY = "post_deploy";
+  /*! \brief Name of the key used to identify the pre-undeploy hook in the apps config file. */
+  constexpr static inline std::string JSON_HOOK_PRE_UNDEPLOY = "pre_undeploy";
+  /*! \brief Name of the key used to identify the post-undeploy hook in the apps config file. */
+  constexpr static inline std::string JSON_HOOK_POST_UNDEPLOY = "post_undeploy";
 
   /*! \brief If true: Dialog is used to edit, else: Dialog is used to create. */
   bool edit_mode_ = false;
@@ -145,6 +155,18 @@ private:
    * Shows the resolved Steam install path, or a neutral placeholder if none was detected.
    */
   void updateDetectedPath();
+  /*!
+   * \brief Loads the four deploy hook commands from the given app's config file
+   * into the hook line edits. Clears the fields if the file or hooks are absent.
+   * \param staging_dir Staging directory of the app whose config should be read.
+   */
+  void loadHooksFromConfig(const QString& staging_dir);
+  /*!
+   * \brief Merges the hook commands entered in the dialog into the given app's
+   * config file under the "hooks" key, leaving all other settings untouched.
+   * \param staging_dir Staging directory of the app whose config should be updated.
+   */
+  void saveHooksToConfig(const QString& staging_dir);
 
 public:
   /*!

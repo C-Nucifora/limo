@@ -282,6 +282,74 @@
     </spacer>
    </item>
    <item row="7" column="0">
+    <widget class="QGroupBox" name="hooks_box">
+     <property name="toolTip">
+      <string>Shell commands run automatically around deployment. Each field is a full command line, run as typed.</string>
+     </property>
+     <property name="title">
+      <string>Hooks</string>
+     </property>
+     <layout class="QGridLayout" name="hooks_layout">
+      <item row="0" column="0">
+       <widget class="QLabel" name="pre_deploy_label">
+        <property name="text">
+         <string>Pre-deploy:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="0" column="1">
+       <widget class="QLineEdit" name="pre_deploy_field">
+        <property name="toolTip">
+         <string>Command run before deployment</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="0">
+       <widget class="QLabel" name="post_deploy_label">
+        <property name="text">
+         <string>Post-deploy:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QLineEdit" name="post_deploy_field">
+        <property name="toolTip">
+         <string>Command run after deployment</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="0">
+       <widget class="QLabel" name="pre_undeploy_label">
+        <property name="text">
+         <string>Pre-undeploy:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="2" column="1">
+       <widget class="QLineEdit" name="pre_undeploy_field">
+        <property name="toolTip">
+         <string>Command run before undeployment</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="0">
+       <widget class="QLabel" name="post_undeploy_label">
+        <property name="text">
+         <string>Post-undeploy:</string>
+        </property>
+       </widget>
+      </item>
+      <item row="3" column="1">
+       <widget class="QLineEdit" name="post_undeploy_field">
+        <property name="toolTip">
+         <string>Command run after undeployment</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item row="8" column="0">
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>

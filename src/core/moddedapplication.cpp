@@ -14,10 +14,13 @@
 #include <archive_entry.h>
 #include <algorithm>
 #include <array>
+#include <cstdlib>
+#include <format>
 #include <fstream>
 #include <memory>
 #include <ranges>
 #include <regex>
+#include <sys/wait.h>
 
 namespace sfs = std::filesystem;
 namespace str = std::ranges;
@@ -77,6 +80,8 @@ void ModdedApplication::deployModsFor(std::vector<int> deployers)
       weights.push_back(num_mods);
   }
 
+  runHook("pre-deploy", pre_deploy_hook_);
+
   ProgressNode node(progress_callback_, weights);
   for(auto [i, deployer] : str::enumerate_view(deployers))
   {
@@ -92,6 +97,8 @@ void ModdedApplication::deployModsFor(std::vector<int> deployers)
       }
     }
   }
+
+  runHook("post-deploy", post_deploy_hook_);
 
   updateSettings(true);
 }
@@ -123,9 +130,13 @@ void ModdedApplication::unDeployModsFor(std::vector<int> deployers)
       weights.push_back(num_mods);
   }
 
+  runHook("pre-undeploy", pre_undeploy_hook_);
+
   ProgressNode node(progress_callback_, weights);
   for(auto [i, deployer] : str::enumerate_view(deployers))
     deployers_[deployer]->unDeploy(&(node.child(i)));
+
+  runHook("post-undeploy", post_undeploy_hook_);
 
   updateSettings(true);
 }
@@ -1193,6 +1204,59 @@ void ModdedApplication::setLog(const std::function<void(Log::LogLevel, const std
     deployer->setLog(newLog);
 }
 
+std::string ModdedApplication::getPreDeployHook() const
+{
+  return pre_deploy_hook_;
+}
+
+std::string ModdedApplication::getPostDeployHook() const
+{
+  return post_deploy_hook_;
+}
+
+std::string ModdedApplication::getPreUnDeployHook() const
+{
+  return pre_undeploy_hook_;
+}
+
+std::string ModdedApplication::getPostUnDeployHook() const
+{
+  return post_undeploy_hook_;
+}
+
+void ModdedApplication::setDeployHooks(const std::string& pre_deploy,
+                                       const std::string& post_deploy,
+                                       const std::string& pre_undeploy,
+                                       const std::string& post_undeploy)
+{
+  pre_deploy_hook_ = pre_deploy;
+  post_deploy_hook_ = post_deploy;
+  pre_undeploy_hook_ = pre_undeploy;
+  post_undeploy_hook_ = post_undeploy;
+  updateSettings(true);
+}
+
+int ModdedApplication::runHook(const std::string& hook_name, const std::string& command) const
+{
+  if(command.empty())
+    return 0;
+
+  // The hook string is treated as a complete command line authored by the user
+  // (just like a Tool command overwrite, see issue #32) and is handed to the
+  // shell verbatim. It is never re-escaped or wrapped beyond what the user typed.
+  log_(Log::LOG_INFO, std::format("Running {} hook: {}", hook_name, command));
+  const int status = std::system(command.c_str());
+  const int exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : status;
+  if(exit_code != 0)
+    // Policy: log a warning and continue. Deployment is not aborted because a
+    // failing hook (e.g. an optional notification) should not block mod changes.
+    log_(Log::LOG_WARNING,
+         std::format("{} hook exited with code {} (continuing).", hook_name, exit_code));
+  else
+    log_(Log::LOG_INFO, std::format("{} hook finished successfully.", hook_name));
+  return exit_code;
+}
+
 void ModdedApplication::addBackupTarget(const sfs::path& path,
                                         const std::string& name,
                                         const std::vector<std::string>& backup_names)
@@ -1950,6 +2014,11 @@ void ModdedApplication::updateSettings(bool write)
       json_settings_["update_ignore_list"][i++] = mod_id;
   }
 
+  json_settings_["hooks"]["pre_deploy"] = pre_deploy_hook_;
+  json_settings_["hooks"]["post_deploy"] = post_deploy_hook_;
+  json_settings_["hooks"]["pre_undeploy"] = pre_undeploy_hook_;
+  json_settings_["hooks"]["post_undeploy"] = post_undeploy_hook_;
+
   if(write)
     writeSettings();
 }
@@ -2266,6 +2335,23 @@ void ModdedApplication::updateState(bool read)
     const Json::Value update_ignore_list = json_settings_["update_ignore_list"];
     for(int i = 0; i < update_ignore_list.size(); i++)
       update_ignore_list_.insert(update_ignore_list[i].asInt());
+  }
+
+  pre_deploy_hook_ = "";
+  post_deploy_hook_ = "";
+  pre_undeploy_hook_ = "";
+  post_undeploy_hook_ = "";
+  if(json_settings_.isMember("hooks"))
+  {
+    const Json::Value hooks = json_settings_["hooks"];
+    if(hooks.isMember("pre_deploy"))
+      pre_deploy_hook_ = hooks["pre_deploy"].asString();
+    if(hooks.isMember("post_deploy"))
+      post_deploy_hook_ = hooks["post_deploy"].asString();
+    if(hooks.isMember("pre_undeploy"))
+      pre_undeploy_hook_ = hooks["pre_undeploy"].asString();
+    if(hooks.isMember("post_undeploy"))
+      post_undeploy_hook_ = hooks["post_undeploy"].asString();
   }
 
   updateSteamIconPath();

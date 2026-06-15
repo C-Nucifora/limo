@@ -434,6 +434,28 @@ public:
   DeployerInfo getDeployerInfo(int deployer);
   /*! \brief Setter for log callback. */
   void setLog(const std::function<void(Log::LogLevel, const std::string&)>& newLog);
+  /*! \brief Getter for the pre-deploy hook command. */
+  std::string getPreDeployHook() const;
+  /*! \brief Getter for the post-deploy hook command. */
+  std::string getPostDeployHook() const;
+  /*! \brief Getter for the pre-undeploy hook command. */
+  std::string getPreUnDeployHook() const;
+  /*! \brief Getter for the post-undeploy hook command. */
+  std::string getPostUnDeployHook() const;
+  /*!
+   * \brief Sets the shell commands run automatically around (un-)deployment.
+   * Each command is treated as a complete, user-authored command line (like a
+   * Tool command overwrite) and is run via the existing safe runner without
+   * additional shell-wrapping beyond what the user typed. Empty strings are no-ops.
+   * \param pre_deploy Command run before deployment.
+   * \param post_deploy Command run after deployment.
+   * \param pre_undeploy Command run before undeployment.
+   * \param post_undeploy Command run after undeployment.
+   */
+  void setDeployHooks(const std::string& pre_deploy,
+                      const std::string& post_deploy,
+                      const std::string& pre_undeploy,
+                      const std::string& post_undeploy);
   /*!
    * \brief Adds a new target file or directory to be managed by the BackupManager.
    * \param path Path to the target file or directory.
@@ -882,6 +904,26 @@ private:
   long steam_app_id_;
   /*! \brief App-global mod dependency / conflict rules. */
   std::vector<ModRule> mod_rules_;
+  /*! \brief Shell command run before deployment. Empty: disabled. */
+  std::string pre_deploy_hook_ = "";
+  /*! \brief Shell command run after deployment. Empty: disabled. */
+  std::string post_deploy_hook_ = "";
+  /*! \brief Shell command run before undeployment. Empty: disabled. */
+  std::string pre_undeploy_hook_ = "";
+  /*! \brief Shell command run after undeployment. Empty: disabled. */
+  std::string post_undeploy_hook_ = "";
+
+  /*!
+   * \brief Runs a user-authored hook command via the existing safe runner.
+   *
+   * The command is treated as a complete command line authored by the user
+   * (exactly like a Tool command overwrite); it is never re-escaped or
+   * shell-wrapped beyond what the user typed. Start and exit status are logged.
+   * \param hook_name Human readable name of the hook, used for logging.
+   * \param command The command line to run. Empty: no-op.
+   * \return The command's exit code, or 0 if the command was empty.
+   */
+  int runHook(const std::string& hook_name, const std::string& command) const;
 
   /*!
    * \brief Updates json_settings_ with the current state of this object.
