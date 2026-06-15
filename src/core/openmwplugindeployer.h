@@ -125,6 +125,14 @@ private:
    */
   void updatePlugins() override;
   /*!
+   * \brief Sorts the current load order using libloot with \ref loot::GameType::openmw and
+   * the OpenMW masterlist. On success, \ref plugins_ is reordered to match libloot's result.
+   * \param progress_node Used to inform about the current progress.
+   * \return True if libloot sorting succeeded, false if it had to be skipped (e.g. a missing
+   * or incompatible masterlist), in which case the existing load order is left untouched.
+   */
+  bool sortPluginsWithLoot(std::optional<ProgressNode*> progress_node);
+  /*!
    *  \brief Initializes the plugin file, if it does not exist.
    *  \return A bool indicating if the plugin file was created.
    */

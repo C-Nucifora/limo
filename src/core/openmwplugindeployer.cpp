@@ -82,10 +82,117 @@ std::map<std::string, int> OpenMwPluginDeployer::getAutoTagMap()
            { ES_PLUGIN_TAG, num_es_plugins_ } };
 }
 
+bool OpenMwPluginDeployer::sortPluginsWithLoot(std::optional<ProgressNode*> progress_node)
+{
+  if(progress_node)
+  {
+    (*progress_node)->addChildren({ 1, 2, 5, 0.2f });
+    (*progress_node)->child(0).setTotalSteps(1);
+    (*progress_node)->child(1).setTotalSteps(1);
+    (*progress_node)->child(2).setTotalSteps(1);
+    (*progress_node)->child(3).setTotalSteps(1);
+  }
+
+  // OpenMW shares Morrowind's masterlist. This list historically only targeted older
+  // metadata syntax versions, so a missing or incompatible list must not abort the sort.
+  // Any failure here is reported by the caller, which then keeps the existing load order.
+  updateMasterList();
+  if(progress_node)
+    (*progress_node)->child(0).advance();
+
+  const sfs::path master_list_path = dest_path_ / "masterlist.yaml";
+  if(!sfs::exists(master_list_path))
+  {
+    log_(Log::LOG_WARNING,
+         std::format("Deployer '{}': Could not find masterlist.yaml at '{}'.",
+                     name_,
+                     master_list_path.string()));
+    return false;
+  }
+
+  auto loot_handle = loot::CreateGameHandle(app_type_, source_path_, dest_path_);
+  const sfs::path prelude_path(dest_path_ / "prelude.yaml");
+  if(sfs::exists(prelude_path))
+    loot_handle->GetDatabase().LoadMasterlistWithPrelude(master_list_path, prelude_path);
+  else
+    loot_handle->GetDatabase().LoadMasterlist(master_list_path);
+  const sfs::path user_list_path(dest_path_ / "userlist.yaml");
+  if(sfs::exists(user_list_path))
+    loot_handle->GetDatabase().LoadUserlist(user_list_path);
+  if(progress_node)
+    (*progress_node)->child(1).advance();
+
+  std::vector<sfs::path> plugin_paths;
+  std::vector<std::string> plugin_file_names;
+  plugin_paths.reserve(plugins_.size());
+  plugin_file_names.reserve(plugins_.size());
+  for(const auto& [path, s] : plugins_)
+  {
+    plugin_paths.emplace_back(source_path_ / path);
+    plugin_file_names.emplace_back(path);
+  }
+  loot_handle->LoadPlugins(plugin_paths, false);
+  auto sorted_plugins = loot_handle->SortPlugins(plugin_file_names);
+  if(progress_node)
+    (*progress_node)->child(2).advance();
+
+  std::vector<std::pair<std::string, bool>> new_plugins;
+  new_plugins.reserve(plugins_.size());
+  for(const auto& plugin : sorted_plugins)
+  {
+    auto iter = str::find_if(plugins_, [&plugin](const auto& p) { return p.first == plugin; });
+    bool enabled = iter != plugins_.end() ? iter->second : true;
+    new_plugins.emplace_back(plugin, enabled);
+
+    const auto cur_plugin = loot_handle->GetPlugin(plugin);
+    for(const auto& master : cur_plugin->GetMasters())
+    {
+      if(!pu::pathExists(master, source_path_) && enabled)
+        log_(Log::LOG_WARNING,
+             "LOOT: Plugin '" + master + "' is missing but required for '" + plugin + "'");
+    }
+    auto meta_data = loot_handle->GetDatabase().GetPluginMetadata(plugin);
+    if(!meta_data)
+      continue;
+    for(const auto& req : meta_data->GetRequirements())
+    {
+      std::string file = static_cast<std::string>(req.GetName());
+      if(!pu::pathExists(file, source_path_))
+        log_(Log::LOG_WARNING, "LOOT: Requirement '" + file + "' not met for '" + plugin + "'");
+    }
+  }
+
+  if(enable_unsafe_sorting_)
+    plugins_ = new_plugins;
+  log_(Log::LOG_INFO,
+       std::format("Deployer '{}': Sorted {} OpenMW content files using LOOT.",
+                   name_,
+                   new_plugins.size()));
+  if(progress_node)
+    (*progress_node)->child(3).advance();
+  return true;
+}
+
 void OpenMwPluginDeployer::sortModsByConflicts(std::optional<ProgressNode*> progress_node)
 {
-  LootDeployer::sortModsByConflicts(progress_node);
+  // Use libloot's masterlist based sorting for OpenMW (libloot now supports
+  // loot::GameType::openmw). If no usable masterlist is available, fall back to the
+  // existing grouping-only order instead of aborting the sort.
+  try
+  {
+    if(!sortPluginsWithLoot(progress_node))
+      log_(Log::LOG_INFO,
+           std::format("Deployer '{}': LOOT sorting unavailable, keeping current order.", name_));
+  }
+  catch(const std::exception& e)
+  {
+    log_(Log::LOG_WARNING,
+         std::format("Deployer '{}': LOOT sorting failed ({}), keeping current order.",
+                     name_,
+                     e.what()));
+  }
 
+  // Always enforce OpenMW's grouping: scripts, then groundcover, then regular plugins.
   auto groups = getConflictGroups();
   std::vector<std::pair<std::string, bool>> new_plugins;
   new_plugins.reserve(plugins_.size());
