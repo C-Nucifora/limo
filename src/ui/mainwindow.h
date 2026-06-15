@@ -187,6 +187,9 @@ private:
   QAction* edit_deployer_action_;
   // fork #53: action used to verify deployment integrity for the current deployer.
   QAction* verify_deployer_action_;
+  // fork #31: action opening the LOOT user-metadata (userlist.yaml) editor.
+  /*! \brief Action used to edit LOOT user metadata for the current LOOT deployer. */
+  QAction* edit_loot_userlist_action_;
   /*! \brief Action used to add a new profile. */
   QAction* add_profile_action_;
   /*! \brief Action used to remove a profile. */
@@ -875,6 +878,9 @@ private slots:
   void onEditDeployerMenuClicked();
   // fork #53: runs deployment integrity verification for the current deployer and shows the result.
   void onVerifyDeployerMenuClicked();
+  // fork #31: opens the LOOT user-metadata editor for the current LOOT deployer.
+  /*! \brief Shows a dialog to edit LOOT user metadata (userlist.yaml). */
+  void onEditLootUserlistMenuClicked();
   /*! \brief Updates the currently active profile. */
   void on_profile_selection_box_currentIndexChanged(int index);
   /*! \brief Shows a dialog to add a new profile. */
