@@ -619,6 +619,8 @@ void ModdedApplication::setProfile(int profile)
   for(const auto& deployer : deployers_)
     deployer->setProfile(profile);
   current_profile_ = profile;
+  // Persist the active profile so it is remembered across restarts.
+  updateSettings(true);
 }
 
 void ModdedApplication::addProfile(const EditProfileInfo& info)
@@ -1834,6 +1836,11 @@ void ModdedApplication::updateSettings(bool write)
   for(int i = 0; i < mod_rules_.size(); i++)
     json_settings_["mod_rules"][i] = mod_rules_[i].toJson();
 
+  // Persist the active profile so the user's selection is restored on restart.
+  // Without this the currently selected profile was never written and always
+  // reset to 0 on the next launch.
+  json_settings_["current_profile"] = current_profile_;
+
   if(write)
     writeSettings();
 }
@@ -1955,6 +1962,18 @@ void ModdedApplication::updateState(bool read)
   {
     profile_names_.push_back(profiles[i]["name"].asString());
     app_versions_.push_back(profiles[i]["app_version"].asString());
+  }
+
+  // Restore the previously active profile. This is read before the deployer
+  // loop below so the deployers/backup manager are set to the correct profile.
+  // Older config files may not contain this field, in which case profile 0 is
+  // used. The value is bounds-checked against the available profiles.
+  current_profile_ = 0;
+  if(json_settings_.isMember("current_profile"))
+  {
+    int stored_profile = json_settings_["current_profile"].asInt();
+    if(stored_profile >= 0 && stored_profile < profile_names_.size())
+      current_profile_ = stored_profile;
   }
 
   Json::Value installed_mods = json_settings_["installed_mods"];
