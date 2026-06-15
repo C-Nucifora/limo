@@ -17,8 +17,14 @@ void FomodCheckBox::enterEvent(QEvent* event)
   description_label_->setText(description_);
   QPixmap pixmap(image_path_);
   if(!pixmap.isNull())
-    image_label_->setPixmap(
-      pixmap.scaled({ std::min(512, pixmap.width()), pixmap.height() }, Qt::KeepAspectRatio));
+  {
+    // Fix limo-app/limo#97: scale to the label's actual size rather than a fixed
+    // 512 px cap so the preview fills the available info-panel space.
+    QSize target = image_label_->size();
+    if(!target.isValid() || target.isEmpty())
+      target = { 512, 512 };
+    image_label_->setPixmap(pixmap.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+  }
   else
     image_label_->setPixmap(pixmap);
   QCheckBox::enterEvent(event);
