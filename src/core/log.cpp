@@ -1,9 +1,28 @@
 #include "log.h"
 #include <chrono>
+#include <deque>
 #include <fstream>
 #include <iomanip>
+#include <mutex>
 
 namespace sfs = std::filesystem;
+
+namespace
+{
+/*! \brief Ring buffer holding the most recently logged messages. */
+std::deque<Log::LogEntry> log_buffer;
+/*! \brief Guards access to log_buffer from multiple threads. */
+std::mutex log_buffer_mutex;
+
+/*! \brief Appends a formatted message to the in-memory ring buffer. */
+void recordLogEntry(const std::string& message, Log::LogLevel log_level)
+{
+  std::lock_guard<std::mutex> lock(log_buffer_mutex);
+  log_buffer.push_back({ log_level, message, std::chrono::system_clock::now() });
+  while(log_buffer.size() > Log::max_log_buffer_size)
+    log_buffer.pop_front();
+}
+}
 
 inline constexpr std::string default_log_file_name = "limo_log";
 inline constexpr std::string default_log_file_extension = ".txt";
@@ -23,6 +42,10 @@ std::string getTimestamp(Log::LogLevel log_level)
 
 void writeLog(const std::string& message, Log::LogLevel log_level, int target_printer = 0)
 {
+  // Additively record every message into the in-memory ring buffer for the
+  // in-app log viewer, regardless of the active log level or printers.
+  recordLogEntry(message, log_level);
+
   if(Log::log_level >= log_level && Log::log_printers.size() > target_printer)
     Log::log_printers[target_printer](message, log_level);
 
@@ -56,6 +79,27 @@ std::string getLogFileName(int log_num)
 
 namespace Log
 {
+std::vector<LogEntry> getRecentLogs(LogLevel min_level)
+{
+  std::lock_guard<std::mutex> lock(log_buffer_mutex);
+  std::vector<LogEntry> result;
+  result.reserve(log_buffer.size());
+  for(const auto& entry : log_buffer)
+  {
+    // Lower enum value == higher importance, so "at least as important as
+    // min_level" means entry.level <= min_level.
+    if(entry.level <= min_level)
+      result.push_back(entry);
+  }
+  return result;
+}
+
+void clearLogBuffer()
+{
+  std::lock_guard<std::mutex> lock(log_buffer_mutex);
+  log_buffer.clear();
+}
+
 void error(const std::string& message, int target_printer)
 {
   writeLog(getTimestamp(Log::LOG_ERROR) + " [Error]: " + message, LOG_ERROR, target_printer);
