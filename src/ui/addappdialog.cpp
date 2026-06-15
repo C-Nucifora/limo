@@ -325,6 +325,92 @@ void AddAppDialog::updateDetectedPath()
   ui->detected_path_label->setText(steam_install_path_);
 }
 
+void AddAppDialog::loadHooksFromConfig(const QString& staging_dir)
+{
+  ui->pre_deploy_field->setText("");
+  ui->post_deploy_field->setText("");
+  ui->pre_undeploy_field->setText("");
+  ui->post_undeploy_field->setText("");
+
+  if(staging_dir.isEmpty())
+    return;
+  const sfs::path config_path =
+    sfs::path(staging_dir.toStdString()) / ModdedApplication::CONFIG_FILE_NAME;
+  if(!sfs::exists(config_path))
+    return;
+
+  Json::Value json;
+  std::ifstream file(config_path, std::fstream::binary);
+  if(!file.is_open())
+    return;
+  try
+  {
+    file >> json;
+  }
+  catch(...)
+  {
+    Log::debug("Failed to read hooks from app config at: " + config_path.string());
+    return;
+  }
+
+  if(!json.isMember(JSON_HOOKS_GROUP))
+    return;
+  const Json::Value hooks = json[JSON_HOOKS_GROUP];
+  if(hooks.isMember(JSON_HOOK_PRE_DEPLOY))
+    ui->pre_deploy_field->setText(hooks[JSON_HOOK_PRE_DEPLOY].asCString());
+  if(hooks.isMember(JSON_HOOK_POST_DEPLOY))
+    ui->post_deploy_field->setText(hooks[JSON_HOOK_POST_DEPLOY].asCString());
+  if(hooks.isMember(JSON_HOOK_PRE_UNDEPLOY))
+    ui->pre_undeploy_field->setText(hooks[JSON_HOOK_PRE_UNDEPLOY].asCString());
+  if(hooks.isMember(JSON_HOOK_POST_UNDEPLOY))
+    ui->post_undeploy_field->setText(hooks[JSON_HOOK_POST_UNDEPLOY].asCString());
+}
+
+void AddAppDialog::saveHooksToConfig(const QString& staging_dir)
+{
+  if(staging_dir.isEmpty())
+    return;
+  const sfs::path config_path =
+    sfs::path(staging_dir.toStdString()) / ModdedApplication::CONFIG_FILE_NAME;
+  // Only an existing app config can carry hooks. For freshly created apps the
+  // config file does not exist yet at this point; hooks can be set later by
+  // editing the application.
+  if(!sfs::exists(config_path))
+    return;
+
+  Json::Value json;
+  {
+    std::ifstream file(config_path, std::fstream::binary);
+    if(!file.is_open())
+    {
+      Log::debug("Failed to open app config to save hooks at: " + config_path.string());
+      return;
+    }
+    try
+    {
+      file >> json;
+    }
+    catch(...)
+    {
+      Log::debug("Failed to parse app config to save hooks at: " + config_path.string());
+      return;
+    }
+  }
+
+  json[JSON_HOOKS_GROUP][JSON_HOOK_PRE_DEPLOY] = ui->pre_deploy_field->text().toStdString();
+  json[JSON_HOOKS_GROUP][JSON_HOOK_POST_DEPLOY] = ui->post_deploy_field->text().toStdString();
+  json[JSON_HOOKS_GROUP][JSON_HOOK_PRE_UNDEPLOY] = ui->pre_undeploy_field->text().toStdString();
+  json[JSON_HOOKS_GROUP][JSON_HOOK_POST_UNDEPLOY] = ui->post_undeploy_field->text().toStdString();
+
+  std::ofstream out(config_path, std::fstream::binary);
+  if(!out.is_open())
+  {
+    Log::debug("Failed to write hooks to app config at: " + config_path.string());
+    return;
+  }
+  out << json;
+}
+
 void AddAppDialog::setEditMode(const QString& name,
                                const QString& app_version,
                                const QString& path,
@@ -362,6 +448,7 @@ void AddAppDialog::setEditMode(const QString& name,
   ui->path_field->setText(path);
   ui->command_field->setText(command);
   updateDetectedPath();
+  loadHooksFromConfig(path);
   dialog_completed_ = false;
 }
 
@@ -386,6 +473,7 @@ void AddAppDialog::setAddMode()
   ui->icon_picker_button->setIcon(QIcon::fromTheme("folder-open"));
   ui->path_field->setText("");
   ui->command_field->setText("");
+  loadHooksFromConfig("");
   enableOkButton(false);
   edit_mode_ = false;
   ui->move_dir_box->setVisible(false);
@@ -408,6 +496,13 @@ void AddAppDialog::on_buttonBox_accepted()
   if(edit_mode_)
   {
     info.move_staging_dir = ui->move_dir_box->checkState() == Qt::Checked;
+    // Persist hooks directly into the app config. EditApplicationInfo lives in an
+    // out-of-scope header and can not carry the hook strings, so we write them to
+    // lmm_mods.json here. ModdedApplication reads them back via its "hooks" key.
+    // Note: if the app config is rewritten from the live in-memory object before
+    // it reloads these values (e.g. by the edit operation itself), the change
+    // takes effect on the next app reload / program start.
+    saveHooksToConfig(ui->path_field->text());
     emit applicationEdited(info, app_id_);
   }
   else
