@@ -1065,6 +1065,88 @@ Deployer::VerificationResult Deployer::verifyDeployment(
   return result;
 }
 
+// fork #50: 'Problems' / health-check panel
+Deployer::HealthCheckResult Deployer::runHealthCheck(
+  bool checksum,
+  std::optional<ProgressNode*> progress_node) const
+{
+  log_(Log::LOG_INFO, std::format("Deployer '{}': Running health check...", name_));
+
+  HealthCheckResult result;
+  result.deployer_name = name_;
+
+  // The enabled load order, mirroring how computeDeploymentPlan() / deploy() select mods.
+  std::vector<int> loadorder;
+  for(auto const& lo : *loadorders_[current_profile_])
+  {
+    auto mod_info = std::static_pointer_cast<DeployerModInfo>(lo.lock());
+    if(mod_info && !mod_info->isSeparator && mod_info->enabled)
+      loadorder.push_back(mod_info->id);
+  }
+  const std::set<int> enabled_mods(loadorder.begin(), loadorder.end());
+
+  // Broken/incorrect links and missing files: reuse the verification logic verbatim.
+  result.verification = verifyDeployment(checksum, progress_node);
+
+  // Orphaned files: recorded as deployed in .lmmfiles but owned by a mod which is no longer in
+  // the enabled load order, so a deploy would not re-create them.
+  const std::map<sfs::path, int> deployed_files = loadDeployedFiles();
+  for(const auto& [path, mod_id] : deployed_files)
+  {
+    // Directory records are not deployed files; skip them.
+    if(sfs::is_directory(dest_path_ / path))
+      continue;
+    if(!enabled_mods.contains(mod_id))
+      result.orphaned.push_back(path);
+  }
+
+  // Conflicts: enumerate the files each enabled mod would provide (the same enumeration deploy()
+  // uses) and record every path claimed by more than one mod. The winner is the mod deepest in
+  // the load order, matching how getDeploymentSourceFilesAndModSizes resolves overwrites.
+  std::map<sfs::path, std::vector<int>> providers;
+  for(int mod_id : loadorder)
+  {
+    if(!checkModPathExistsAndMaybeLogError(mod_id))
+      continue;
+    const sfs::path mod_base_path = source_path_ / std::to_string(mod_id);
+    for(auto const& dir_entry : sfs::recursive_directory_iterator(mod_base_path))
+    {
+      if(dir_entry.is_symlink() || !dir_entry.is_regular_file())
+        continue;
+      if(isIgnoredFile(dir_entry.path()))
+        continue;
+      providers[pu::getRelativePath(dir_entry.path(), mod_base_path)].push_back(mod_id);
+    }
+  }
+  for(auto& [path, mod_ids] : providers)
+  {
+    if(mod_ids.size() < 2)
+      continue;
+    // The winner is the last enabled mod in the load order which provides this path.
+    int winner = mod_ids.front();
+    for(int mod_id : loadorder)
+    {
+      if(str::find(mod_ids, mod_id) != mod_ids.end())
+        winner = mod_id;
+    }
+    result.conflicts.push_back({ path, winner, std::move(mod_ids) });
+  }
+
+  if(result.isHealthy())
+    log_(Log::LOG_INFO, std::format("Deployer '{}': Health check found no problems", name_));
+  else
+    log_(Log::LOG_WARNING,
+         std::format("Deployer '{}': Health check found {} problems: {} orphaned, "
+                     "{} broken/incorrect links, {} conflicts",
+                     name_,
+                     result.numProblems(),
+                     result.orphaned.size(),
+                     result.numBrokenLinks(),
+                     result.conflicts.size()));
+
+  return result;
+}
+
 void Deployer::keepOrRevertFileModifications(const FileChangeChoices& changes_to_keep)
 {
   if(deploy_mode_ == copy)

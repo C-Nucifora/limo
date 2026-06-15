@@ -21,6 +21,7 @@
 #include "deployerlistview.h"
 #include "deploypreviewdialog.h" // fork feature #49: deploy dry-run / preview
 #include "deployverifydialog.h" // fork #53
+#include "healthcheckdialog.h" // fork #50
 #include "editmanualtagsdialog.h"
 #include "enterapipwdialog.h"
 #include "lootuserlistdialog.h" // fork #31
@@ -1082,6 +1083,15 @@ void MainWindow::setupButtons()
   verify_deployer_action_->setIcon(QIcon::fromTheme("emblem-checked"));
   connect(
     verify_deployer_action_, &QAction::triggered, this, &MainWindow::onVerifyDeployerMenuClicked);
+  // fork #50: health-check action.
+  health_check_deployer_action_ = new QAction(this);
+  health_check_deployer_action_->setToolTip("Check the deployment for problems");
+  health_check_deployer_action_->setText("Health Check");
+  health_check_deployer_action_->setIcon(QIcon::fromTheme("emblem-important"));
+  connect(health_check_deployer_action_,
+          &QAction::triggered,
+          this,
+          &MainWindow::onHealthCheckDeployerMenuClicked);
   // fork #31: action to open the LOOT user-metadata (userlist.yaml) editor.
   edit_loot_userlist_action_ = new QAction(this);
   edit_loot_userlist_action_->setToolTip("Edit LOOT user metadata (groups, load-after rules)");
@@ -1096,6 +1106,7 @@ void MainWindow::setupButtons()
                                              remove_deployer_action_,
                                              edit_deployer_action_,
                                              verify_deployer_action_,
+                                             health_check_deployer_action_, // fork #50
                                              edit_loot_userlist_action_, // fork #31
                                              ui->actionbrowse_deployer_files });
   ui->deployer_tool_button->setDefaultAction(add_deployer_action_);
@@ -3085,6 +3096,42 @@ void MainWindow::onVerifyDeployerMenuClicked()
   catch(const std::exception& error)
   {
     onReceiveError("Error", QString("Could not verify deployment: ") + error.what());
+  }
+}
+
+// fork #50: run a read-only health check for the current deployer and show the aggregated problems.
+// Mirrors onVerifyDeployerMenuClicked: builds a transient Deployer from the displayed
+// source/target paths and deploy mode. runHealthCheck performs no disk writes.
+void MainWindow::onHealthCheckDeployerMenuClicked()
+{
+  const int deployer = currentDeployer();
+  if(deployer < 0 || deployer >= static_cast<int>(deployer_source_paths_.size()) ||
+     deployer >= static_cast<int>(deployer_target_paths_.size()))
+    return;
+
+  const QString name =
+    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Name"))->text();
+  const QString deploy_mode_string =
+    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Mode"))->text();
+  Deployer::DeployMode deploy_mode = Deployer::hard_link;
+  if(deploy_mode_string == deploy_mode_sym_link)
+    deploy_mode = Deployer::sym_link;
+  else if(deploy_mode_string == deploy_mode_copy)
+    deploy_mode = Deployer::copy;
+
+  try
+  {
+    Deployer checker(deployer_source_paths_[deployer].toStdString(),
+                     deployer_target_paths_[deployer].toStdString(),
+                     name.toStdString(),
+                     deploy_mode);
+    const Deployer::HealthCheckResult result = checker.runHealthCheck();
+    HealthCheckDialog dialog(result, this);
+    dialog.exec();
+  }
+  catch(const std::exception& error)
+  {
+    onReceiveError("Error", QString("Could not run health check: ") + error.what());
   }
 }
 

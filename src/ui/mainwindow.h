@@ -187,6 +187,8 @@ private:
   QAction* edit_deployer_action_;
   // fork #53: action used to verify deployment integrity for the current deployer.
   QAction* verify_deployer_action_;
+  // fork #50: action used to run a health check for the current deployer.
+  QAction* health_check_deployer_action_;
   // fork #31: action opening the LOOT user-metadata (userlist.yaml) editor.
   /*! \brief Action used to edit LOOT user metadata for the current LOOT deployer. */
   QAction* edit_loot_userlist_action_;
@@ -878,6 +880,8 @@ private slots:
   void onEditDeployerMenuClicked();
   // fork #53: runs deployment integrity verification for the current deployer and shows the result.
   void onVerifyDeployerMenuClicked();
+  // fork #50: runs a health check for the current deployer and shows the aggregated problems.
+  void onHealthCheckDeployerMenuClicked();
   // fork #31: opens the LOOT user-metadata editor for the current LOOT deployer.
   /*! \brief Shows a dialog to edit LOOT user metadata (userlist.yaml). */
   void onEditLootUserlistMenuClicked();
