@@ -23,6 +23,7 @@
 #include "deployverifydialog.h" // fork #53
 #include "editmanualtagsdialog.h"
 #include "enterapipwdialog.h"
+#include "lootuserlistdialog.h" // fork #31
 #include "modlistproxymodel.h"
 #include "movemoddialog.h"
 #include "settingsdialog.h"
@@ -1081,11 +1082,21 @@ void MainWindow::setupButtons()
   verify_deployer_action_->setIcon(QIcon::fromTheme("emblem-checked"));
   connect(
     verify_deployer_action_, &QAction::triggered, this, &MainWindow::onVerifyDeployerMenuClicked);
+  // fork #31: action to open the LOOT user-metadata (userlist.yaml) editor.
+  edit_loot_userlist_action_ = new QAction(this);
+  edit_loot_userlist_action_->setToolTip("Edit LOOT user metadata (groups, load-after rules)");
+  edit_loot_userlist_action_->setText("Edit LOOT user metadata");
+  edit_loot_userlist_action_->setIcon(QIcon::fromTheme("editor"));
+  connect(edit_loot_userlist_action_,
+          &QAction::triggered,
+          this,
+          &MainWindow::onEditLootUserlistMenuClicked);
   QMenu* deployer_menu = new QMenu(this);
   deployer_menu->addActions(QList<QAction*>{ add_deployer_action_,
                                              remove_deployer_action_,
                                              edit_deployer_action_,
                                              verify_deployer_action_,
+                                             edit_loot_userlist_action_, // fork #31
                                              ui->actionbrowse_deployer_files });
   ui->deployer_tool_button->setDefaultAction(add_deployer_action_);
   ui->deployer_tool_button->setMenu(deployer_menu);
@@ -3074,6 +3085,33 @@ void MainWindow::onVerifyDeployerMenuClicked()
   catch(const std::exception& error)
   {
     onReceiveError("Error", QString("Could not verify deployment: ") + error.what());
+  }
+}
+
+// fork #31: opens the LOOT user-metadata editor for the current LOOT deployer.
+// The actual deployers live on a worker thread (ApplicationManager) and the GUI
+// thread has no access to their source/target paths, so we ask the user for the
+// two directories the LootDeployer needs: the plugin source directory and the
+// target directory that holds plugins.txt/loadorder.txt and userlist.yaml.
+void MainWindow::onEditLootUserlistMenuClicked()
+{
+  const QString source_dir = QFileDialog::getExistingDirectory(
+    this, "Select the LOOT deployer's plugin source directory");
+  if(source_dir.isEmpty())
+    return;
+  const QString dest_dir = QFileDialog::getExistingDirectory(
+    this, "Select the LOOT deployer's target directory (contains userlist.yaml)");
+  if(dest_dir.isEmpty())
+    return;
+  try
+  {
+    LootUserlistDialog dialog(source_dir.toStdString(), dest_dir.toStdString(), this);
+    dialog.exec();
+  }
+  catch(const std::exception& e)
+  {
+    QMessageBox::critical(
+      this, "Error", QString("Could not open the LOOT user metadata editor:\n") + e.what());
   }
 }
 

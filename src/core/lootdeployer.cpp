@@ -301,6 +301,78 @@ std::map<std::string, int> LootDeployer::getAutoTagMap()
            { STANDARD_PLUGIN, num_standard_plugins_ } };
 }
 
+// fork #31: read currently loaded user metadata for every managed plugin.
+std::vector<LootDeployer::PluginUserMetadata> LootDeployer::getPluginUserMetadata()
+{
+  auto loot_handle = loot::CreateGameHandle(app_type_, source_path_, dest_path_);
+  sfs::path user_list_path(dest_path_ / "userlist.yaml");
+  if(sfs::exists(user_list_path))
+    loot_handle->GetDatabase().LoadUserlist(user_list_path);
+
+  std::vector<PluginUserMetadata> result;
+  result.reserve(plugins_.size());
+  for(const auto& [plugin, enabled] : plugins_)
+  {
+    PluginUserMetadata entry;
+    entry.plugin = plugin;
+    // GetPluginUserMetadata only returns user-added metadata, not masterlist data.
+    auto meta_data = loot_handle->GetDatabase().GetPluginUserMetadata(plugin);
+    if(meta_data)
+    {
+      if(auto group = meta_data->GetGroup())
+        entry.group = *group;
+      for(const auto& file : meta_data->GetLoadAfterFiles())
+        entry.load_after.push_back(static_cast<std::string>(file.GetName()));
+    }
+    result.push_back(std::move(entry));
+  }
+  return result;
+}
+
+// fork #31: write per-plugin user metadata back to userlist.yaml, preserving any
+// user metadata Limo does not model by round-tripping through libloot.
+void LootDeployer::writePluginUserMetadata(const std::vector<PluginUserMetadata>& metadata)
+{
+  auto loot_handle = loot::CreateGameHandle(app_type_, source_path_, dest_path_);
+  sfs::path user_list_path(dest_path_ / "userlist.yaml");
+  // Load the existing userlist so unmodelled fields survive the round-trip.
+  if(sfs::exists(user_list_path))
+    loot_handle->GetDatabase().LoadUserlist(user_list_path);
+
+  for(const auto& entry : metadata)
+  {
+    // Start from the plugin's existing user metadata so that fields Limo does not
+    // model (messages, tags, dirty/clean info, locations, requirements, ...) are kept.
+    auto existing = loot_handle->GetDatabase().GetPluginUserMetadata(entry.plugin);
+    loot::PluginMetadata plugin_meta = existing ? *existing : loot::PluginMetadata(entry.plugin);
+
+    if(entry.group.empty())
+      plugin_meta.UnsetGroup();
+    else
+      plugin_meta.SetGroup(entry.group);
+
+    std::vector<loot::File> load_after;
+    load_after.reserve(entry.load_after.size());
+    for(const auto& file : entry.load_after)
+    {
+      if(!file.empty())
+        load_after.emplace_back(file);
+    }
+    plugin_meta.SetLoadAfterFiles(load_after);
+
+    // For non-regex plugin names this replaces the existing user metadata entry.
+    loot_handle->GetDatabase().SetPluginUserMetadata(plugin_meta);
+  }
+
+  loot::MetadataWriteOptions options;
+  options.SetTruncate(true);
+  loot_handle->GetDatabase().WriteUserMetadata(user_list_path, options);
+  log_(Log::LOG_INFO,
+       std::format("LOOT: Wrote user metadata for {} plugins to '{}'",
+                   metadata.size(),
+                   user_list_path.string()));
+}
+
 void LootDeployer::writePlugins() const
 {
   PluginDeployer::writePlugins();

@@ -114,6 +114,45 @@ public:
    */
   virtual std::map<std::string, int> getAutoTagMap() override;
 
+  // fork #31: LOOT user-metadata (userlist.yaml) editing support.
+  /*!
+   * \brief Simple, UI friendly representation of a single plugin's user metadata
+   * as stored in userlist.yaml. Only the fields editable through Limo are modelled
+   * here; any other user metadata (messages, tags, dirty/clean info, ...) is left
+   * untouched by Limo and round-tripped through libloot when writing.
+   */
+  struct PluginUserMetadata
+  {
+    /*! \brief File name of the plugin this metadata belongs to. */
+    std::string plugin;
+    /*! \brief Group the plugin is assigned to, empty if no explicit group is set. */
+    std::string group;
+    /*! \brief File names of plugins this plugin must load after. */
+    std::vector<std::string> load_after;
+  };
+
+  /*!
+   * \brief Reads the currently loaded user metadata (from userlist.yaml) for every
+   * plugin managed by this deployer into a simple, editable representation.
+   * \return One \ref PluginUserMetadata entry per currently loaded plugin, in load order.
+   * Plugins without any user metadata are included with empty group/load_after fields so
+   * the editor can populate them.
+   */
+  std::vector<PluginUserMetadata> getPluginUserMetadata();
+  /*!
+   * \brief Writes the given per-plugin user metadata to userlist.yaml in the target
+   * directory.
+   * \details The existing userlist.yaml (if any) is loaded through libloot first, so that
+   * user metadata Limo does not model (messages, tags, dirty/clean info, locations,
+   * requirements, incompatibilities, general messages, known bash tags and group
+   * definitions) is preserved. For every plugin present in \p metadata, only its group
+   * and load-after files are overwritten; all other fields of that plugin's metadata are
+   * kept. Plugins not present in \p metadata are left as-is. The file is then re-serialised
+   * by libloot, so the result is always valid LOOT metadata.
+   * \param metadata The per-plugin user metadata to apply.
+   */
+  void writePluginUserMetadata(const std::vector<PluginUserMetadata>& metadata);
+
 protected:
   /*! \brief Name of the file containing plugin load order. */
   static constexpr std::string LOADORDER_FILE_NAME = "loadorder.txt";

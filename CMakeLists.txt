@@ -369,6 +369,9 @@ set(PROJECT_SOURCES
         src/ui/ipcserver.h
         src/ui/listaction.cpp
         src/ui/listaction.h
+        src/ui/lootuserlistdialog.cpp
+        src/ui/lootuserlistdialog.h
+        src/ui/lootuserlistdialog.ui
         src/ui/mainwindow.cpp
         src/ui/mainwindow.h
         src/ui/mainwindow.ui
