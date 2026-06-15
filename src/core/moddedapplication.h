@@ -121,11 +121,27 @@ public:
                              std::optional<ProgressNode*> progress_node = {});
   /*!
    * \brief Enables or disables the given mod in the load order for given Deployer.
-   * \param deployer The target Deployer
+   *
+   * Issue #65: If the mod id is shared by several (non-autonomous) deployers, e.g. because the
+   * mod was split across a Data deployer and a plugin deployer, the new status is applied to
+   * every deployer containing the mod id so the split mod toggles together. See
+   * \ref setModStatusAcrossDeployers.
+   * \param deployer The deployer the toggle originated from.
    * \param mod_id Mod to be edited.
    * \param status The new status.
    */
   void setModStatus(int deployer, int mod_id, bool status);
+  /*!
+   * \brief Enables or disables the given mod in every non-autonomous deployer that contains it.
+   *
+   * The given source deployer is always updated; all other non-autonomous deployers are only
+   * updated if they currently contain the mod id. Autonomous deployers are skipped. Persists
+   * the result.
+   * \param source_deployer The deployer the toggle originated from.
+   * \param mod_id Mod to be edited.
+   * \param status The new status.
+   */
+  void setModStatusAcrossDeployers(int source_deployer, int mod_id, bool status);
   /*!
    * \brief Adds a new Deployer of given type.
    * \param info Contains all data needed to create a deployer, e.g. its name.
