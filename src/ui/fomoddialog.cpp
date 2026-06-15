@@ -9,6 +9,9 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QRadioButton>
+#include <format>
+#include <fstream>
+#include <json/json.h>
 
 namespace sfs = std::filesystem;
 
@@ -36,12 +39,18 @@ void FomodDialog::setupDialog(const sfs::path& config_file,
                               const QString& app_version,
                               const ImportModInfo& info,
                               int app_id,
-                              bool paths_are_case_invariant)
+                              bool paths_are_case_invariant,
+                              const sfs::path& choices_path)
 {
   dialog_completed_ = false;
   import_mod_info_ = info;
   app_id_ = app_id;
   paths_are_case_invariant_ = paths_are_case_invariant;
+  /* Set up choices persistence (fork #135 / limo-app/limo#256). */
+  choices_file_ = choices_path.empty() ? sfs::path{} : choices_path / ".fomod_choices.json";
+  saved_choices_.clear();
+  current_choices_.clear();
+  loadChoices();
   installer_->init(config_file, paths_are_case_invariant, target_path, app_version.toStdString());
   back_button_->setVisible(false);
   has_no_steps_ = installer_->hasNoSteps();
@@ -186,6 +195,33 @@ void FomodDialog::updateInstallStep(
     group_layout->addWidget(box);
     group_idx++;
   }
+
+  /* Pre-select previously saved choices for this step (fork #135 / limo-app/limo#256).
+   * Only applied for forward navigation (not stepBack, which restores from prev_selections_). */
+  if(!prev_step && !saved_choices_.empty())
+  {
+    const auto pre_sel = installer_->applyNamedChoices(saved_choices_);
+    /* pre_sel is indexed by group, skipping the "None" dummy button in at_most_one groups. */
+    for(int gi = 0; gi < button_groups_.size() && gi < static_cast<int>(pre_sel.size()); gi++)
+    {
+      const auto& group_sel = pre_sel[gi];
+      bool any_saved = false;
+      for(bool b : group_sel)
+        any_saved = any_saved || b;
+      if(!any_saved)
+        continue; /* No saved choice for this group — keep defaults. */
+      const auto buttons = button_groups_[gi]->buttons();
+      /* For at_most_one groups, button index 0 is the "None" dummy — skip it. */
+      int btn_offset = none_groups_.contains(gi) ? 1 : 0;
+      for(int pi = 0; pi < static_cast<int>(group_sel.size()); pi++)
+      {
+        int btn_idx = pi + btn_offset;
+        if(btn_idx < buttons.size())
+          buttons[btn_idx]->setChecked(group_sel[pi]);
+      }
+    }
+  }
+
   group_layout->addStretch();
   next_button_->setEnabled(selectionIsValid());
   updateNextButton();
@@ -272,9 +308,21 @@ void FomodDialog::onNextButtonPressed()
   ui->description_label->setText("");
   ui->image_label->setPixmap({});
   if(next_button_->text() == "Next")
+  {
+    /* Record named choices for the current step before advancing
+     * (fork #135 / limo-app/limo#256). */
+    const auto step_choices = installer_->getStepChoiceNames(getSelection());
+    current_choices_.insert(step_choices.begin(), step_choices.end());
     updateInstallStep();
+  }
   else
   {
+    /* Record named choices for the final step, then persist to disk
+     * (fork #135 / limo-app/limo#256). */
+    const auto step_choices = installer_->getStepChoiceNames(getSelection());
+    current_choices_.insert(step_choices.begin(), step_choices.end());
+    saveChoices();
+
     dialog_completed_ = true;
     result_ = installer_->getInstallationFiles(getSelection());
     if(result_.empty())
@@ -312,3 +360,77 @@ void FomodDialog::on_buttonBox_rejected()
   dialog_completed_ = true;
   emit addModAborted();
 }
+
+void FomodDialog::loadChoices()
+{
+  /* Load previously persisted FOMOD choices from the sidecar JSON.
+   * Fork #135 / limo-app/limo#256. */
+  if(choices_file_.empty() || !sfs::exists(choices_file_))
+    return;
+  try
+  {
+    std::ifstream file(choices_file_);
+    if(!file.is_open())
+      return;
+    Json::Value root;
+    Json::CharReaderBuilder builder;
+    std::string errs;
+    if(!Json::parseFromStream(builder, file, &root, &errs))
+    {
+      Log::warning(std::format("Failed to parse FOMOD choices file '{}': {}",
+                               choices_file_.string(),
+                               errs));
+      return;
+    }
+    for(const auto& key : root.getMemberNames())
+    {
+      std::set<std::string> plugin_names;
+      for(const auto& name : root[key])
+        plugin_names.insert(name.asString());
+      saved_choices_[key] = std::move(plugin_names);
+    }
+  }
+  catch(const std::exception& e)
+  {
+    Log::warning(std::format("Could not load FOMOD choices from '{}': {}",
+                             choices_file_.string(),
+                             e.what()));
+  }
+}
+
+void FomodDialog::saveChoices()
+{
+  /* Persist the current session's named choices to the sidecar JSON.
+   * Fork #135 / limo-app/limo#256. */
+  if(choices_file_.empty() || current_choices_.empty())
+    return;
+  try
+  {
+    Json::Value root(Json::objectValue);
+    for(const auto& [key, names] : current_choices_)
+    {
+      Json::Value arr(Json::arrayValue);
+      for(const auto& name : names)
+        arr.append(name);
+      root[key] = arr;
+    }
+    Json::StreamWriterBuilder builder;
+    builder["indentation"] = "  ";
+    std::ofstream file(choices_file_);
+    if(!file.is_open())
+    {
+      Log::warning(std::format("Could not open FOMOD choices file '{}' for writing",
+                               choices_file_.string()));
+      return;
+    }
+    std::unique_ptr<Json::StreamWriter> writer(builder.newStreamWriter());
+    writer->write(root, &file);
+  }
+  catch(const std::exception& e)
+  {
+    Log::warning(std::format("Could not save FOMOD choices to '{}': {}",
+                             choices_file_.string(),
+                             e.what()));
+  }
+}
+

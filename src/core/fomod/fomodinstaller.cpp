@@ -380,6 +380,62 @@ void FomodInstaller::updateState(const std::vector<std::vector<bool>>& selection
   std::stable_sort(files_.begin(), files_.end());
 }
 
+std::map<std::string, std::set<std::string>> FomodInstaller::getStepChoiceNames(
+  const std::vector<std::vector<bool>>& selection) const
+{
+  /* Returns named choices for the current step so the dialog can persist them.
+   * Fork #135 / limo-app/limo#256. */
+  std::map<std::string, std::set<std::string>> result;
+  if(cur_step_ < 0 || cur_step_ >= static_cast<int>(steps_.size()))
+    return result;
+  const auto& step = steps_[cur_step_];
+  for(int group_idx = 0; group_idx < static_cast<int>(step.groups.size()); group_idx++)
+  {
+    const auto& group = step.groups[group_idx];
+    const std::string key = step.name + "\x1f" + group.name;
+    std::set<std::string> selected_names;
+    if(group_idx < static_cast<int>(selection.size()))
+    {
+      for(int plugin_idx = 0; plugin_idx < static_cast<int>(group.plugins.size()); plugin_idx++)
+      {
+        if(plugin_idx < static_cast<int>(selection[group_idx].size()) &&
+           selection[group_idx][plugin_idx])
+          selected_names.insert(group.plugins[plugin_idx].name);
+      }
+    }
+    result[key] = selected_names;
+  }
+  return result;
+}
+
+std::vector<std::vector<bool>> FomodInstaller::applyNamedChoices(
+  const std::map<std::string, std::set<std::string>>& saved) const
+{
+  /* Converts a persisted named-choice map back to a bool selection vector for the current step.
+   * Unknown names are ignored; groups with no saved data remain all-false.
+   * Fork #135 / limo-app/limo#256. */
+  std::vector<std::vector<bool>> selection;
+  if(cur_step_ < 0 || cur_step_ >= static_cast<int>(steps_.size()))
+    return selection;
+  const auto& step = steps_[cur_step_];
+  for(const auto& group : step.groups)
+  {
+    const std::string key = step.name + "\x1f" + group.name;
+    std::vector<bool> group_vec(group.plugins.size(), false);
+    auto it = saved.find(key);
+    if(it != saved.end())
+    {
+      for(int plugin_idx = 0; plugin_idx < static_cast<int>(group.plugins.size()); plugin_idx++)
+      {
+        if(it->second.count(group.plugins[plugin_idx].name))
+          group_vec[plugin_idx] = true;
+      }
+    }
+    selection.push_back(group_vec);
+  }
+  return selection;
+}
+
 std::pair<std::string, std::string> FomodInstaller::getFomodPath(const sfs::path& source,
                                                                  const std::string& file_name)
 {

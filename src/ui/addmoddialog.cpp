@@ -544,7 +544,9 @@ void AddModDialog::on_buttonBox_accepted()
       app_version_,
       import_mod_info_,
       import_mod_info_.app_id,
-      case_invariant);
+      case_invariant,
+      import_mod_info_.current_path /* choices_path: sidecar lives alongside the mod staging dir
+                                       (fork #135 / limo-app/limo#256) */);
     if(!fomod_dialog_->hasSteps())
     {
       import_mod_info_.files = fomod_dialog_->getResult();
