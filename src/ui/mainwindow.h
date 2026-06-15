@@ -21,6 +21,7 @@
 // fork #8: persistent download queue panel
 #include "downloadswidget.h"
 #include "conflictsmodel.h"
+#include "core/deployer.h" // fork feature #49: Deployer::DeploymentPlan
 #include "core/importmodinfo.h"
 #include "managegroupsdialog.h"
 #include "managemodrulesdialog.h"
@@ -353,6 +354,18 @@ private:
    *  else: Only for the currently active one.
    */
   bool deploy_for_all_ = true;
+  /*!
+   * \brief fork feature #49: deploy dry-run / preview.
+   * If true: Show the DeployPreviewDialog confirm step before deployment when plans are
+   * available. Defaults to false until the ApplicationManager exposes the computed plans.
+   */
+  bool show_deploy_preview_ = false;
+  /*!
+   * \brief fork feature #49: deploy dry-run / preview.
+   * Per-deployer deployment plans to preview, populated immediately before a deploy is
+   * dispatched (intended to be filled from an ApplicationManager signal). Cleared after use.
+   */
+  std::vector<Deployer::DeploymentPlan> deploy_preview_plans_;
   /*! \brief If true: Show the log window when an error is logged. */
   bool show_log_on_error_ = false;
   /*! \brief If true: Show the log window when a warning is logged. */

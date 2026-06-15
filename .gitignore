@@ -100,3 +100,4 @@ repro-captures/
 build-repro/
 build-fix/
 build-clean/
+build-qt6/

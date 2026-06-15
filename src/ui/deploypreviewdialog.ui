@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>DeployPreviewDialog</class>
+ <widget class="QDialog" name="DeployPreviewDialog">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>640</width>
+    <height>480</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Deployment Preview</string>
+  </property>
+  <layout class="QVBoxLayout" name="verticalLayout">
+   <item>
+    <widget class="QLabel" name="info_label">
+     <property name="text">
+      <string>The following changes would be made to the deployment target. Nothing has been written yet.</string>
+     </property>
+     <property name="wordWrap">
+      <bool>true</bool>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QLabel" name="summary_label">
+     <property name="text">
+      <string>Create: 0    Overwrite: 0    Remove: 0</string>
+     </property>
+    </widget>
+   </item>
+   <item>
+    <widget class="QTreeWidget" name="change_tree">
+     <property name="alternatingRowColors">
+      <bool>true</bool>
+     </property>
+     <column>
+      <property name="text">
+       <string>File</string>
+      </property>
+     </column>
+     <column>
+      <property name="text">
+       <string>Details</string>
+      </property>
+     </column>
+    </widget>
+   </item>
+   <item>
+    <widget class="QDialogButtonBox" name="buttonBox">
+     <property name="orientation">
+      <enum>Qt::Horizontal</enum>
+     </property>
+     <property name="standardButtons">
+      <set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set>
+     </property>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections>
+  <connection>
+   <sender>buttonBox</sender>
+   <signal>accepted()</signal>
+   <receiver>DeployPreviewDialog</receiver>
+   <slot>accept()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>248</x>
+     <y>454</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>157</x>
+     <y>474</y>
+    </hint>
+   </hints>
+  </connection>
+  <connection>
+   <sender>buttonBox</sender>
+   <signal>rejected()</signal>
+   <receiver>DeployPreviewDialog</receiver>
+   <slot>reject()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>316</x>
+     <y>460</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>286</x>
+     <y>474</y>
+    </hint>
+   </hints>
+  </connection>
+ </connections>
+</ui>

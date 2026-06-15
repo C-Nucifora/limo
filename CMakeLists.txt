@@ -413,6 +413,10 @@ set(PROJECT_SOURCES
         src/ui/downloadswidget.cpp
         src/ui/downloadswidget.h
         src/ui/downloadswidget.ui
+        # Deploy dry-run / preview dialog (fork feature #49).
+        src/ui/deploypreviewdialog.cpp
+        src/ui/deploypreviewdialog.h
+        src/ui/deploypreviewdialog.ui
 )
 
 qt_add_resources(QSS_RESOURCES
