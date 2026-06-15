@@ -1104,6 +1104,13 @@ void MainWindow::setupButtons()
           &QAction::triggered,
           this,
           &MainWindow::onHealthCheckDeployerMenuClicked);
+  // fork #149: load-order bisect action.
+  bisect_deployer_action_ = new QAction(this);
+  bisect_deployer_action_->setToolTip("Bisect Load Order");
+  bisect_deployer_action_->setText("Bisect");
+  bisect_deployer_action_->setIcon(QIcon::fromTheme("edit-find"));
+  connect(
+    bisect_deployer_action_, &QAction::triggered, this, &MainWindow::onBisectDeployerMenuClicked);
 #ifdef LIMO_WITH_LOOT
   // fork #31: action to open the LOOT user-metadata (userlist.yaml) editor.
   edit_loot_userlist_action_ = new QAction(this);
@@ -1122,6 +1129,7 @@ void MainWindow::setupButtons()
                                              verify_deployer_action_,
                                              deployed_files_tree_action_, // fork #11
                                              health_check_deployer_action_, // fork #50
+                                             bisect_deployer_action_, // fork #149
                                              ui->actionbrowse_deployer_files });
 #ifdef LIMO_WITH_LOOT
   deployer_menu->addAction(edit_loot_userlist_action_); // fork #31
@@ -3232,6 +3240,31 @@ void MainWindow::onEditLootUserlistMenuClicked()
   }
 }
 #endif
+
+// fork #149
+void MainWindow::onBisectDeployerMenuClicked()
+{
+  std::vector<LoadOrderBisectDialog::Entry> entries;
+  const int rows = deployer_model_->rowCount();
+  entries.reserve(rows);
+  for(int row = 0; row < rows; row++)
+  {
+    const QString name =
+      deployer_model_
+        ->data(deployer_model_->index(row, DeployerListModel::name_col), Qt::DisplayRole)
+        .toString();
+    const bool enabled =
+      deployer_model_
+        ->data(deployer_model_->index(row, DeployerListModel::status_col),
+               DeployerListModel::mod_status_role)
+        .toBool();
+    entries.push_back({ name.toStdString(), enabled });
+  }
+  auto* dialog = new LoadOrderBisectDialog(this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->setEntries(entries);
+  dialog->show();
+}
 
 void MainWindow::on_profile_selection_box_currentIndexChanged(int index)
 {

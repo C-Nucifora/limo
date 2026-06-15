@@ -447,6 +447,10 @@ set(PROJECT_SOURCES
         src/ui/savemanagerwidget.cpp
         src/ui/savemanagerwidget.h
         src/ui/savemanagerwidget.ui
+        # fork #149: load-order bisect tool
+        src/ui/loadorderbisectdialog.cpp
+        src/ui/loadorderbisectdialog.h
+        src/ui/loadorderbisectdialog.ui
 )
 
 qt_add_resources(QSS_RESOURCES
