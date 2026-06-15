@@ -1337,6 +1337,27 @@ public slots:
    * \param note The new note text.
    */
   void setModNote(int app_id, int mod_id, QString note);
+  // fork #199: per-mod highlight colour labels.
+  /*!
+   * \brief Sets the highlight colour attached to a mod. An empty string clears the colour.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   * \param color The new colour as a hex string (e.g. "#ff0000"), or empty to clear.
+   */
+  void setModColor(int app_id, int mod_id, QString color);
+  /*!
+   * \brief Returns the highlight colour for a mod, or an empty string if none is set.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   * \return The colour as a hex string, or an empty string.
+   */
+  QString getModColor(int app_id, int mod_id);
+  /*!
+   * \brief Returns the highlight colours for all mods of the given app as a mod-id -> hex map.
+   * \param app_id Target app.
+   * \return Map of mod id to hex colour string. Empty if the app id is invalid.
+   */
+  std::map<int, std::string> getModColors(int app_id);
   /*!
    * \brief Pins or unpins the version of a mod.
    * \param app_id Target app.

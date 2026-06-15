@@ -500,6 +500,9 @@ std::vector<ModInfo> ModdedApplication::getModInfo() const
       is_active,
       manual_tag_map_.contains(mod.id) ? manual_tag_map_.at(mod.id) : std::vector<std::string>{},
       auto_tag_map_.contains(mod.id) ? auto_tag_map_.at(mod.id) : std::vector<std::string>{});
+    // fork #199: carry the user-assigned highlight colour with the mod info.
+    if(mod_color_map_.contains(mod.id))
+      mod_info.back().color = mod_color_map_.at(mod.id);
   }
   return mod_info;
 }
@@ -2339,6 +2342,35 @@ void ModdedApplication::setModNote(int mod_id, const std::string& note)
   updateSettings(true);
 }
 
+// fork #199: assign/clear a highlight colour for a mod and persist it.
+void ModdedApplication::setModColor(int mod_id, const std::string& hex)
+{
+  auto iter = std::find_if(
+    installed_mods_.begin(), installed_mods_.end(), [mod_id](const Mod& m) { return m.id == mod_id; });
+  if(iter == installed_mods_.end())
+    return;
+  if(hex.empty())
+    mod_color_map_.erase(mod_id);
+  else
+    mod_color_map_[mod_id] = hex;
+  updateSettings(true);
+}
+
+// fork #199: return the highlight colour for a mod, or empty string if none.
+std::string ModdedApplication::getModColor(int mod_id) const
+{
+  auto iter = mod_color_map_.find(mod_id);
+  if(iter == mod_color_map_.end())
+    return "";
+  return iter->second;
+}
+
+// fork #199: return the full mod-id -> colour map for bulk UI consumption.
+std::map<int, std::string> ModdedApplication::getModColors() const
+{
+  return mod_color_map_;
+}
+
 void ModdedApplication::pinModVersion(int mod_id)
 {
   auto iter = std::find_if(
@@ -2399,6 +2431,10 @@ void ModdedApplication::updateSettings(bool write)
   {
     json_settings_["installed_mods"][i] = installed_mods_[i].toJson();
     json_settings_["installed_mods"][i]["installer"] = installer_map_[installed_mods_[i].id];
+    // fork #199: persist the optional highlight colour alongside the mod entry.
+    auto color_iter = mod_color_map_.find(installed_mods_[i].id);
+    if(color_iter != mod_color_map_.end() && !color_iter->second.empty())
+      json_settings_["installed_mods"][i]["color"] = color_iter->second;
   }
 
   for(int depl = 0; depl < deployers_.size(); depl++)
@@ -2563,6 +2599,7 @@ void ModdedApplication::updateState(bool read)
   auto_tags_.clear();
   auto_tag_map_.clear();
   installer_map_.clear();
+  mod_color_map_.clear(); // fork #199
   mod_rules_.clear();
   update_ignore_list_.clear();
 
@@ -2620,6 +2657,13 @@ void ModdedApplication::updateState(bool read)
       throw ParseError("Unknown installer type: " + installer + " in \"" +
                        (staging_dir_ / CONFIG_FILE_NAME).string() + "\"");
     installer_map_[installed_mods[i]["id"].asInt()] = installer;
+    // fork #199: restore the optional highlight colour; missing field means no colour.
+    if(installed_mods[i].isMember("color"))
+    {
+      std::string color = installed_mods[i]["color"].asString();
+      if(!color.empty())
+        mod_color_map_[installed_mods[i]["id"].asInt()] = color;
+    }
   }
   Json::Value groups = json_settings_["groups"];
   for(int group = 0; group < groups.size(); group++)

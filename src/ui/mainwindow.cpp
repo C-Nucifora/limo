@@ -44,6 +44,7 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPushButton>
+#include <QColorDialog> // fork #199
 #include <QLabel> // fork #25
 #include <QVBoxLayout> // fork #25
 #include <QScrollBar>
@@ -418,6 +419,8 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::sortModsByConflicts);
   connect(this, &MainWindow::setModNote,
           app_manager_, &ApplicationManager::setModNote);
+  connect(this, &MainWindow::setModColor, // fork #199
+          app_manager_, &ApplicationManager::setModColor);
   connect(this, &MainWindow::setModPinned,
           app_manager_, &ApplicationManager::setModPinned);
   connect(this, &MainWindow::getModRulesFor,
@@ -727,6 +730,15 @@ void MainWindow::setupMenus()
   manage_groups_action_ = new QAction("Manage Groups...", this);
   manage_groups_action_->setToolTip("View and edit all version groups for this app");
   connect(manage_groups_action_, &QAction::triggered, this, &MainWindow::onManageGroups);
+  set_color_action_ = new QAction("Set Colour...", this); // fork #199
+  set_color_action_->setToolTip("Assign a highlight colour to the selected mod(s)");
+  connect(set_color_action_, &QAction::triggered, this, &MainWindow::onSetModColor);
+  clear_color_action_ = new QAction("Clear Colour", this); // fork #199
+  clear_color_action_->setToolTip("Remove the highlight colour from the selected mod(s)");
+  connect(clear_color_action_, &QAction::triggered, this, &MainWindow::onClearModColor);
+  edit_config_action_ = new QAction("Edit Config...", this); // fork #200
+  edit_config_action_->setToolTip("Edit configuration files shipped by this mod");
+  connect(edit_config_action_, &QAction::triggered, this, &MainWindow::onEditModConfig);
   QList<QAction*> mod_list_actions{ ui->actionadd_to_deployer,      ui->actionAdd_to_Group,
                                     ui->actionbrowse_mod_files,     ui->actionRemove_from_Group,
                                     ui->actionRemove_Mods,          ui->actionRemove_Other_Versions,
@@ -735,7 +747,9 @@ void MainWindow::setupMenus()
                                     ui->actionReinstall_From_Local, ui->actionCheck_For_Updates,
                                     ui->actionSuppress_Update,       edit_note_action_,
                                     pin_version_action_,            unpin_version_action_,
-                                    mod_rules_action_,               manage_groups_action_ };
+                                    mod_rules_action_,               manage_groups_action_,
+                                    set_color_action_,               clear_color_action_,
+                                    edit_config_action_ };
   std::sort(mod_list_actions.begin(), mod_list_actions.end(), sort_actions);
   mod_list_menu_->addActions(mod_list_actions);
 
@@ -818,6 +832,9 @@ void MainWindow::setupMenus()
   QAction* repositories_action = tools_menu->addAction(tr("Mod Repositories"));
   connect(
     repositories_action, &QAction::triggered, this, &MainWindow::onOpenRepositoriesDialog);
+  // fork #203: instance dashboard / overview.
+  QAction* dashboard_action = tools_menu->addAction(tr("Instance Dashboard"));
+  connect(dashboard_action, &QAction::triggered, this, &MainWindow::onShowInstanceDashboard);
   // fork #1/#2: Add a "Collections" menu with Import/Export actions.
   QMenu* collections_menu = menuBar()->addMenu("Collections");
   QAction* import_collection_action = collections_menu->addAction("Import Collection");
@@ -4111,6 +4128,112 @@ void MainWindow::onUnpinModVersion()
   const int mod_id = mod_list_model_->data(index, ModListModel::mod_id_role).toInt();
   emit setModPinned(currentApp(), mod_id, false);
   emit getModInfo(currentApp());
+}
+
+void MainWindow::onSetModColor()
+{
+  // fork #199: apply a chosen colour to every selected mod (falls back to the current row).
+  auto mod_ids = ui->mod_list->getSelectedModIds();
+  if(mod_ids.empty())
+  {
+    const auto index =
+      mod_list_proxy_->mapToSource(ui->mod_list->selectionModel()->currentIndex());
+    if(!index.isValid())
+      return;
+    mod_ids.push_back(mod_list_model_->data(index, ModListModel::mod_id_role).toInt());
+  }
+  const QColor color = QColorDialog::getColor(Qt::white, this, "Select highlight colour");
+  if(!color.isValid())
+    return;
+  for(int mod_id : mod_ids)
+    emit setModColor(currentApp(), mod_id, color.name());
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onClearModColor()
+{
+  // fork #199: clear the colour of every selected mod (falls back to the current row).
+  auto mod_ids = ui->mod_list->getSelectedModIds();
+  if(mod_ids.empty())
+  {
+    const auto index =
+      mod_list_proxy_->mapToSource(ui->mod_list->selectionModel()->currentIndex());
+    if(!index.isValid())
+      return;
+    mod_ids.push_back(mod_list_model_->data(index, ModListModel::mod_id_role).toInt());
+  }
+  for(int mod_id : mod_ids)
+    emit setModColor(currentApp(), mod_id, "");
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onEditModConfig()
+{
+  // fork #200: open the per-mod config editor on the selected mod's staging directory.
+  const auto index = mod_list_proxy_->mapToSource(ui->mod_list->selectionModel()->currentIndex());
+  if(!index.isValid())
+    return;
+  const int mod_id = mod_list_model_->data(index, ModListModel::mod_id_role).toInt();
+  const QString mod_name = index.data(ModListModel::mod_name_role).toString();
+  const QString path = ui->info_sdir_label->text() + "/" + QString::number(mod_id);
+  if(!sfs::exists(path.toStdString()))
+  {
+    Log::error(("Could not edit config: '" + path + "' does not exist").toStdString());
+    return;
+  }
+  auto* dialog = new ModConfigEditorDialog(path, mod_name, this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  // A saved config changes staging, so the next deploy must refresh the deployed copy.
+  connect(dialog, &ModConfigEditorDialog::configSaved, this,
+          [this]() { emit getDeployerInfo(currentApp(), currentDeployer()); });
+  dialog->show();
+}
+
+void MainWindow::onShowInstanceDashboard()
+{
+  // fork #203: aggregate already-available mod info into a snapshot overview.
+  InstanceDashboardStats stats;
+  stats.app_name = ui->app_selection_box->currentText();
+  const auto& infos = mod_list_model_->getModInfo();
+  stats.total_mods = static_cast<int>(infos.size());
+  for(const auto& info : infos)
+  {
+    const bool enabled =
+      std::any_of(info.deployer_statuses.begin(), info.deployer_statuses.end(),
+                  [](bool s) { return s; });
+    if(enabled)
+      stats.enabled_mods++;
+    else
+      stats.disabled_mods++;
+  }
+  stats.plugin_count = -1; // not generically available
+  stats.last_deploy = "";
+  // Total staging size: best-effort recursive scan of the app's staging directory.
+  stats.total_staging_bytes = -1;
+  const std::string staging = ui->info_sdir_label->text().toStdString();
+  if(!staging.empty() && sfs::exists(staging))
+  {
+    std::error_code ec;
+    qint64 total = 0;
+    for(auto it = sfs::recursive_directory_iterator(
+                    staging, sfs::directory_options::skip_permission_denied, ec);
+        !ec && it != sfs::recursive_directory_iterator();
+        it.increment(ec))
+    {
+      std::error_code fec;
+      if(it->is_regular_file(fec) && !fec)
+        total += static_cast<qint64>(it->file_size(fec));
+    }
+    if(!ec)
+      stats.total_staging_bytes = total;
+  }
+  stats.status_line = stats.total_mods == 0
+                        ? "No mods installed yet"
+                        : QString("%1 mods installed (%2 enabled)")
+                            .arg(stats.total_mods)
+                            .arg(stats.enabled_mods);
+  InstanceDashboardDialog dialog(stats, this);
+  dialog.exec();
 }
 
 void MainWindow::onEditModRules()

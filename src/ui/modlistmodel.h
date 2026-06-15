@@ -8,6 +8,7 @@
 #include "../core/modinfo.h"
 #include "modlistproxymodel.h"
 #include <QAbstractTableModel>
+#include <QColor>
 #include <QComboBox>
 #include <QPixmap>
 #include <set>
@@ -198,6 +199,16 @@ public:
   void setConflictHighlight(int selected_mod_id, const std::set<int>& conflicting_mod_ids);
   /*! \brief Clears the conflict highlight set, causing the view to repaint without highlights. */
   void clearConflictHighlight();
+  // fork #199: per-mod highlight colour labels.
+  /*!
+   * \brief Sets the user-assigned highlight colours for all mods, replacing any previous map.
+   *
+   * Keys are mod ids, values are hex colour strings (e.g. "#ff0000"). Empty or invalid
+   * strings are ignored. Rendered as the row background via \ref Qt::BackgroundRole, layered
+   * below the selection and conflict highlights so those always win.
+   * \param colors Map of mod id to hex colour string.
+   */
+  void setModColors(const std::map<int, std::string>& colors);
 
 private:
   /*! \brief The proxy model used to sort and filter this model. */
@@ -228,6 +239,8 @@ private:
   int highlight_selected_mod_id_ = -1;
   /*! \brief Ids of all mods which conflict with the currently selected mod. */
   std::set<int> highlight_conflicting_mod_ids_;
+  /*! \brief fork #199: maps mod ids to their user-assigned highlight colour. */
+  std::map<int, QColor> mod_color_map_;
 
   /*! \brief Edge length, in pixels, of the preview thumbnails shown in the name column. */
   static constexpr int thumbnail_size = 40;

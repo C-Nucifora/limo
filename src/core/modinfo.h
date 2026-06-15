@@ -32,6 +32,8 @@ struct ModInfo
   std::vector<std::string> manual_tags;
   /*! \brief Contains the names of all auto tags added to this mod. */
   std::vector<std::string> auto_tags;
+  /*! \brief fork #199: user-assigned highlight colour as a #rrggbb hex string. Empty = none. */
+  std::string color;
 
   /*!
    * \brief Constructor. Simply initializes members.

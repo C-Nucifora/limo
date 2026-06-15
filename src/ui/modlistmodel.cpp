@@ -186,6 +186,15 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
       color.setAlpha(70);
       return QBrush(color);
     }
+    // fork #199: user-assigned per-mod highlight colour. Layered below the selection and
+    // conflict highlights above so those always win, and uses alpha so text stays legible.
+    auto color_iter = mod_color_map_.find(mod_id);
+    if(color_iter != mod_color_map_.end() && color_iter->second.isValid())
+    {
+      QColor color = color_iter->second;
+      color.setAlpha(70);
+      return QBrush(color);
+    }
   }
   if(role == version_list_role)
   {
@@ -289,9 +298,17 @@ void ModListModel::setModInfo(const std::vector<ModInfo>& mods)
   manual_tag_map_.clear();
   auto_tag_map_.clear();
   mod_size_strings_.clear();
+  mod_color_map_.clear(); // fork #199
   for(const auto& info : mods)
   {
     deployer_statuses_[info.mod.id] = info.deployer_statuses;
+    // fork #199: apply the per-mod highlight colour carried by ModInfo.
+    if(!info.color.empty())
+    {
+      QColor color(QString::fromStdString(info.color));
+      if(color.isValid())
+        mod_color_map_[info.mod.id] = color;
+    }
     if(info.group >= 0)
     {
       group_map_[info.mod.id] = info.group;
@@ -375,6 +392,25 @@ void ModListModel::clearConflictHighlight()
 {
   highlight_selected_mod_id_ = -1;
   highlight_conflicting_mod_ids_.clear();
+  if(active_mods_.empty())
+    return;
+  emit dataChanged(index(0, 0),
+                   index(active_mods_.size() - 1, columnCount() - 1),
+                   { Qt::BackgroundRole });
+}
+
+// fork #199: store the user-assigned highlight colours and repaint the backgrounds.
+void ModListModel::setModColors(const std::map<int, std::string>& colors)
+{
+  mod_color_map_.clear();
+  for(const auto& [mod_id, hex] : colors)
+  {
+    if(hex.empty())
+      continue;
+    QColor color(QString::fromStdString(hex));
+    if(color.isValid())
+      mod_color_map_[mod_id] = color;
+  }
   if(active_mods_.empty())
     return;
   emit dataChanged(index(0, 0),

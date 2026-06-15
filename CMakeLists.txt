@@ -316,6 +316,9 @@ set(PROJECT_SOURCES
         src/ui/changelogdialog.cpp
         src/ui/changelogdialog.h
         src/ui/changelogdialog.ui
+        src/ui/modconfigeditordialog.cpp
+        src/ui/modconfigeditordialog.h
+        src/ui/modconfigeditordialog.ui
         src/ui/collectiondialog.cpp
         src/ui/collectiondialog.h
         src/ui/collectiondialog.ui
@@ -343,6 +346,9 @@ set(PROJECT_SOURCES
         src/ui/healthcheckdialog.cpp
         src/ui/healthcheckdialog.h
         src/ui/healthcheckdialog.ui
+        src/ui/instancedashboarddialog.cpp
+        src/ui/instancedashboarddialog.h
+        src/ui/instancedashboarddialog.ui
         src/ui/editautotagsdialog.cpp
         src/ui/editautotagsdialog.h
         src/ui/editautotagsdialog.ui
