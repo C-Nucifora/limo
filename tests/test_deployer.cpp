@@ -164,22 +164,27 @@ TEST_CASE("Conflict groups are created", "[deployer]")
 TEST_CASE("Mods are sorted", "[deployer]")
 {
   // Arrange
-  auto expectedEntry0 = std::make_shared<DeployerModInfo>(false, "mod 0", "", 0, true);
-  auto expectedEntry1 = std::make_shared<DeployerModInfo>(false, "mod 1", "", 1, true);
-  auto expectedEntry2 = std::make_shared<DeployerModInfo>(false, "mod 2", "", 2, true);
-  auto expectedEntry3 = std::make_shared<DeployerModInfo>(false, "mod 3", "", 3, true);
-  auto expectedEntry4 = std::make_shared<DeployerModInfo>(false, "mod 4", "", 4, true);
-  auto expectedEntry5 = std::make_shared<DeployerModInfo>(false, "mod 5", "", 5, true);
-  auto expectedEntry6 = std::make_shared<DeployerModInfo>(false, "mod 6", "", 6, true);
-  auto expectedEntry7 = std::make_shared<DeployerModInfo>(false, "mod 7", "", 7, true);
+  // getTraversalItems() returns the Root node first, then mods with empty display names
+  // (the base deployer carries ids, not names). Order reflects the deterministic conflict-group
+  // sort: group {4,6} -> 6,4; group {0,1,2,3,5} -> 5,0,2,1,3; group {7} -> 7.
+  auto root = std::make_shared<DeployerEntry>(true, "Root", -2);
+  auto expectedEntry0 = std::make_shared<DeployerModInfo>(false, "", "", 0, true);
+  auto expectedEntry1 = std::make_shared<DeployerModInfo>(false, "", "", 1, true);
+  auto expectedEntry2 = std::make_shared<DeployerModInfo>(false, "", "", 2, true);
+  auto expectedEntry3 = std::make_shared<DeployerModInfo>(false, "", "", 3, true);
+  auto expectedEntry4 = std::make_shared<DeployerModInfo>(false, "", "", 4, true);
+  auto expectedEntry5 = std::make_shared<DeployerModInfo>(false, "", "", 5, true);
+  auto expectedEntry6 = std::make_shared<DeployerModInfo>(false, "", "", 6, true);
+  auto expectedEntry7 = std::make_shared<DeployerModInfo>(false, "", "", 7, true);
   std::vector<std::weak_ptr<DeployerEntry>> expectedEntries = {
+    root,
+    expectedEntry6,
+    expectedEntry4,
     expectedEntry5,
     expectedEntry0,
     expectedEntry2,
     expectedEntry1,
     expectedEntry3,
-    expectedEntry6,
-    expectedEntry4,
     expectedEntry7
   };
 
