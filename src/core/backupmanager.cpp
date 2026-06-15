@@ -69,9 +69,9 @@ void BackupManager::addBackup(int target_id, const std::string& name, int source
     source_path = getBackupPath(target_id, source);
   else
     source_path = getBackupPath(target_id, target.active_members[cur_profile_]);
-  sfs::copy(source_path,
-            getBackupPath(target.path, target.backup_names.size()),
-            sfs::copy_options::recursive | sfs::copy_options::copy_symlinks);
+  // Use reflink (CoW clone) where the filesystem supports it, falling back to a regular
+  // recursive copy otherwise (limo-app/limo#232).
+  pu::reflinkOrCopy(source_path, getBackupPath(target.path, target.backup_names.size()));
   target.backup_names.push_back(name);
   updateSettings();
 }
@@ -238,8 +238,9 @@ void BackupManager::overwriteBackup(int target_id, int source_backup, int dest_b
   const auto source_path = getBackupPath(target_id, source_backup);
   const auto dest_path = getBackupPath(target_id, dest_backup);
   sfs::remove_all(dest_path);
-  sfs::copy(
-    source_path, dest_path, sfs::copy_options::recursive | sfs::copy_options::overwrite_existing);
+  // Use reflink (CoW clone) where the filesystem supports it, falling back to a regular
+  // recursive copy otherwise (limo-app/limo#232).
+  pu::reflinkOrCopy(source_path, dest_path);
 }
 
 void BackupManager::setLog(const std::function<void(Log::LogLevel, const std::string&)>& new_log)

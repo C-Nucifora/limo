@@ -114,4 +114,35 @@ void copyOrMoveFiles(const std::filesystem::path& source,
  * \return True if path exists.
  */
 bool exists(const std::filesystem::path& path);
+
+/*!
+ * \brief Copies a single regular file, attempting a reflink (copy-on-write clone) first.
+ *
+ * On Linux, FICLONE ioctl is used to request a CoW clone, which is near-instant and
+ * consumes no additional disk space until the clone is modified. This works on btrfs,
+ * XFS (≥4.16), bcachefs, and other reflink-capable filesystems. When the ioctl fails
+ * with EOPNOTSUPP, ENOTTY, EXDEV, or EINVAL (unsupported FS, cross-device, etc.) the
+ * function falls back to a regular std::filesystem::copy_file call so behaviour on
+ * non-CoW filesystems is identical to before.
+ *
+ * Implements limo-app/limo#232 (reflink backup support).
+ *
+ * \param source Path to the source regular file.
+ * \param dest   Path to the destination file (must not already exist).
+ */
+void reflinkOrCopyFile(const std::filesystem::path& source, const std::filesystem::path& dest);
+
+/*!
+ * \brief Recursively copies a file or directory tree, preferring reflinks for each
+ * regular file and falling back to a normal copy when reflinks are unsupported.
+ *
+ * Symlinks are reproduced as symlinks (equivalent to copy_options::copy_symlinks).
+ * Directories are created normally. Regular files are cloned via reflinkOrCopyFile().
+ *
+ * Implements limo-app/limo#232 (reflink backup support).
+ *
+ * \param source Source file or directory.
+ * \param dest   Destination path (must not already exist).
+ */
+void reflinkOrCopy(const std::filesystem::path& source, const std::filesystem::path& dest);
 }
