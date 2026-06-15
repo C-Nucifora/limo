@@ -44,6 +44,8 @@
 #include <QPainter>
 #include <QPalette>
 #include <QPushButton>
+#include <QLabel> // fork #25
+#include <QVBoxLayout> // fork #25
 #include <QScrollBar>
 #include <QSettings>
 #include <QTextStream>
@@ -155,6 +157,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
     app_manager_, &ApplicationManager::requestDownloadQueue, Qt::QueuedConnection);
   // ---- end fork #8 ----------------------------------------------------------
 
+  setupEmptyStateOverlay(); // fork #25
+
   Log::info("Startup complete");
 }
 
@@ -193,6 +197,67 @@ void MainWindow::closeEvent(QCloseEvent* event)
   settings.setValue("deployer_list_header_state", ui->deployer_list->header()->saveState());
   ipc_server_->shutdown();
   event->accept();
+}
+
+// fork #25: build the first-run / no-application empty-state overlay.
+void MainWindow::setupEmptyStateOverlay()
+{
+  empty_state_overlay_ = new QFrame(centralWidget());
+  empty_state_overlay_->setObjectName("empty_state_overlay");
+  empty_state_overlay_->setFrameShape(QFrame::NoFrame);
+  // Semi-opaque backdrop so the overlay reads as a distinct empty state.
+  empty_state_overlay_->setAutoFillBackground(true);
+  empty_state_overlay_->setStyleSheet(
+    "#empty_state_overlay { background-color: palette(window); }");
+
+  auto* layout = new QVBoxLayout(empty_state_overlay_);
+  layout->setAlignment(Qt::AlignCenter);
+  layout->setSpacing(16);
+
+  auto* title = new QLabel(tr("No applications yet"), empty_state_overlay_);
+  QFont title_font = title->font();
+  title_font.setPointSizeF(title_font.pointSizeF() * 1.6);
+  title_font.setBold(true);
+  title->setFont(title_font);
+  title->setAlignment(Qt::AlignCenter);
+
+  auto* hint = new QLabel(
+    tr("Click \"+ Add application\" or import an existing setup to get started."),
+    empty_state_overlay_);
+  hint->setAlignment(Qt::AlignCenter);
+  hint->setWordWrap(true);
+
+  empty_state_button_ = new QPushButton(tr("Add application"), empty_state_overlay_);
+  empty_state_button_->setIcon(QIcon::fromTheme("list-add"));
+  empty_state_button_->setCursor(Qt::PointingHandCursor);
+  empty_state_button_->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+  // Reuse the existing add-application action (app_tool_button's CTA target).
+  connect(
+    empty_state_button_, &QPushButton::clicked, this, &MainWindow::onAddAppButtonClicked);
+
+  layout->addStretch();
+  layout->addWidget(title, 0, Qt::AlignCenter);
+  layout->addWidget(hint, 0, Qt::AlignCenter);
+  layout->addWidget(empty_state_button_, 0, Qt::AlignCenter);
+  layout->addStretch();
+
+  empty_state_overlay_->hide();
+  empty_state_overlay_->raise();
+  updateEmptyStateOverlayGeometry();
+}
+
+// fork #25: keep the overlay covering the whole central area.
+void MainWindow::updateEmptyStateOverlayGeometry()
+{
+  if(empty_state_overlay_ && centralWidget())
+    empty_state_overlay_->setGeometry(centralWidget()->rect());
+}
+
+// fork #25
+void MainWindow::resizeEvent(QResizeEvent* event)
+{
+  QMainWindow::resizeEvent(event);
+  updateEmptyStateOverlayGeometry();
 }
 
 void MainWindow::setCmdArgument(std::string argument)
@@ -1677,6 +1742,18 @@ void MainWindow::initUiWithoutApps(bool has_apps)
   // other
   ui->app_tab_widget->setEnabled(has_apps);
   ui->search_field->setEnabled(has_apps);
+  // fork #25: show the empty-state overlay when no application is configured.
+  if(empty_state_overlay_)
+  {
+    if(has_apps)
+      empty_state_overlay_->hide();
+    else
+    {
+      updateEmptyStateOverlayGeometry();
+      empty_state_overlay_->raise();
+      empty_state_overlay_->show();
+    }
+  }
 }
 
 void MainWindow::checkForContainers()

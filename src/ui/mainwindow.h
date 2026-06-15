@@ -60,7 +60,10 @@
 #include <QMainWindow>
 #include <QMessageBox>
 #include <QPlainTextEdit>
+#include <QFrame> // fork #25
 #include <QProgressBar>
+#include <QPushButton> // fork #25
+#include <QResizeEvent> // fork #25
 #include <QTableWidget>
 #include <QThread>
 #include <QtCore>
@@ -107,6 +110,8 @@ public:
    * \param event The close event sent upon closing the application.
    */
   void closeEvent(QCloseEvent* event) override;
+  // fork #25: keep the empty-state overlay centered/sized over the central area.
+  void resizeEvent(QResizeEvent* event) override;
   /*!
    * \brief Checks if the given argument is a NexusMods download link. If True: Downloads the mod.
    * \param argument Potential download link.
@@ -152,6 +157,10 @@ private:
   QThread* worker_thread_;
   /*! \brief fork #24: Save-game manager tab widget. */
   SaveManagerWidget* save_manager_widget_ = nullptr;
+  /*! \brief fork #25: Empty-state overlay shown over the central area when no app exists. */
+  QFrame* empty_state_overlay_ = nullptr;
+  /*! \brief fork #25: Prominent call-to-action button on the empty-state overlay. */
+  QPushButton* empty_state_button_ = nullptr;
   /*! \brief If true: changes to ui->mod_list will not trigger table updates. */
   bool ignore_table_changes_ = false;
   /*! \brief Indicates whether ui->deployer_list has been initialized. */
@@ -598,6 +607,15 @@ private:
    * elements.
    */
   void initUiWithoutApps(bool has_apps);
+  /*!
+   * \brief fork #25: Builds the empty-state overlay (placeholder text + call-to-action button)
+   * that is shown over the central area when no application is configured.
+   */
+  void setupEmptyStateOverlay();
+  /*!
+   * \brief fork #25: Repositions the empty-state overlay so it covers the central area.
+   */
+  void updateEmptyStateOverlayGeometry();
   /*! \brief Checks the environmet for signs that Limo is running in a container, like flatpak. */
   void checkForContainers();
   /*! \brief Checks the current settings for outdated entries and adepts those as needed. */
