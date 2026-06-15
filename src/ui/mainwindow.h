@@ -36,6 +36,7 @@
 #include "nexusmoddialog.h"
 #include "overwritebackupdialog.h"
 #include "repositoriesdialog.h" // fork #114
+#include "savemanagerwidget.h" // fork #24
 #include "settingsdialog.h"
 #include "tablecelldelegate.h"
 #include "ui/changelogdialog.h"
@@ -147,6 +148,8 @@ private:
   ApplicationManager* app_manager_;
   /*! \brief Thread containing the ApplicationManager. */
   QThread* worker_thread_;
+  /*! \brief fork #24: Save-game manager tab widget. */
+  SaveManagerWidget* save_manager_widget_ = nullptr;
   /*! \brief If true: changes to ui->mod_list will not trigger table updates. */
   bool ignore_table_changes_ = false;
   /*! \brief Indicates whether ui->deployer_list has been initialized. */

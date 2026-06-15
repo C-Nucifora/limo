@@ -122,6 +122,13 @@ public:
   /*! \brief Returns the number of managed \ModdedApplication "applications". */
   int getNumApplications() const;
   /*!
+   * \brief fork #24: Minimal synchronous passthrough used by the save-game manager to obtain
+   * a suggested saves directory for the given app (its staging directory).
+   * \param app_id Target app id.
+   * \return The app's staging directory, or an empty string if the id is invalid.
+   */
+  std::string getStagingDir(int app_id) const;
+  /*!
    * \brief Returns the number of profiles for one application.
    * \param app_id Application for which to get the number of profiles.
    * \return The number.
