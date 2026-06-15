@@ -325,6 +325,10 @@ set(PROJECT_SOURCES
         src/ui/modconfigeditordialog.cpp
         src/ui/modconfigeditordialog.h
         src/ui/modconfigeditordialog.ui
+        # fork #209: built-in game-asset preview for staged mod files
+        src/ui/assetpreviewdialog.cpp
+        src/ui/assetpreviewdialog.h
+        src/ui/assetpreviewdialog.ui
         src/ui/collectiondialog.cpp
         src/ui/collectiondialog.h
         src/ui/collectiondialog.ui
