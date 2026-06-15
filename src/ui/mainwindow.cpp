@@ -738,6 +738,13 @@ void MainWindow::setupMenus()
   backup_list_menu_->addActions(backup_list_actions);
 
   ui->actionEdit_Tags_for_mods->setIcon(QIcon::fromTheme("tag"));
+
+  // fork #114: add a "Mod Repositories" entry to the (otherwise empty) menu bar
+  // that opens the OMM network repository dialog.
+  QMenu* tools_menu = menuBar()->addMenu(tr("Tools"));
+  QAction* repositories_action = tools_menu->addAction(tr("Mod Repositories"));
+  connect(
+    repositories_action, &QAction::triggered, this, &MainWindow::onOpenRepositoriesDialog);
 }
 
 void MainWindow::setupDialogs()
@@ -1112,6 +1119,43 @@ void MainWindow::showEditDeployerDialog(int deployer)
     deployer_model_->hasIgnoredFiles());
   setBusyStatus(true, false);
   add_deployer_dialog_->show();
+}
+
+void MainWindow::onOpenRepositoriesDialog()
+{
+  // fork #114: lazily create the dialog and wire its install signal into the
+  // existing download/import flow.
+  if(!repositories_dialog_)
+  {
+    repositories_dialog_ = std::make_unique<RepositoriesDialog>(this);
+    connect(repositories_dialog_.get(),
+            &RepositoriesDialog::installPackageRequested,
+            this,
+            &MainWindow::onRepositoryInstallRequested);
+  }
+  repositories_dialog_->show();
+  repositories_dialog_->raise();
+  repositories_dialog_->activateWindow();
+}
+
+void MainWindow::onRepositoryInstallRequested(remote::RemoteDownloadInfo info)
+{
+  // fork #114: route the already-resolved direct download URL through the
+  // existing import queue. The download itself is performed by the established
+  // ApplicationManager flow; nothing is re-implemented here.
+  ImportModInfo import_info;
+  import_info.app_id = currentApp();
+  import_info.action_type = ImportModInfo::download;
+  import_info.remote_download_url = info.download_url;
+  import_info.remote_file_name = info.file_name;
+  import_info.remote_file_version = info.version;
+  import_info.name_overwrite = info.package_name;
+  import_info.version_overwrite = info.version;
+
+  const bool was_empty = mod_import_queue_.empty();
+  mod_import_queue_.push(import_info);
+  if(was_empty)
+    importMod();
 }
 
 void MainWindow::importMod()

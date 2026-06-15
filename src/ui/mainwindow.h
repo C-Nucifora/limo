@@ -35,6 +35,7 @@
 #include "nexusbrowserdialog.h" // feature #33: in-app NexusMods browsing/search
 #include "nexusmoddialog.h"
 #include "overwritebackupdialog.h"
+#include "repositoriesdialog.h" // fork #114
 #include "settingsdialog.h"
 #include "tablecelldelegate.h"
 #include "ui/changelogdialog.h"
@@ -246,6 +247,8 @@ private:
   std::unique_ptr<AddBackupDialog> add_backup_dialog_;
   /*! \brief Reusable dialog for overwriting backups. */
   std::unique_ptr<OverwriteBackupDialog> overwrite_backup_dialog_;
+  /*! \brief fork #114: Reusable dialog for managing OMM network mod repositories. */
+  std::unique_ptr<RepositoriesDialog> repositories_dialog_;
   /*! \brief Reusable dialog for editing manual tags. */
   std::unique_ptr<EditManualTagsDialog> edit_manual_tags_dialog_;
   /*! \brief Reusable dialog for managing the manual tags assigned to a set of mods. */
@@ -804,6 +807,14 @@ public slots:
   void setupIcons();
 
 private slots:
+  /*! \brief fork #114: Opens the OMM network mod repositories dialog. */
+  void onOpenRepositoriesDialog();
+  /*!
+   * \brief fork #114: Routes an OMM repository install request through the
+   * existing download/import flow.
+   * \param info Resolved download information emitted by RepositoriesDialog.
+   */
+  void onRepositoryInstallRequested(remote::RemoteDownloadInfo info);
   /*! \brief Deploys all mods for the currently active ModdedApplication. */
   void on_deploy_button_clicked();
   /*! \brief Adds a separator to the deployer for the currently active ModdedApplication. */
