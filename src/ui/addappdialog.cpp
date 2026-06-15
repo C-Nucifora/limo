@@ -48,13 +48,16 @@ void AddAppDialog::on_file_picker_button_clicked()
   QString starting_dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
   if(pathIsValid())
     starting_dir = ui->path_field->text();
-  auto dialog = new QFileDialog;
-  dialog->setWindowTitle("Select Staging Directory");
-  dialog->setFilter(QDir::AllDirs | QDir::Hidden);
-  dialog->setFileMode(QFileDialog::Directory);
-  dialog->setDirectory(starting_dir);
-  connect(dialog, &QFileDialog::fileSelected, this, &AddAppDialog::onFileDialogAccepted);
-  dialog->exec();
+  // Use the directory-only chooser instead of a manually configured QFileDialog.
+  // The previous code forced the non-native Qt dialog (via setFilter) which, combined
+  // with QDir::Hidden, eagerly enumerated the full contents of the browsed directories
+  // on the UI thread and could freeze the dialog. The directory chooser populates lazily.
+  const QString path =
+    QFileDialog::getExistingDirectory(this,
+                                      "Select Staging Directory",
+                                      starting_dir,
+                                      QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+  onFileDialogAccepted(path);
 }
 
 void AddAppDialog::on_name_field_textChanged(const QString& text)
@@ -72,7 +75,8 @@ void AddAppDialog::on_path_field_textChanged(const QString& text)
   else if(!ui->name_field->text().isEmpty()) {
     enableOkButton(true);
     auto src = std::filesystem::path(ui->path_field->text().toStdString());
-    if(std::filesystem::exists(src / ModdedApplication::CONFIG_FILE_NAME)) {
+    std::error_code ec;
+    if(std::filesystem::exists(src / ModdedApplication::CONFIG_FILE_NAME, ec)) {
         ui->import_checkbox->setEnabled(false);
         ui->import_checkbox->setChecked(false);
         ui->import_tags_checkbox->setEnabled(false);
@@ -96,7 +100,8 @@ bool AddAppDialog::pathIsValid()
   QString path = ui->path_field->text();
   if(path.isEmpty())
     return false;
-  return std::filesystem::exists(path.toStdString());
+  std::error_code ec;
+  return std::filesystem::exists(path.toStdString(), ec);
 }
 
 bool AddAppDialog::iconIsValid(const QString& path)
