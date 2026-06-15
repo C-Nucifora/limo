@@ -119,14 +119,19 @@ private:
   /*! \brief Checks whether the currently entered path exists. */
   bool pathIsValid();
   /*!
-   * \brief When adding a new application, auto-creates the staging directory in the
-   * path field if it does not yet exist. Only creates when the immediate parent already
-   * exists or exactly one parent level is missing ("single missing parent"), so a
-   * mistyped deep path is still rejected rather than silently materialised. Never
-   * touches an existing directory and does nothing in edit mode. (fork #78)
-   * \return true if the staging directory exists (already or after creation).
+   * \brief fork #78: Whether the given path is a valid staging dir: it already exists, or
+   * (in add mode) does not exist but is safely creatable — its immediate parent exists or
+   * exactly one parent level is missing ("single missing parent"). A mistyped deep path is
+   * rejected. Pure predicate with no side effects; the directory is created on accept.
    */
-  bool ensureStagingDirExists(); // fork #78
+  bool pathExistsOrCreatable(const QString& text) const; // fork #78
+  /*!
+   * \brief fork #78: In add mode, creates the staging directory if it does not yet exist and
+   * is safely creatable (see \ref pathExistsOrCreatable). Never touches an existing directory
+   * and is a no-op in edit mode.
+   * \return true if the directory exists or was created, false on failure.
+   */
+  bool createStagingDirIfNeeded(); // fork #78
   /*!
    * \brief Checks whether the currently entered icon path refers to a valid icon file.
    * \param Path to an icon. If this checked instead of ui->icon_field if this is not empty.

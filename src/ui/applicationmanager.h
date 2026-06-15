@@ -636,6 +636,15 @@ signals:
    */
   void sendModInfo(std::vector<ModInfo> mod_info);
   /*!
+   * \brief fork #145: Emitted in response to \ref requestPrunableArchives.
+   * \param archives The prunable archive files.
+   * \param total_size Total size to be freed, in bytes.
+   * \param app_id The app the result is for.
+   */
+  void sendPrunableArchives(std::vector<PrunableArchive> archives,
+                            unsigned long total_size,
+                            int app_id);
+  /*!
    * \brief Sends the load order for one deployer of one \ref ModdedApplication "application".
    * \param loadorder The load order.
    */
@@ -820,6 +829,12 @@ public slots:
    * \param app_id The target \ref ModdedApplication "application".
    */
   void unDeployMods(int app_id);
+  /*!
+   * \brief fork #208: Undeploys every deployer and then deploys from scratch (purge +
+   * redeploy), to recover from drift or external tampering.
+   * \param app_id Target app.
+   */
+  void forceRedeployMods(int app_id);
   /*!
    * \brief Undeploys mods for given deployers and given application.
    * \param app_id Target application.
@@ -1367,6 +1382,12 @@ public slots:
    * if the app id is invalid.
    */
   std::pair<std::vector<PrunableArchive>, unsigned long> getPrunableArchives(int app_id);
+  /*!
+   * \brief fork #145: Computes the prunable archives for an app and emits the result via
+   * \ref sendPrunableArchives, so the UI can confirm before deleting (async-friendly).
+   * \param app_id Target app.
+   */
+  void requestPrunableArchives(int app_id);
   /*!
    * \brief Deletes the supplied archive files. Missing or locked files are skipped.
    * \param app_id Target app.

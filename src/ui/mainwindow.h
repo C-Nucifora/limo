@@ -43,6 +43,7 @@
 #include "ui/changelogdialog.h"
 #include "ui/modconfigeditordialog.h" // fork #200
 #include "ui/instancedashboarddialog.h" // fork #203
+#include "ui/pruneversionsdialog.h" // fork #145
 #include "ui/editautotagsdialog.h"
 #include "ui/editmanualtagsdialog.h"
 #include "ui/exportappconfigdialog.h"
@@ -1323,6 +1324,17 @@ private slots:
   void onEditModConfig();
   /*! \brief fork #203: Builds an instance summary and shows the dashboard dialog. */
   void onShowInstanceDashboard();
+  /*! \brief fork #208: Confirms then purges and redeploys all deployers from scratch. */
+  void onForceRedeploy();
+  /*! \brief fork #145: Requests the prunable outdated archive list for the current app. */
+  void onPruneArchives();
+  /*!
+   * \brief fork #145: Receives prunable archives, shows the confirm dialog and, if accepted,
+   * deletes them.
+   */
+  void onPrunableArchives(std::vector<PrunableArchive> archives,
+                          unsigned long total_size,
+                          int app_id);
   /*! \brief Opens the ManageModRulesDialog for the currently selected mod. */
   void onEditModRules();
   /*!
@@ -1502,6 +1514,12 @@ signals:
    * \param app_id The target \ref ModdedApplication "application".
    */
   void deployMods(int app_id);
+  /*! \brief fork #208: Purge (undeploy) then redeploy every deployer from scratch. */
+  void forceRedeployMods(int app_id);
+  /*! \brief fork #145: Requests the list of prunable outdated archives (answered by onPrunableArchives). */
+  void requestPrunableArchives(int app_id);
+  /*! \brief fork #145: Deletes the given archive files. */
+  void pruneArchives(int app_id, std::vector<std::filesystem::path> paths);
   /*!
    * \brief Deploys mods using given Deployers of one \ref ModdedApplication "application".
    * \param app_id The target \ref ModdedApplication "application".

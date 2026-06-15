@@ -26,7 +26,11 @@ AddAppDialog::AddAppDialog(bool is_flatpak, QWidget* parent) :
   ui->import_checkbox->setVisible(false);
   ui->import_tags_checkbox->setVisible(false);
   enableOkButton(false);
-  ui->path_field->setValidationMode(ValidatingLineEdit::VALID_PATH_EXISTS);
+  // fork #78: a staging dir that does not exist yet but is safely creatable (single
+  // missing parent) counts as valid; it is materialised once on accept, not while typing.
+  ui->path_field->setValidationMode(ValidatingLineEdit::VALID_CUSTOM);
+  ui->path_field->setCustomValidator([this](QString p)
+                                     { return pathExistsOrCreatable(p); });
   dialog_completed_ = false;
   import_from_steam_dialog_ = std::make_unique<ImportFromSteamDialog>();
   connect(import_from_steam_dialog_.get(),
@@ -72,12 +76,6 @@ void AddAppDialog::on_name_field_textChanged(const QString& text)
 
 void AddAppDialog::on_path_field_textChanged(const QString& text)
 {
-  // When adding a new app, try to materialise a missing staging directory (single
-  // missing parent only). On success the path now exists, so the field's own
-  // existence-based validation styling needs refreshing to clear the red tint. (fork #78)
-  if(!edit_mode_ && ensureStagingDirExists())
-    ui->path_field->updateValidation();
-
   if(!pathIsValid())
     enableOkButton(false);
   else if(!ui->name_field->text().isEmpty()) {
@@ -105,49 +103,50 @@ void AddAppDialog::enableOkButton(bool state)
 
 bool AddAppDialog::pathIsValid()
 {
-  QString path = ui->path_field->text();
-  if(path.isEmpty())
-    return false;
-  std::error_code ec;
-  return std::filesystem::exists(path.toStdString(), ec);
+  return pathExistsOrCreatable(ui->path_field->text());
 }
 
-bool AddAppDialog::ensureStagingDirExists() // fork #78
+bool AddAppDialog::pathExistsOrCreatable(const QString& text) const // fork #78
 {
-  // Only auto-create when adding a new application; editing an existing app's
-  // staging dir keeps its previous behaviour.
-  if(edit_mode_)
-    return pathIsValid();
-
-  const QString text = ui->path_field->text();
   if(text.isEmpty())
     return false;
-
   std::error_code ec;
   const sfs::path path = text.toStdString();
   if(sfs::exists(path, ec))
     return true;
-
-  // Safety: only create when the immediate parent already exists, or exactly one
-  // parent level is missing. If more than one ancestor is missing the path most
-  // likely contains a typo, so we leave validation to reject it rather than
-  // silently creating a deep, arbitrary directory tree.
+  // Editing an existing app requires a real, existing staging dir.
+  if(edit_mode_)
+    return false;
+  // Safety: a non-existent staging dir is only acceptable when the immediate parent
+  // already exists, or exactly one parent level is missing ("single missing parent").
+  // If more than one ancestor is missing the path most likely contains a typo, so it
+  // stays invalid rather than being silently materialised as a deep directory tree.
   const sfs::path parent = path.parent_path();
   if(parent.empty())
     return false;
-  if(!sfs::exists(parent, ec) && !sfs::exists(parent.parent_path(), ec))
-    return false;
+  return sfs::exists(parent, ec) || sfs::exists(parent.parent_path(), ec);
+}
 
-  // create_directories makes the (at most one) missing parent and the staging dir
-  // itself. Guarded by error_code so a failure simply leaves the field invalid.
+bool AddAppDialog::createStagingDirIfNeeded() // fork #78
+{
+  if(edit_mode_)
+    return true;
+  const QString text = ui->path_field->text();
+  std::error_code ec;
+  const sfs::path path = text.toStdString();
+  if(text.isEmpty() || sfs::exists(path, ec))
+    return true;
+  if(!pathExistsOrCreatable(text))
+    return false;
+  // create_directories fills in the (at most one) missing parent and the staging dir.
   sfs::create_directories(path, ec);
   if(ec)
   {
-    Log::debug("Failed to auto-create staging directory at: " + path.string() +
+    Log::error("Failed to create staging directory at: " + path.string() +
                ". Error was: " + ec.message());
     return false;
   }
-  Log::debug("Auto-created staging directory at: " + path.string());
+  Log::info("Created staging directory at: " + path.string());
   return true;
 }
 
@@ -564,6 +563,16 @@ void AddAppDialog::on_buttonBox_accepted()
 {
   if(dialog_completed_)
     return;
+  // fork #78: materialise a not-yet-existing (but safely creatable) staging directory now,
+  // once, rather than while the user is still typing the path.
+  if(!createStagingDirIfNeeded())
+  {
+    QMessageBox::warning(this,
+                         "Could not create staging directory",
+                         "The staging directory could not be created. Please choose a "
+                         "different location.");
+    return;
+  }
   dialog_completed_ = true;
   EditApplicationInfo info;
   info.name = ui->name_field->text().toStdString();
