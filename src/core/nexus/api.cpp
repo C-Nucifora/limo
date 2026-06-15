@@ -1,6 +1,7 @@
 #include "api.h"
 #include "../consts.h"
 #include "../parseerror.h"
+#include <ctime>
 #include <iostream>
 #include <json/json.h>
 #include <ranges>
@@ -423,4 +424,108 @@ std::optional<std::smatch> Api::nxmUrlIsValid(const std::string& nxm_url)
   if(match.empty())
     return {};
   return match;
+}
+
+std::optional<std::pair<GitPlatform, std::pair<std::string, std::string>>> Api::gitRepoFromUrl(
+  const std::string& url)
+{
+  if(url.empty())
+    return {};
+  // Matches https://github.com/<owner>/<repo> or https://gitlab.com/<owner>/<repo>.
+  // The repo name stops at the first '/', '?', '#' or end of string and an optional trailing
+  // ".git" is stripped.
+  const std::regex regex(
+    R"((?:https:\/\/)?(?:www\.)?(github|gitlab)\.com\/([^\/\s]+)\/([^\/\s?#]+?)(?:\.git)?(?:[\/?#].*)?)");
+  std::smatch match;
+  if(!std::regex_match(url, match, regex))
+    return {};
+  const GitPlatform platform = match[1] == "github" ? GitPlatform::github : GitPlatform::gitlab;
+  return { { platform, { match[2], match[3] } } };
+}
+
+cpr::Header Api::gitAuthHeader()
+{
+  // GitHub rejects requests without a User-Agent header; GitLab tolerates it.
+  return cpr::Header{ { "User-Agent", "Limo" } };
+}
+
+std::time_t Api::parseIso8601(const std::string& timestamp)
+{
+  if(timestamp.empty())
+    return 0;
+  std::tm tm{};
+  // git platforms return UTC timestamps such as 2023-01-02T03:04:05Z or with a fractional part.
+  if(std::sscanf(timestamp.c_str(),
+                 "%4d-%2d-%2dT%2d:%2d:%2d",
+                 &tm.tm_year,
+                 &tm.tm_mon,
+                 &tm.tm_mday,
+                 &tm.tm_hour,
+                 &tm.tm_min,
+                 &tm.tm_sec) != 6)
+    return 0;
+  tm.tm_year -= 1900;
+  tm.tm_mon -= 1;
+#ifdef _WIN32
+  return _mkgmtime(&tm);
+#else
+  return timegm(&tm);
+#endif
+}
+
+std::optional<GitRelease> Api::getLatestGitRelease(const std::string& repo_url)
+{
+  const auto repo = gitRepoFromUrl(repo_url);
+  if(!repo)
+    return {};
+
+  const GitPlatform platform = repo->first;
+  const std::string& owner = repo->second.first;
+  const std::string& name = repo->second.second;
+
+  std::string request_url;
+  if(platform == GitPlatform::github)
+    request_url =
+      std::format("https://api.github.com/repos/{}/{}/releases/latest", owner, name);
+  else
+    request_url = std::format(
+      "https://gitlab.com/api/v4/projects/{}%2F{}/releases", owner, name);
+
+  cpr::Response response = cpr::Get(cpr::Url(request_url), gitAuthHeader());
+  if(response.status_code != 200)
+  {
+    std::cerr << std::format("Failed to get latest release for \"{}\". Response code was {}.",
+                             repo_url,
+                             response.status_code)
+              << std::endl;
+    return {};
+  }
+
+  Json::Value json_body;
+  Json::Reader reader;
+  if(!reader.parse(response.text.c_str(), json_body))
+  {
+    std::cerr << std::format("Failed to parse release response for \"{}\".", repo_url) << std::endl;
+    return {};
+  }
+
+  GitRelease release;
+  release.platform = platform;
+  if(platform == GitPlatform::github)
+  {
+    release.version = json_body["tag_name"].asString();
+    release.published_time = parseIso8601(json_body["published_at"].asString());
+  }
+  else
+  {
+    // GitLab returns an array of releases, newest first.
+    if(!json_body.isArray() || json_body.empty())
+      return {};
+    release.version = json_body[0]["tag_name"].asString();
+    release.published_time = parseIso8601(json_body[0]["released_at"].asString());
+  }
+
+  if(release.version.empty())
+    return {};
+  return release;
 }

@@ -34,6 +34,28 @@ struct Page
 };
 
 /*!
+ * \brief Hosting platforms for mods distributed through git release pages.
+ */
+enum class GitPlatform
+{
+  github,
+  gitlab
+};
+
+/*!
+ * \brief Contains data for the latest release of a mod hosted on a git platform.
+ */
+struct GitRelease
+{
+  /*! \brief The platform hosting the release. */
+  GitPlatform platform;
+  /*! \brief The release version, taken from the release's tag name. */
+  std::string version;
+  /*! \brief Timestamp for when the release was published, as a Unix time. 0 if unknown. */
+  std::time_t published_time = 0;
+};
+
+/*!
  * \brief Provides functions for accessing the NexusMods API.
  */
 class Api
@@ -162,8 +184,47 @@ public:
    * URL. If the URL is invalid: An empty optional.
    */
   static std::optional<std::smatch> nxmUrlIsValid(const std::string& nxm_url);
+  /*!
+   * \brief Checks if the given URL points to a GitHub or GitLab repository and, if so,
+   * extracts the owner and repository name.
+   *
+   * Recognizes URLs of the form \c https://github.com/<owner>/<repo> and
+   * \c https://gitlab.com/<owner>/<repo> (with or without a trailing \c .git or path/query).
+   *
+   * \param url URL to check.
+   * \return If the URL is a valid git repo URL: The hosting platform together with the
+   * owner and repository name. Else: An empty std::optional.
+   */
+  static std::optional<std::pair<GitPlatform, std::pair<std::string, std::string>>> gitRepoFromUrl(
+    const std::string& url);
+  /*!
+   * \brief Fetches the latest release for a mod hosted on GitHub or GitLab.
+   *
+   * For GitHub the \c releases/latest endpoint is queried, for GitLab the first entry of the
+   * project's releases list is used. Network or parse failures are handled gracefully.
+   *
+   * \param repo_url URL to the GitHub or GitLab repository.
+   * \return If a release could be retrieved: A GitRelease with the version and publish time.
+   * Else: An empty std::optional.
+   */
+  static std::optional<GitRelease> getLatestGitRelease(const std::string& repo_url);
 
 private:
+  /*!
+   * \brief Builds the HTTP header used for requests to git platforms.
+   *
+   * GitHub requires a User-Agent header to be set; this mirrors that requirement for both
+   * supported platforms.
+   * \return The header to send with git platform requests.
+   */
+  static cpr::Header gitAuthHeader();
+  /*!
+   * \brief Parses an ISO 8601 timestamp (e.g. \c 2023-01-02T03:04:05Z) into a Unix time.
+   * \param timestamp The timestamp string as returned by the git platform APIs.
+   * \return The parsed Unix time, or 0 if parsing failed.
+   */
+  static std::time_t parseIso8601(const std::string& timestamp);
+
   /*! \brief The API key used for all operations. */
   inline static std::string api_key_ = "";
 };
