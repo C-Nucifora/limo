@@ -218,6 +218,8 @@ set(CORE_SOURCES
         src/core/deployerentry.cpp
         src/core/savemanager.cpp
         src/core/savemanager.h
+        src/core/inimanager.cpp
+        src/core/inimanager.h
 )
 
 # The LOOT/OpenMW deployers depend on libloot and are only built on demand.
