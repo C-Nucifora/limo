@@ -7,6 +7,7 @@
 
 #include "lspakfilelistentry.h"
 #include "lspakheader.h"
+#include <cstdint>
 #include <filesystem>
 #include <vector>
 
@@ -73,7 +74,8 @@ private:
                           int compression_type);
   /*!
    * \brief Reads the file list from the source archive and initializes file_list_.
+   * \param archive_size Total byte size of the archive, used for bounds validation.
    * \return The compressed size of the file list.
    */
-  unsigned int readFileList();
+  unsigned int readFileList(uint64_t archive_size);
 };
