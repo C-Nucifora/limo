@@ -142,7 +142,17 @@ void CaseMatchingDeployer::adaptLoadorderFiles(const std::vector<int>& loadorder
       (*progress_node)->child(0).advance();
   }
 
+  // Reconcile the canonical case across the full current set of source files instead of
+  // freezing it from whatever was deployed first. The currently deployed files reflect the
+  // case that is actually present on the target, so they are used to seed the canonical
+  // mapping. This ensures that a dependency installed after its dependent is reconciled
+  // with the existing files regardless of installation order.
   std::map<std::string, std::string> file_name_map;
+  for(const auto& [path, id] : loadDeployedFiles())
+  {
+    const std::string relative_path = path.string();
+    file_name_map[pu::toLowerCase(relative_path)] = relative_path;
+  }
   for(int mod_id : loadorder)
   {
     const sfs::path mod_path = source_path_ / std::to_string(mod_id);

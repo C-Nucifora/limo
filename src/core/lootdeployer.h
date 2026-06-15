@@ -150,6 +150,33 @@ protected:
     loot::GameType::fonv,
     loot::GameType::tes4
   };
+  /*!
+   * \brief Maps game types whose Plugins.txt must not contain base-game/DLC master plugins to the
+   * set of vanilla master plugin file names (lower case) the game manages itself.
+   *
+   * For Skyrim SE and Fallout 4 the game engine implicitly loads its own base-game and DLC masters
+   * regardless of what is written to Plugins.txt. Listing them there (or listing Creation Club
+   * plugins, which the game also manages) can cause load order problems, so they are excluded from
+   * the generated file. Only well known vanilla names are listed here so that user mods are never
+   * dropped. See https://github.com/limo-app/limo/issues/64.
+   */
+  static inline const std::map<loot::GameType, std::set<std::string>> IMPLICIT_BASE_PLUGINS = {
+    { loot::GameType::tes5se,
+      { "skyrim.esm",
+        "update.esm",
+        "dawnguard.esm",
+        "hearthfires.esm",
+        "dragonborn.esm" } },
+    { loot::GameType::fo4,
+      { "fallout4.esm",
+        "dlcrobot.esm",
+        "dlcworkshop01.esm",
+        "dlccoast.esm",
+        "dlcworkshop02.esm",
+        "dlcworkshop03.esm",
+        "dlcnukaworld.esm",
+        "dlcultrahighresolution.esm" } }
+  };
 
   /*! \brief Name of the file containing plugin load order, as read by the target app. */
   std::string app_plugin_file_name_;
@@ -200,4 +227,13 @@ protected:
   void resetSettingsPrivate();
   /*! \brief Updates the loot plugin tags for every currently loaded plugin. */
   void updatePluginTagsPrivate();
+  /*!
+   * \brief Determines whether a plugin is managed implicitly by the game and must therefore be
+   * omitted from the generated Plugins.txt. This applies to base-game/DLC master plugins and
+   * Creation Club plugins for games which load these automatically (currently Skyrim SE and
+   * Fallout 4). Matching is case insensitive.
+   * \param plugin_name File name of the plugin to check.
+   * \return True iff the plugin should be excluded from the written Plugins.txt.
+   */
+  bool isImplicitlyManagedPlugin(const std::string& plugin_name) const;
 };

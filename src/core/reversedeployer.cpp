@@ -24,6 +24,8 @@ ReverseDeployer::ReverseDeployer(const sfs::path& source_path,
 {
   type_ = "Reverse Deployer";
   is_autonomous_ = true;
+  if(!sfs::exists(source_path_))
+    sfs::create_directories(source_path_);
   if(sfs::exists(source_path_ / managed_files_name_))
     readManagedFiles();
   else
@@ -608,11 +610,35 @@ void ReverseDeployer::writeIgnoredFiles() const
 void ReverseDeployer::readManagedFiles()
 {
   const sfs::path managed_files_path = source_path_ / managed_files_name_;
+  // Treat an absent managed files file as a first run with an empty state instead of failing.
+  if(!sfs::exists(managed_files_path))
+  {
+    managed_files_.clear();
+    deployed_loadorder_.clear();
+    deployed_profile_ = -1;
+    number_of_files_in_target_ = 0;
+    writeManagedFiles();
+    return;
+  }
   std::ifstream file(managed_files_path, std::ios::binary);
   if(!file.is_open())
     throw std::runtime_error("Could not read \"" + managed_files_path.string() + "\".");
   Json::Value json_object;
-  file >> json_object;
+  // An empty or partially written file should not abort initialization; fall back to empty state.
+  try
+  {
+    file >> json_object;
+  }
+  catch(const std::exception& error)
+  {
+    log_(Log::LOG_WARNING,
+         std::format("Deployer '{}': Could not parse managed files at '{}': {}. "
+                     "Reinitializing with an empty state.",
+                     name_,
+                     managed_files_path.string(),
+                     error.what()));
+    json_object = Json::Value();
+  }
 
   managed_files_.clear();
   deployed_profile_ = json_object["deployed_profile"].asInt();

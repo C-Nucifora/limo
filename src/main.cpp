@@ -18,19 +18,110 @@
 #include "ui/ipcclient.h"
 #include "ui/mainwindow.h"
 #include <QApplication>
+#include <QColor>
 #include <QFile>
 #include <QIcon>
-#include <QStyle>
-#include <QStyleFactory>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPalette>
+#include <QSettings>
+#include <QStyle>
+#include <QStyleFactory>
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <regex>
 #include <string>
 #include <vector>
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+#include <QStyleHints>
+#endif
+
+
+/*!
+ * \brief Applies the color scheme / theme selected in the settings dialog.
+ *
+ * Theme indices match the entries of the theme_box combo in the settings dialog:
+ * 0 = System (Qt default palette/style is left untouched), 1 = Light, 2 = Dark,
+ * 3 = High-contrast.
+ * \param app The running application instance.
+ * \param theme The theme index read from QSettings.
+ */
+static void applyTheme(QApplication& app, int theme)
+{
+  // System: leave Qt's default palette and style in place.
+  if(theme <= 0)
+    return;
+
+  // Use the Fusion style so the custom palette is honored consistently across platforms.
+  if(auto* style = QStyleFactory::create("Fusion"))
+    app.setStyle(style);
+
+  QPalette palette;
+  if(theme == 1) // Light
+  {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    app.styleHints()->setColorScheme(Qt::ColorScheme::Light);
+#endif
+    palette.setColor(QPalette::Window, QColor(0xf0, 0xf0, 0xf0));
+    palette.setColor(QPalette::WindowText, Qt::black);
+    palette.setColor(QPalette::Base, Qt::white);
+    palette.setColor(QPalette::AlternateBase, QColor(0xe8, 0xe8, 0xe8));
+    palette.setColor(QPalette::ToolTipBase, Qt::white);
+    palette.setColor(QPalette::ToolTipText, Qt::black);
+    palette.setColor(QPalette::Text, Qt::black);
+    palette.setColor(QPalette::Button, QColor(0xf0, 0xf0, 0xf0));
+    palette.setColor(QPalette::ButtonText, Qt::black);
+    palette.setColor(QPalette::Link, QColor(0x24, 0x6c, 0xe0));
+    palette.setColor(QPalette::Highlight, QColor(0x24, 0x6c, 0xe0));
+    palette.setColor(QPalette::HighlightedText, Qt::white);
+  }
+  else if(theme == 2) // Dark
+  {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    app.styleHints()->setColorScheme(Qt::ColorScheme::Dark);
+#endif
+    palette.setColor(QPalette::Window, QColor(0x35, 0x35, 0x35));
+    palette.setColor(QPalette::WindowText, Qt::white);
+    palette.setColor(QPalette::Base, QColor(0x23, 0x23, 0x23));
+    palette.setColor(QPalette::AlternateBase, QColor(0x35, 0x35, 0x35));
+    palette.setColor(QPalette::ToolTipBase, QColor(0x23, 0x23, 0x23));
+    palette.setColor(QPalette::ToolTipText, Qt::white);
+    palette.setColor(QPalette::Text, Qt::white);
+    palette.setColor(QPalette::Button, QColor(0x35, 0x35, 0x35));
+    palette.setColor(QPalette::ButtonText, Qt::white);
+    palette.setColor(QPalette::Link, QColor(0x2a, 0x82, 0xda));
+    palette.setColor(QPalette::Highlight, QColor(0x2a, 0x82, 0xda));
+    palette.setColor(QPalette::HighlightedText, Qt::black);
+    palette.setColor(QPalette::Disabled, QPalette::Text, QColor(0x7f, 0x7f, 0x7f));
+    palette.setColor(QPalette::Disabled, QPalette::WindowText, QColor(0x7f, 0x7f, 0x7f));
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(0x7f, 0x7f, 0x7f));
+  }
+  else // High-contrast
+  {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    app.styleHints()->setColorScheme(Qt::ColorScheme::Dark);
+#endif
+    palette.setColor(QPalette::Window, Qt::black);
+    palette.setColor(QPalette::WindowText, Qt::white);
+    palette.setColor(QPalette::Base, Qt::black);
+    palette.setColor(QPalette::AlternateBase, QColor(0x10, 0x10, 0x10));
+    palette.setColor(QPalette::ToolTipBase, Qt::black);
+    palette.setColor(QPalette::ToolTipText, Qt::white);
+    palette.setColor(QPalette::Text, Qt::white);
+    palette.setColor(QPalette::Button, Qt::black);
+    palette.setColor(QPalette::ButtonText, Qt::white);
+    palette.setColor(QPalette::Link, QColor(0x00, 0xff, 0xff));
+    palette.setColor(QPalette::Highlight, QColor(0xff, 0xff, 0x00));
+    palette.setColor(QPalette::HighlightedText, Qt::black);
+    palette.setColor(QPalette::Disabled, QPalette::Text, QColor(0x80, 0x80, 0x80));
+    palette.setColor(QPalette::Disabled, QPalette::WindowText, QColor(0x80, 0x80, 0x80));
+    palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(0x80, 0x80, 0x80));
+  }
+  app.setPalette(palette);
+}
 
 
 // ---------------------------------------------------------------------------
@@ -938,6 +1029,10 @@ int main(int argc, char* argv[])
   }
 
   app.setWindowIcon(QIcon(":/logo.png"));
+  {
+    QSettings settings(QCoreApplication::applicationName());
+    applyTheme(app, settings.value("theme", 0).toInt());
+  }
   MainWindow w;
   w.setDebugMode(debug_mode);
   if(!nxm_arg.empty())

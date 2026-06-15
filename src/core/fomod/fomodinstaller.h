@@ -129,6 +129,15 @@ private:
   bool paths_are_case_invariant_;
 
   /*!
+   * \brief Checks whether the given relative path escapes the given root directory, either by
+   * being absolute or by traversing above the root via "../" components or symlinks.
+   * \param relative_path Path relative to root to validate.
+   * \param root Directory the path must remain within.
+   * \return True if the path is absolute or escapes the root.
+   */
+  static bool pathEscapesRoot(const std::filesystem::path& relative_path,
+                              const std::filesystem::path& root);
+  /*!
    * \brief Extracts all files from given file list node and appends them to given vector.
    * \param file_list Source file list.
    * \param target_list Extracted files will be appended to this vector.

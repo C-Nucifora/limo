@@ -172,6 +172,31 @@ bool FomodInstaller::hasPreviousStep() const
   return cur_step_ > 0;
 }
 
+bool FomodInstaller::pathEscapesRoot(const sfs::path& relative_path, const sfs::path& root)
+{
+  // An absolute path is never a valid source/ destination inside the mod or staging directory.
+  if(relative_path.is_absolute())
+    return true;
+  const sfs::path normalized_relative = relative_path.lexically_normal();
+  // A normalized relative path beginning with ".." traverses above its root.
+  if(normalized_relative.begin() != normalized_relative.end() &&
+     normalized_relative.begin()->string() == "..")
+    return true;
+  // weakly_canonical resolves symlinks and "../" segments without requiring the full path to
+  // exist, allowing a robust comparison against the (canonical) root directory.
+  std::error_code ec;
+  const sfs::path canonical_root = sfs::weakly_canonical(root, ec);
+  if(ec)
+    return true;
+  const sfs::path canonical_target = sfs::weakly_canonical(root / normalized_relative, ec);
+  if(ec)
+    return true;
+  const sfs::path relative_to_root = canonical_target.lexically_relative(canonical_root);
+  if(relative_to_root.empty())
+    return true;
+  return relative_to_root.begin()->string() == "..";
+}
+
 void FomodInstaller::parseFileList(const pugi::xml_node& file_list,
                                    std::vector<File>& target_vector,
                                    bool warn_missing)
@@ -180,6 +205,15 @@ void FomodInstaller::parseFileList(const pugi::xml_node& file_list,
   {
     File new_file;
     const auto source_path = pu::normalizePath(file.attribute("source").value());
+    // Reject sources that point outside the mod directory before resolving them on disk to
+    // prevent path traversal reads (e.g. source="../../etc/passwd" or absolute paths).
+    if(pathEscapesRoot(source_path, mod_base_path_))
+    {
+      Log::warning(std::format(
+        "Fomod attempted to install file from outside the mod directory: '{}'. Skipping.",
+        source_path));
+      continue;
+    }
     auto source_path_optional = pu::pathExists(source_path, mod_base_path_);
     if(!source_path_optional)
     {
@@ -188,12 +222,32 @@ void FomodInstaller::parseFileList(const pugi::xml_node& file_list,
                                  (mod_base_path_ / source_path).string()));
       continue;
     }
+    // The case-insensitive resolution above may have re-introduced traversal via a symlinked
+    // directory component, so re-validate the resolved path against the mod root.
+    if(pathEscapesRoot(*source_path_optional, mod_base_path_))
+    {
+      Log::warning(std::format(
+        "Fomod attempted to install file from outside the mod directory: '{}'. Skipping.",
+        source_path_optional->string()));
+      continue;
+    }
     new_file.source = *source_path_optional;
     auto dest = file.attribute("destination");
     if(dest)
       new_file.destination = pu::normalizePath(dest.value());
     else
       new_file.destination = new_file.source;
+    // Reject destinations that would write outside the staging target directory. The mod root is
+    // used as the reference point since the relative destination is later resolved against the
+    // staging target with the same semantics.
+    if(pathEscapesRoot(new_file.destination, mod_base_path_))
+    {
+      Log::warning(std::format(
+        "Fomod attempted to install file to a destination outside the target directory: '{}'. "
+        "Skipping.",
+        new_file.destination.string()));
+      continue;
+    }
     auto always_install = file.attribute("alwaysInstall");
     if(always_install)
       new_file.always_install = always_install.as_bool();
