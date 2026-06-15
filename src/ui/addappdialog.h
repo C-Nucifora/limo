@@ -140,6 +140,11 @@ private:
   void initConfigForGog(const QString& install_path,
                         const QString& prefix_path,
                         const QString& config_path);
+  /*!
+   * \brief Updates the read-only display showing the detected game install path.
+   * Shows the resolved Steam install path, or a neutral placeholder if none was detected.
+   */
+  void updateDetectedPath();
 
 public:
   /*!
