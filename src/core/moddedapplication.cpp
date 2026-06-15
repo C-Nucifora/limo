@@ -245,6 +245,14 @@ void ModdedApplication::uninstallMods(const std::vector<int>& mod_ids,
     deployers_[depl]->setProfile(current_profile_);
   }
 
+  // Drop any mod rules that reference an uninstalled mod, otherwise checkModRules() emits a
+  // permanent spurious deploy-time warning for a mod that no longer exists, and stale rules can
+  // later match a mod that reuses the same id (limo-app/limo: stale mod rules on uninstall).
+  for(int mod_id : mod_ids)
+    std::erase_if(mod_rules_,
+                  [mod_id](const ModRule& r)
+                  { return r.source_mod_id == mod_id || r.target_mod_id == mod_id; });
+
   updateSettings(true);
 }
 

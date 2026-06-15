@@ -132,7 +132,13 @@ void CyberpunkDeployer::deployFilesWithRemap(
   {
     const sfs::path dest_path = dest_path_ / dest_relative_path;
     if(!checkModPathExistsAndMaybeLogError(id))
+    {
+      // Advance on this skip too, so the progress bar still reaches 100% when a mod's source path
+      // is missing (mirrors Tw3Deployer::deployFilesWithPathMap) (limo-app/limo: progress stall).
+      if(progress_node)
+        (*progress_node)->advance();
       continue;
+    }
     const auto source_iter = source_paths.find(dest_relative_path);
     if(source_iter == source_paths.end())
     {
