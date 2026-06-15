@@ -7,6 +7,7 @@
 
 #include "lspakfilelistentry.h"
 #include "lspakheader.h"
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <vector>
@@ -51,8 +52,27 @@ private:
   static constexpr int COMPRESSION_ZSTD = 3;
   /*! \brief Indicates file is a supported .pak archive. */
   static constexpr unsigned int LS_PAK_MAGIC_HEADER_NUMBER = 0x4b50534c;
-  /*! \brief Currently the only supported archive format version. */
-  static constexpr unsigned int LS_PAK_SUPPORTED_VERSION = 18;
+  /*!
+   * \brief Supported archive format versions.
+   *
+   * Versions 16 and 18 share the same on-disk layout: the LSPKHeader16 header
+   * (magic, version, file_list_offset, file_list_size, flags, priority, md5,
+   * num_parts) and the 280-byte FileEntry18 file list entry. Version 15 uses a
+   * different header and file entry layout and is therefore not accepted.
+   */
+  static constexpr std::array<unsigned int, 2> LS_PAK_SUPPORTED_VERSIONS = { 16, 18 };
+  /*!
+   * \brief Checks whether the given archive format version is supported.
+   * \param version Version read from the archive header.
+   * \return True if the version's layout is handled by this extractor.
+   */
+  static bool isSupportedVersion(unsigned int version)
+  {
+    for(unsigned int v : LS_PAK_SUPPORTED_VERSIONS)
+      if(v == version)
+        return true;
+    return false;
+  }
   /*! \brief Path to the source archive. */
   std::filesystem::path source_path_;
   /*! \brief Contains the archive's header. */
