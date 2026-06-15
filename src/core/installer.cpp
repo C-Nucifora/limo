@@ -326,6 +326,88 @@ unsigned long Installer::install(const sfs::path& source,
   return size;
 }
 
+unsigned long Installer::installPatch(const sfs::path& source,
+                                      const sfs::path& existing_mod_dir,
+                                      int options,
+                                      int root_level)
+{
+  log(Log::LOG_DEBUG, "Beginning mod patch installation");
+
+  if(!pu::exists(existing_mod_dir) || !sfs::is_directory(existing_mod_dir))
+    throw std::runtime_error("Error: Existing mod directory \"" + existing_mod_dir.string() +
+                             "\" does not exist!");
+
+  unsigned tmp_id = 0;
+  sfs::path tmp_dir;
+  do
+    tmp_dir = existing_mod_dir.parent_path() / (EXTRACT_TMP_DIR + std::to_string(tmp_id));
+  while(pu::exists(tmp_dir) && tmp_id++ < std::numeric_limits<unsigned>::max());
+  if(tmp_id == std::numeric_limits<unsigned>::max())
+    throw std::runtime_error("Could not create directory!");
+
+  try
+  {
+    extract(source, tmp_dir, {});
+  }
+  catch(CompressionError& error)
+  {
+    sfs::remove_all(tmp_dir);
+    throw error;
+  }
+
+  // Apply the same name/structure transformations as the simple installer so the
+  // overlaid files match the conventions used by the existing mod.
+  try
+  {
+    if(options & lower_case)
+      pu::renameFiles(tmp_dir, tmp_dir, [](unsigned char c) { return std::tolower(c); });
+    else if(options & upper_case)
+      pu::renameFiles(tmp_dir, tmp_dir, [](unsigned char c) { return std::toupper(c); });
+    if(options & single_directory)
+    {
+      std::vector<sfs::path> directories;
+      for(const auto& dir_entry : sfs::recursive_directory_iterator(tmp_dir))
+      {
+        if(!dir_entry.is_directory())
+          sfs::rename(dir_entry.path(), tmp_dir / dir_entry.path().filename());
+        else
+          directories.push_back(dir_entry.path());
+      }
+      for(const auto& dir : directories)
+        sfs::remove_all(dir);
+    }
+
+    if(root_level > 0)
+    {
+      auto tmp_move_dir = tmp_dir.string() + "." + MOVE_EXTENSION;
+      pu::moveFilesWithDepth(tmp_dir, tmp_move_dir, root_level);
+      sfs::rename(tmp_move_dir, tmp_dir);
+    }
+
+    // Overlay the extracted files onto the existing mod. moveFilesToDirectory merges
+    // recursively, overwriting files of the same relative path while leaving any files
+    // in existing_mod_dir that are not part of the patch untouched.
+    pu::moveFilesToDirectory(tmp_dir, existing_mod_dir, true);
+  }
+  catch(sfs::filesystem_error& error)
+  {
+    sfs::remove_all(tmp_dir);
+    throw error;
+  }
+  catch(std::runtime_error& error)
+  {
+    sfs::remove_all(tmp_dir);
+    throw error;
+  }
+  sfs::remove_all(tmp_dir);
+
+  unsigned long size = 0;
+  for(const auto& dir_entry : sfs::recursive_directory_iterator(existing_mod_dir))
+    if(dir_entry.is_regular_file())
+      size += dir_entry.file_size();
+  return size;
+}
+
 void Installer::uninstall(const sfs::path& mod_path, const std::string& type)
 {
   sfs::remove_all(mod_path);
