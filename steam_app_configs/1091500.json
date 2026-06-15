@@ -1,12 +1,97 @@
 {
-	"deployers" :
-	[
+	"deployers": [
 		{
-			"deploy_mode" : "hard_link",
-			"name" : "Cyberpunk 2077",
-			"target_dir" : "$STEAM_INSTALL_PATH$",
-			"type" : "Cyberpunk 2077 Deployer"
+			"deploy_mode": "hard_link",
+			"name": "Cyberpunk 2077",
+			"target_dir": "$STEAM_INSTALL_PATH$",
+			"type": "Cyberpunk 2077 Deployer"
 		}
 	],
-	"name" : "Cyberpunk 2077"
+	"name": "Cyberpunk 2077",
+	"auto_tags": [
+		{
+			"name": "CET",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "cyber_engine_tweaks",
+					"use_regex": false
+				}
+			]
+		},
+		{
+			"name": "RED4ext",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "red4ext",
+					"use_regex": false
+				}
+			]
+		},
+		{
+			"name": "redscript",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "\\.reds$",
+					"use_regex": true
+				}
+			]
+		},
+		{
+			"name": "ArchiveXL",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "\\.archive\\.xl$",
+					"use_regex": true
+				}
+			]
+		},
+		{
+			"name": "TweakXL",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "(r6/tweaks/|\\.tweak$)",
+					"use_regex": true
+				}
+			]
+		},
+		{
+			"name": "REDmod",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "(^|/)mods/[^/]+/info\\.json$",
+					"use_regex": true
+				}
+			]
+		},
+		{
+			"name": "archive",
+			"expression": "0",
+			"conditions": [
+				{
+					"condition_type": "path",
+					"invert": false,
+					"search_string": "\\.archive$",
+					"use_regex": true
+				}
+			]
+		}
+	]
 }
