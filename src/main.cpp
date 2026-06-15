@@ -7,6 +7,10 @@
 #include "ui/mainwindow.h"
 #include <QApplication>
 #include <QFile>
+#include <QIcon>
+#include <QStyle>
+#include <QStyleFactory>
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 
@@ -28,6 +32,41 @@ int main(int argc, char* argv[])
                                         ? "io.github.limo_app.limo"
                                         : "limo");
   QApplication app(argc, argv);
+
+  // limo-app/limo#230: Under Flatpak/KDE, QT_STYLE_OVERRIDE may name a style
+  // (e.g. "kvantum") that isn't present in the runtime, causing Qt to silently
+  // drop it and leave the app with a broken style and missing icons.  Detect
+  // this and fall back to Breeze (if available) or Fusion so the UI stays sane.
+  {
+    const QString requested =
+      QString::fromLocal8Bit(qgetenv("QT_STYLE_OVERRIDE")).trimmed();
+    if(!requested.isEmpty())
+    {
+      const QStringList available = QStyleFactory::keys();
+      // Case-insensitive search: Qt itself normalises names this way.
+      const bool valid = std::any_of(
+        available.cbegin(), available.cend(),
+        [&](const QString& key) { return key.compare(requested, Qt::CaseInsensitive) == 0; });
+      if(!valid)
+      {
+        const QStringList preferred = { "Breeze", "Fusion" };
+        for(const QString& candidate : preferred)
+        {
+          if(available.contains(candidate, Qt::CaseInsensitive))
+          {
+            QApplication::setStyle(QStyleFactory::create(candidate));
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  // limo-app/limo#230: Ensure action icons render when no XDG icon theme is
+  // configured (common in minimal Flatpak runtimes).
+  if(QIcon::themeName().isEmpty())
+    QIcon::setFallbackThemeName("breeze");
+
   // Apply the bundled palette-aware theme on top of the platform style.
   QFile style_file(":/styles/app.qss");
   if(style_file.open(QFile::ReadOnly | QFile::Text))

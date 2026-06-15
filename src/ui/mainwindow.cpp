@@ -130,9 +130,8 @@ void MainWindow::closeEvent(QCloseEvent* event)
   settings.setValue("ask_remove_profile", ask_remove_profile_);
   settings.setValue("ask_remove_backup_target", ask_remove_backup_target_);
   settings.setValue("ask_remove_tool", ask_remove_tool_);
-  settings.setValue("mod_list_sort_column",
-                    ui->mod_list->horizontalHeader()->sortIndicatorSection());
-  settings.setValue("mod_list_sort_order", ui->mod_list->horizontalHeader()->sortIndicatorOrder());
+  settings.setValue("mod_list_sort_column", ui->mod_list->header()->sortIndicatorSection());
+  settings.setValue("mod_list_sort_order", ui->mod_list->header()->sortIndicatorOrder());
   settings.setValue("sort_apps_alphabetically", sort_apps_alphabetically_);
   ipc_server_->shutdown();
   event->accept();
