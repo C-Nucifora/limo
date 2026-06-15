@@ -53,6 +53,32 @@ std::string decrypt(const std::string& cipher_text,
                     const std::string& nonce,
                     const std::string& tag);
 
-/*! \brief A default encryption key used in case no key was specified. */
+/*!
+ * \brief Sentinel value passed by callers to indicate that no master password was chosen.
+ *
+ * SECURITY (fork issue #28): This used to be a single, hardcoded key baked into the binary.
+ * Encrypting with it offered no real protection: anyone with the config file and the (public)
+ * binary could trivially recover the API key, while the UI implied the key was protected.
+ *
+ * It is now only a sentinel. When this value (or an empty string) is passed to encrypt()/
+ * decrypt(), a per-installation random key is used instead (see installationKey()). The random
+ * key is generated once and stored in a file with 0600 permissions inside the application's
+ * config directory, so it is at least not a single constant shared across all users/installs.
+ *
+ * The literal below is kept unchanged for backwards compatibility only: decrypt() falls back to
+ * it so that API keys encrypted by older versions can still be read (and re-saved under the new
+ * scheme on the next change).
+ */
 constexpr char default_key[] = "rWnYJVdtxz8Iu62GSJy0OPlOat7imMb8";
+
+/*!
+ * \brief Returns the per-installation encryption key used when no master password is set.
+ *
+ * The key is 32 random bytes, generated on first use and persisted base64-encoded in a file
+ * with owner-only (0600) permissions in the application config directory. It replaces the old
+ * hardcoded \ref default_key for newly stored API keys.
+ * \return The per-installation key.
+ * \throws CryptographyError If the key cannot be generated or persisted.
+ */
+std::string installationKey();
 };

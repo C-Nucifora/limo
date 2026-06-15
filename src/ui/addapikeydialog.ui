@@ -27,7 +27,9 @@
    <item>
     <widget class="QLabel" name="label_2">
      <property name="text">
-      <string>Chose a password for key encryption. If you leave this empty the key will be encrypted using a default password and you will not be prompted to enter a password when accessing the API. Not chosing a password might allow someone with access to this device to decrypt your API key.</string>
+      <string>Choose a master password for key encryption. If you set one, you will be prompted for it whenever the API key is accessed, and only this password can decrypt the key.
+
+If you leave this empty, the key is NOT protected by a password. It is encrypted with a random key unique to this installation, stored in a file readable only by your user account (chmod 600). This keeps the key out of plain sight and avoids any shared/hardcoded password, but anyone who can read your account's files can still recover the key. For real protection, set a master password.</string>
      </property>
      <property name="wordWrap">
       <bool>true</bool>
