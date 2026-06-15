@@ -170,6 +170,8 @@ set(CORE_SOURCES
         src/core/installer.h
         src/core/log.cpp
         src/core/log.h
+        src/core/bsaarchive.cpp
+        src/core/bsaarchive.h
         src/core/lspakextractor.cpp
         src/core/lspakextractor.h
         src/core/lspakfilelistentry.h
@@ -344,6 +346,9 @@ set(PROJECT_SOURCES
         src/ui/deployedfilestreedialog.cpp
         src/ui/deployedfilestreedialog.h
         src/ui/deployedfilestreedialog.ui
+        src/ui/bsabrowserdialog.cpp
+        src/ui/bsabrowserdialog.h
+        src/ui/bsabrowserdialog.ui
         src/ui/deployverifydialog.cpp
         src/ui/deployverifydialog.h
         src/ui/deployverifydialog.ui

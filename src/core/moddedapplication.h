@@ -818,6 +818,20 @@ public:
    * \return The colour map. Mods without a colour are not present in the map.
    */
   std::map<int, std::string> getModColors() const;
+  // fork #198: per-mod free-text category labels for organisation.
+  /*!
+   * \brief Sets the category for the given mod. An empty string clears the category.
+   * Categories are free-text, are not profile-scoped and are persisted in lmm_mods.json.
+   * \param mod_id Target mod id.
+   * \param category The new category text, or empty to clear.
+   */
+  void setModCategory(int mod_id, const std::string& category);
+  /*!
+   * \brief Returns the category for the given mod.
+   * \param mod_id Target mod id.
+   * \return The category, or an empty string if none is set.
+   */
+  std::string getModCategory(int mod_id) const;
   /*!
    * \brief Pins the given mod to its current installed version, suppressing update
    * notifications unless the remote version is strictly newer than the pinned version.
@@ -1044,6 +1058,8 @@ private:
   std::map<int, std::string> installer_map_;
   // fork #199: maps mods to an optional highlight colour (hex string). Empty/absent = none.
   std::map<int, std::string> mod_color_map_;
+  // fork #198: maps mods to an optional free-text category. Empty/absent = none.
+  std::map<int, std::string> mod_category_map_;
   /*! \brief Ids of mods for which update checks are permanently ignored. */
   std::set<int> update_ignore_list_;
   /*! \brief Path to this applications icon. */

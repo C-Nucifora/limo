@@ -1373,6 +1373,21 @@ public slots:
    * \return Map of mod id to hex colour string. Empty if the app id is invalid.
    */
   std::map<int, std::string> getModColors(int app_id);
+  // fork #198: per-mod free-text categories.
+  /*!
+   * \brief Sets the category attached to a mod. An empty string clears the category.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   * \param category The new category text, or empty to clear.
+   */
+  void setModCategory(int app_id, int mod_id, QString category);
+  /*!
+   * \brief Returns the category for a mod, or an empty string if none is set.
+   * \param app_id Target app.
+   * \param mod_id Target mod.
+   * \return The category text, or an empty string.
+   */
+  QString getModCategory(int app_id, int mod_id);
   // fork #145: bulk prune of outdated mod archive versions.
   /*!
    * \brief Returns the downloaded archives belonging to outdated mod versions which can be

@@ -44,6 +44,7 @@
 #include "ui/modconfigeditordialog.h" // fork #200
 #include "ui/instancedashboarddialog.h" // fork #203
 #include "ui/pruneversionsdialog.h" // fork #145
+#include "ui/bsabrowserdialog.h" // fork #201
 #include "ui/editautotagsdialog.h"
 #include "ui/editmanualtagsdialog.h"
 #include "ui/exportappconfigdialog.h"
@@ -237,6 +238,10 @@ private:
   QAction* clear_color_action_;
   /*! \brief fork #200: Mod context action: open the per-mod config-file editor. */
   QAction* edit_config_action_;
+  /*! \brief fork #78: checkable View action toggling the Tools pane visibility. */
+  QAction* show_tools_pane_action_ = nullptr;
+  /*! \brief fork #198: Mod context action: set the category of the selected mod(s). */
+  QAction* set_category_action_ = nullptr;
   /*! \brief Deployer context action: show per-file win/loss conflict detail for the selected mod. */
   QAction* conflict_detail_action_;
   /*! \brief Deployer context action (Witcher 3): merge conflicting WitcherScript files. */
@@ -1324,6 +1329,12 @@ private slots:
   void onEditModConfig();
   /*! \brief fork #203: Builds an instance summary and shows the dashboard dialog. */
   void onShowInstanceDashboard();
+  /*! \brief fork #78: Shows or hides the Tools pane and persists the choice. */
+  void onToggleToolsPane(bool visible);
+  /*! \brief fork #198: Prompts for and assigns a category to the selected mod(s). */
+  void onSetModCategory();
+  /*! \brief fork #201: Opens the BSA/BA2 archive browser dialog. */
+  void onOpenBsaBrowser();
   /*! \brief fork #208: Confirms then purges and redeploys all deployers from scratch. */
   void onForceRedeploy();
   /*! \brief fork #145: Requests the prunable outdated archive list for the current app. */
@@ -1946,6 +1957,8 @@ signals:
    * \param color #rrggbb hex string, or empty to clear.
    */
   void setModColor(int app_id, int mod_id, QString color);
+  /*! \brief fork #198: Sets (or clears, when empty) the category of a mod. */
+  void setModCategory(int app_id, int mod_id, QString category);
   /*!
    * \brief Pins or unpins the version of a mod.
    * \param app_id Target app.

@@ -34,6 +34,8 @@ struct ModInfo
   std::vector<std::string> auto_tags;
   /*! \brief fork #199: user-assigned highlight colour as a #rrggbb hex string. Empty = none. */
   std::string color;
+  /*! \brief fork #198: user-assigned free-text category. Empty = none. */
+  std::string category;
 
   /*!
    * \brief Constructor. Simply initializes members.

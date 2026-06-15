@@ -51,6 +51,8 @@ public:
   static constexpr int tags_col = 7;
   /*! \brief Index of the status column. */
   static constexpr int status_col = 8;
+  /*! \brief fork #198: Index of the category column. Appended last to keep existing indices stable. */
+  static constexpr int category_col = 9;
 
   /*! \brief Role representing the version of a mod. */
   static constexpr int version_list_role = 256;
@@ -94,6 +96,8 @@ public:
   static constexpr int mod_pinned_role = 278;
   /*! \brief Role representing the pinned version string of a mod. */
   static constexpr int mod_pinned_version_role = 279;
+  /*! \brief fork #198: Role representing the free-text category of a mod. */
+  static constexpr int category_role = 280;
 
   /*!
    * \brief Represents the overall state of a mod as shown in the status column.
