@@ -1655,6 +1655,17 @@
     <enum>QAction::MenuRole::NoRole</enum>
    </property>
   </action>
+  <action name="actionExport_Mod_List">
+   <property name="icon">
+    <iconset theme="document-save-as"/>
+   </property>
+   <property name="text">
+    <string>Export Mod List</string>
+   </property>
+   <property name="toolTip">
+    <string>Export the current deployer's ordered mod list to CSV or Markdown</string>
+   </property>
+  </action>
  </widget>
  <customwidgets>
   <customwidget>
