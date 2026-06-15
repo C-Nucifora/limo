@@ -25,9 +25,110 @@
   "auto_tags":
   [
     {
+      "name": "Archive BSA",
+      "expression": "0",
+      "conditions":
+      [
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "^.*\\.bsa$",
+          "use_regex": true
+        }
+      ]
+    },
+    {
+      "name": "Distributors",
+      "expression": "0or1or2or3or4",
+      "conditions":
+      [
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "^.*_DISTR\\.ini$",
+          "use_regex": true
+        },
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "^.*_CID\\.ini$",
+          "use_regex": true
+        },
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "^.*_DESC\\.ini$",
+          "use_regex": true
+        },
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "^.*_FLM\\.ini$",
+          "use_regex": true
+        },
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "^.*_KID\\.ini$",
+          "use_regex": true
+        }
+      ]
+    },
+    {
+      "name": "INI",
+      "expression": "0and1",
+      "conditions":
+      [
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "^.*\\.ini$",
+          "use_regex": true
+        },
+        {
+          "condition_type": "file_name",
+          "invert": true,
+          "search_string": "^.*meta\\.ini$",
+          "use_regex": false
+        }
+      ]
+    },
+    {
+      "name": "JSON",
+      "expression": "0",
+      "conditions":
+      [
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": ".*\\.json$",
+          "use_regex": true
+        }
+      ]
+    },
+    {
+      "name": "MCM",
+      "expression": "0or1",
+      "conditions":
+      [
+        {
+          "condition_type": "path",
+          "invert": false,
+          "search_string": "MCM/*",
+          "use_regex": false
+        },
+        {
+          "condition_type": "path",
+          "invert": false,
+          "search_string": "mcm/*",
+          "use_regex": false
+        }
+      ]
+    },
+    {
       "name": "Plugin",
       "expression": "0",
-      "conditions": 
+      "conditions":
       [
         {
           "condition_type": "path",
@@ -39,27 +140,45 @@
     },
     {
       "name": "SKSE",
-      "expression": "0",
-      "conditions": 
+      "expression": "0or1or2or3",
+      "conditions":
       [
         {
           "condition_type": "path",
           "invert": false,
           "search_string": "skse/*",
           "use_regex": false
+        },
+        {
+          "condition_type": "path",
+          "invert": false,
+          "search_string": "SKSE/*",
+          "use_regex": false
+        },
+        {
+          "condition_type": "path",
+          "invert": false,
+          "search_string": "sksevr/*",
+          "use_regex": false
+        },
+        {
+          "condition_type": "path",
+          "invert": false,
+          "search_string": "SKSEVR/*",
+          "use_regex": false
         }
       ]
     }
   ],
   "root_level_conditions" :
-	[
-		{
-			"case_invariant" : true,
-			"expression" : ".*\\.es[plm]",
-			"level_offset" : 0,
-			"matcher_type" : "regex",
-			"stop_on_branch" : false,
-			"target_type" : "file"
-		}
-	]
+  [
+    {
+      "case_invariant" : true,
+      "expression" : ".*\\.es[plm]",
+      "level_offset" : 0,
+      "matcher_type" : "regex",
+      "stop_on_branch" : false,
+      "target_type" : "file"
+    }
+  ]
 }
