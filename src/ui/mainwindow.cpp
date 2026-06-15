@@ -624,6 +624,27 @@ void MainWindow::setupMenus()
   std::sort(mod_list_actions.begin(), mod_list_actions.end(), sort_actions);
   mod_list_menu_->addActions(mod_list_actions);
 
+  bulk_enable_action_ = new QAction("Enable selected mods", this);
+  bulk_enable_action_->setIcon(QIcon::fromTheme("checkbox"));
+  connect(bulk_enable_action_, &QAction::triggered, this, &MainWindow::on_actionBulk_Enable_triggered);
+  bulk_disable_action_ = new QAction("Disable selected mods", this);
+  connect(
+    bulk_disable_action_, &QAction::triggered, this, &MainWindow::on_actionBulk_Disable_triggered);
+  bulk_add_tag_action_ = new QAction("Add tag to selected mods", this);
+  bulk_add_tag_action_->setIcon(QIcon::fromTheme("tag"));
+  connect(
+    bulk_add_tag_action_, &QAction::triggered, this, &MainWindow::on_actionBulk_Add_Tag_triggered);
+  bulk_remove_tag_action_ = new QAction("Remove tag from selected mods", this);
+  connect(bulk_remove_tag_action_,
+          &QAction::triggered,
+          this,
+          &MainWindow::on_actionBulk_Remove_Tag_triggered);
+  QList<QAction*> bulk_actions{
+    bulk_enable_action_, bulk_disable_action_, bulk_add_tag_action_, bulk_remove_tag_action_
+  };
+  mod_list_menu_->addSeparator();
+  mod_list_menu_->addActions(bulk_actions);
+
   ui->deployer_list->setContextMenuPolicy(Qt::CustomContextMenu);
   connect(ui->deployer_list,
           &ModListView::customContextMenuRequested,
@@ -3466,6 +3487,83 @@ void MainWindow::on_actionEdit_Tags_for_mods_triggered()
     currentApp(), tags, mod_tags, mod_name, ui->mod_list->getSelectedModIds());
   setBusyStatus(true, false);
   manage_mod_tags_dialog_->show();
+}
+
+void MainWindow::setBulkModStatus(bool status)
+{
+  if(ui->app_selection_box->count() == 0 || ui->deployer_selection_box->count() == 0)
+    return;
+
+  const auto indices = ui->mod_list->getSelectedRowIndices();
+  if(indices.empty())
+    return;
+
+  const int app_id = currentApp();
+  for(const auto& index : indices)
+  {
+    const int mod_id = index.data(ModListModel::mod_id_role).toInt();
+    const auto deployer_ids =
+      index.data(ModListModel::deployer_ids_role).value<std::vector<int>>();
+    for(int deployer : deployer_ids)
+      emit setModStatus(app_id, deployer, mod_id, status);
+  }
+  emit getDeployerInfo(app_id, currentDeployer());
+}
+
+void MainWindow::on_actionBulk_Enable_triggered()
+{
+  setBulkModStatus(true);
+}
+
+void MainWindow::on_actionBulk_Disable_triggered()
+{
+  setBulkModStatus(false);
+}
+
+void MainWindow::on_actionBulk_Add_Tag_triggered()
+{
+  if(ui->app_selection_box->count() == 0 || ui->deployer_selection_box->count() == 0)
+    return;
+
+  const auto mod_ids = ui->mod_list->getSelectedModIds();
+  if(mod_ids.empty())
+    return;
+
+  bool ok = false;
+  const QString tag =
+    QInputDialog::getText(this, "Add Tag", "Tag name:", QLineEdit::Normal, "", &ok);
+  if(!ok || tag.isEmpty())
+    return;
+
+  emit addTagsToMods(currentApp(), QStringList{ tag }, mod_ids);
+  emit getDeployerInfo(currentApp(), currentDeployer());
+}
+
+void MainWindow::on_actionBulk_Remove_Tag_triggered()
+{
+  if(ui->app_selection_box->count() == 0 || ui->deployer_selection_box->count() == 0)
+    return;
+
+  const auto mod_ids = ui->mod_list->getSelectedModIds();
+  if(mod_ids.empty())
+    return;
+
+  QStringList existing_tags;
+  for(const auto& [name, _] : num_mods_per_manual_tag_)
+    existing_tags.append(name.c_str());
+
+  bool ok = false;
+  QString tag;
+  if(existing_tags.empty())
+    tag = QInputDialog::getText(this, "Remove Tag", "Tag name:", QLineEdit::Normal, "", &ok);
+  else
+    tag = QInputDialog::getItem(
+      this, "Remove Tag", "Tag name:", existing_tags, 0, true, &ok);
+  if(!ok || tag.isEmpty())
+    return;
+
+  emit removeTagsFromMods(currentApp(), QStringList{ tag }, mod_ids);
+  emit getDeployerInfo(currentApp(), currentDeployer());
 }
 
 void MainWindow::onModManualTagFilterChanged(QString tag, int state)
