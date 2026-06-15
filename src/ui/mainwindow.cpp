@@ -3249,15 +3249,11 @@ void MainWindow::onBisectDeployerMenuClicked()
   entries.reserve(rows);
   for(int row = 0; row < rows; row++)
   {
-    const QString name =
-      deployer_model_
-        ->data(deployer_model_->index(row, DeployerListModel::name_col), Qt::DisplayRole)
-        .toString();
+    const QModelIndex idx =
+      deployer_model_->index(row, DeployerListModel::name_col, QModelIndex());
+    const QString name = deployer_model_->data(idx, Qt::DisplayRole).toString();
     const bool enabled =
-      deployer_model_
-        ->data(deployer_model_->index(row, DeployerListModel::status_col),
-               DeployerListModel::mod_status_role)
-        .toBool();
+      deployer_model_->data(idx, DeployerListModel::mod_status_role).toBool();
     entries.push_back({ name.toStdString(), enabled });
   }
   auto* dialog = new LoadOrderBisectDialog(this);
