@@ -247,6 +247,17 @@ protected:
   virtual void updatePlugins();
   /*! \brief Load plugins from the plugins file. */
   virtual void loadPlugins();
+  /*!
+   * \brief Reads the enabled/disabled state currently stored in the on-disk plugin state file.
+   *
+   * The plugin state file (plugin_file_name_) may have been edited by an external tool, the game
+   * itself or the user since Limo last wrote it. This returns the externally observed state so that
+   * reconciliation can prefer it over Limo's potentially stale in-memory state. Keys are lower cased
+   * to preserve the case-insensitive plugin matching used throughout the base class.
+   * \return Maps lower cased plugin name to its enabled state, or an empty optional if the file
+   * does not exist (i.e. there is no authoritative external state to respect).
+   */
+  virtual std::optional<std::map<std::string, bool>> readExternalPluginState() const;
   /*! \brief Writes current load order to plugins file. */
   virtual void writePlugins() const;
   /*!

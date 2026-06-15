@@ -790,6 +790,12 @@ private:
   std::string name_;
   /*! \brief Contains the internal state of this object. */
   Json::Value json_settings_;
+  /*!
+   * \brief True if the on-disk settings file could not be parsed during the last load attempt.
+   * While set, writeSettings() refuses to overwrite the existing settings file so a parse
+   * error can not destroy a recoverable config.
+   */
+  bool settings_load_failed_ = false;
   /*! \brief The path to the staging directory containing all installed mods. */
   std::filesystem::path staging_dir_;
   /*! \brief Contains all currently installed mods. */

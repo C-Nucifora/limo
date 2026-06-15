@@ -1840,6 +1840,18 @@ void ModdedApplication::updateSettings(bool write)
 
 void ModdedApplication::writeSettings() const
 {
+  // Refuse to overwrite an existing settings file when the last load failed to parse it.
+  // Otherwise a partial/empty in-memory config could silently destroy a recoverable file.
+  if(settings_load_failed_ && sfs::exists(staging_dir_ / CONFIG_FILE_NAME))
+  {
+    log_(Log::LOG_ERROR,
+         "Refusing to overwrite settings file \"" +
+           (staging_dir_ / CONFIG_FILE_NAME).string() +
+           "\" because it could not be parsed during loading. Resolve or remove the corrupt "
+           "file (a \"." +
+           CONFIG_FILE_NAME + ".corrupt\" backup may have been created) before saving.");
+    return;
+  }
   sfs::path settings_file_path = staging_dir_ / (CONFIG_FILE_NAME + ".tmp");
   std::ofstream file(settings_file_path, std::fstream::binary);
   if(!file.is_open())
@@ -1856,8 +1868,40 @@ void ModdedApplication::readSettings()
   std::ifstream file(settings_file_path, std::fstream::binary);
   if(!file.is_open())
     throw std::runtime_error("Error: Could not read from \"" + settings_file_path.string() + "\".");
-  file >> json_settings_;
-  file.close();
+  try
+  {
+    file >> json_settings_;
+    file.close();
+  }
+  catch(...)
+  {
+    file.close();
+    // The settings file is present but could not be parsed (corruption, partial write, ...).
+    // Preserve the on-disk file so the user can recover and make sure no later write path
+    // overwrites it with an empty/partial config.
+    settings_load_failed_ = true;
+    json_settings_.clear();
+    try
+    {
+      sfs::path corrupt_path = staging_dir_ / ("." + CONFIG_FILE_NAME + ".corrupt");
+      sfs::copy(settings_file_path, corrupt_path, sfs::copy_options::overwrite_existing);
+      log_(Log::LOG_ERROR,
+           "Could not parse settings file \"" + settings_file_path.string() +
+             "\". A backup has been written to \"" + corrupt_path.string() +
+             "\". The existing settings file has been left untouched to allow recovery.");
+    }
+    catch(const std::exception& backup_error)
+    {
+      log_(Log::LOG_ERROR,
+           "Could not parse settings file \"" + settings_file_path.string() +
+             "\" and additionally failed to create a backup: " + backup_error.what() +
+             ". The existing settings file has been left untouched to allow recovery.");
+    }
+    throw;
+  }
+  // Successful parse: the in-memory state once again reflects the on-disk file, so writes are
+  // safe again.
+  settings_load_failed_ = false;
 }
 
 void ModdedApplication::updateState(bool read)

@@ -322,11 +322,29 @@ void PluginDeployer::updatePlugins()
     if(std::regex_match(file_name, plugin_regex_))
       plugin_files.push_back(file_name);
   }
+
+  // The on-disk plugin state file may have been edited externally (by the game, a launcher,
+  // xEdit, ...) since Limo last wrote it. Treat that file, when present, as the authoritative
+  // source for enabled/disabled flags so external changes are not clobbered by Limo's stale
+  // in-memory state. See limo-app/limo#134.
+  const std::optional<std::map<std::string, bool>> external_state = readExternalPluginState();
+
   for(auto it = plugins_.begin(); it != plugins_.end(); it++)
   {
     if(str::find_if(plugin_files, [&it](const auto& s) { return it->first == s; }) !=
        plugin_files.end())
-      new_plugins.emplace_back(*it);
+    {
+      auto plugin = *it;
+      // For plugins present in both Limo's state and the external file, prefer the externally
+      // observed enabled flag over Limo's potentially stale stored value (limo-app/limo#134).
+      if(external_state)
+      {
+        const auto ext_it = external_state->find(pu::toLowerCase(plugin.first));
+        if(ext_it != external_state->end())
+          plugin.second = ext_it->second;
+      }
+      new_plugins.emplace_back(std::move(plugin));
+    }
     else
       // Plugin is listed in the load-order file but has no corresponding file on
       // disk.  Drop it from the active list and log a warning so users know why
@@ -343,11 +361,45 @@ void PluginDeployer::updatePlugins()
   }
   for(auto it = plugin_files.begin(); it != plugin_files.end(); it++)
   {
-    if(str::find_if(new_plugins, [&it](auto& p) { return p.first == *it; }) == new_plugins.end())
-      new_plugins.emplace_back(*it, true);
+    if(str::find_if(new_plugins, [&it](auto& p) { return p.first == *it; }) != new_plugins.end())
+      continue;
+    // Newly discovered plugin file. If the external state file lists it, honor that flag instead
+    // of unconditionally force-enabling it. Only default to enabled when there is no authoritative
+    // external information for this plugin.
+    bool enabled = true;
+    if(external_state)
+    {
+      const auto ext_it = external_state->find(pu::toLowerCase(*it));
+      if(ext_it != external_state->end())
+        enabled = ext_it->second;
+    }
+    new_plugins.emplace_back(*it, enabled);
   }
   plugins_ = new_plugins;
   writePlugins();
+}
+
+std::optional<std::map<std::string, bool>> PluginDeployer::readExternalPluginState() const
+{
+  const sfs::path state_path = dest_path_ / plugin_file_name_;
+  if(!sfs::exists(state_path))
+    return {};
+
+  std::ifstream plugin_file(state_path);
+  if(!plugin_file.is_open())
+    return {};
+
+  std::map<std::string, bool> state;
+  std::string line;
+  while(getline(plugin_file, line))
+  {
+    std::smatch match;
+    if(std::regex_match(line, match, plugin_file_line_regex_))
+      // Key is lower cased to keep the case-insensitive plugin matching used elsewhere.
+      state[pu::toLowerCase(std::string(match[2]))] = match[1] == "*";
+  }
+  plugin_file.close();
+  return state;
 }
 
 void PluginDeployer::loadPlugins()

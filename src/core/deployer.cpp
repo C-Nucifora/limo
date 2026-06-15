@@ -1,6 +1,7 @@
 #include "deployer.h"
 #include "pathutils.h"
 #include <algorithm>
+#include <cctype>
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -502,6 +503,9 @@ Deployer::getDeploymentSourceFilesAndModSizes(const std::vector<int>& loadorder)
       if(dir_entry.is_symlink())
         continue;
       const bool is_regular_file = dir_entry.is_regular_file();
+      // Skip blacklisted files (e.g. README.md, codes.txt) so they are never deployed.
+      if(is_regular_file && isIgnoredFile(dir_entry.path()))
+        continue;
       if(is_regular_file)
         mod_size += dir_entry.file_size();
       if(is_regular_file || dir_entry.is_directory())
@@ -1057,4 +1061,71 @@ void Deployer::setEnableUnsafeSorting(bool enable)
 void Deployer::removeManagedDirFile(const sfs::path& directory) const
 {
   sfs::remove(directory / managed_dir_file_name_);
+}
+
+std::vector<std::string> Deployer::getIgnoredFiles() const
+{
+  return ignored_files_;
+}
+
+void Deployer::setIgnoredFiles(const std::vector<std::string>& ignored_files)
+{
+  ignored_files_ = ignored_files;
+}
+
+bool Deployer::isIgnoredFile(const sfs::path& path) const
+{
+  // Lower-cases a string for case-insensitive comparison.
+  const auto to_lower = [](std::string s)
+  {
+    str::transform(s, s.begin(), [](unsigned char c) { return std::tolower(c); });
+    return s;
+  };
+
+  // Matches a basename against a simple glob pattern where '*' matches any sequence of
+  // characters. All inputs are expected to already be lower-cased.
+  const auto glob_match = [](const std::string& name, const std::string& pattern)
+  {
+    // Iterative wildcard matching with backtracking on the most recent '*'.
+    size_t n = 0, p = 0, star = std::string::npos, match = 0;
+    while(n < name.size())
+    {
+      if(p < pattern.size() && pattern[p] == '*')
+      {
+        star = p++;
+        match = n;
+      }
+      else if(p < pattern.size() && pattern[p] == name[n])
+      {
+        p++;
+        n++;
+      }
+      else if(star != std::string::npos)
+      {
+        p = star + 1;
+        n = ++match;
+      }
+      else
+        return false;
+    }
+    while(p < pattern.size() && pattern[p] == '*')
+      p++;
+    return p == pattern.size();
+  };
+
+  const std::string name = to_lower(path.filename().string());
+  if(name.empty())
+    return false;
+  for(const auto& pattern : ignored_files_)
+  {
+    const std::string lowered_pattern = to_lower(pattern);
+    if(lowered_pattern.find('*') == std::string::npos)
+    {
+      if(name == lowered_pattern)
+        return true;
+    }
+    else if(glob_match(name, lowered_pattern))
+      return true;
+  }
+  return false;
 }
