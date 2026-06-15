@@ -216,6 +216,40 @@ public:
    */
   virtual std::vector<std::vector<int>> getValidModActions() const override;
 
+  /*!
+   * \brief Describes one enabled plugin whose master dependencies are not all satisfied.
+   *
+   * Surfaced by \ref findMissingMasters as the detection step of the "guided fix for missing
+   * plugin masters" health check (fork feature #150). A plugin (.esp/.esm/.esl) declares the
+   * master files it depends on in its file header; if such a master is not present among the
+   * managed plugins, or is present but disabled, the game will typically crash on load.
+   */
+  struct MissingMasterInfo
+  {
+    /*! \brief File name of the plugin that has unmet master dependencies. */
+    std::string plugin;
+    /*! \brief Masters required by the plugin that are not present among the managed plugins. */
+    std::vector<std::string> missing_masters;
+    /*! \brief Masters required by the plugin that are present but currently disabled. */
+    std::vector<std::string> disabled_masters;
+  };
+
+  /*!
+   * \brief Detects enabled plugins whose required master files are missing or disabled.
+   *
+   * For every enabled plugin the master dependencies are read directly from the plugin file
+   * header (see \ref readPluginMasters) and compared, case-insensitively, against the set of
+   * managed plugins. Masters that are not present at all are reported as missing; masters that
+   * are present but disabled are reported separately. Plugins whose files cannot be read or are
+   * too short to contain a valid header are skipped silently and never cause a crash.
+   *
+   * This is the detection ("surfacing") half of the guided fix; the interactive fix UI that
+   * lets the user enable/install the offending masters is a documented follow-up.
+   * \return One \ref MissingMasterInfo entry per plugin that has at least one missing or
+   * disabled master. Plugins with all masters satisfied are omitted.
+   */
+  std::vector<MissingMasterInfo> findMissingMasters() const;
+
 protected:
   /*! \brief Appended to profile file names. */
   static constexpr std::string EXTENSION = ".lmmprof";
@@ -298,4 +332,27 @@ protected:
    * \return The hidden file.
    */
   std::string hideFile(const std::string& name);
+
+  /*!
+   * \brief Reads the master file dependencies declared in a plugin file's header.
+   *
+   * Performs a minimal binary read of the plugin header only; the rest of the file is never
+   * parsed. Two on-disk layouts are supported:
+   *
+   * - TES4 style (Oblivion, Fallout 3/NV, Skyrim (SE/AE), Fallout 4): the file begins with a
+   *   24 byte record header whose 4 byte type is "TES4", followed by the record's field
+   *   (subrecord) data. Each field is a 4 byte type plus a 2 byte little-endian size, then the
+   *   payload. The master file names are stored in "MAST" fields, each a NUL-terminated string.
+   * - TES3 style (Morrowind, OpenMW): the file begins with a "TES3" record; its subrecords use a
+   *   4 byte type plus a 4 byte little-endian size. Master file names are stored in "MAST"
+   *   subrecords (a NUL-terminated string), each typically followed by a "DATA" subrecord.
+   *
+   * The function is deliberately defensive: files that cannot be opened, are shorter than a
+   * valid header, or have inconsistent sizes are treated as having no masters rather than
+   * throwing, so a malformed plugin can never crash the health check.
+   * \param plugin_path Absolute path to the plugin file to inspect.
+   * \return The list of master file names referenced by the plugin, in file order. Empty if the
+   * file could not be read or declares no masters.
+   */
+  std::vector<std::string> readPluginMasters(const std::filesystem::path& plugin_path) const;
 };
