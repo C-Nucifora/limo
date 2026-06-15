@@ -1844,6 +1844,110 @@ void ModdedApplication::exportConfiguration(const std::vector<int>& deployers,
   file << json;
 }
 
+void ModdedApplication::exportInstance(const sfs::path& target) const
+{
+  // Reuse the on-disk settings as the basis for the bundle. json_settings_ is kept in sync
+  // with the object state by updateSettings, so it already contains the full config
+  // (app + deployers + profiles + tools + groups + tags + rules), minus the mod blobs.
+  Json::Value bundle;
+  bundle["format"] = "limo_instance";
+  bundle["version"] = INSTANCE_BUNDLE_VERSION;
+  bundle["exported_name"] = name_;
+
+  Json::Value config = json_settings_;
+  // Generalize the icon path so the bundle does not pin a machine specific Steam path.
+  if(config.isMember("icon_path"))
+    config["icon_path"] = generalizeSteamPath(config["icon_path"].asString());
+  // Generalize deployer destination paths; source paths are already stored relocatable
+  // (STAGING_TOKEN or an autonomous path) by updateSettings.
+  if(config.isMember("deployers"))
+  {
+    for(Json::Value& deployer : config["deployers"])
+    {
+      if(deployer.isMember("dest_path"))
+        deployer["dest_path"] = generalizeSteamPath(deployer["dest_path"].asString());
+    }
+  }
+  // Generalize tool paths if present. Tools serialize via Tool::toJson; we only touch obvious
+  // path-like string members to stay conservative.
+  if(config.isMember("tools"))
+  {
+    for(Json::Value& tool : config["tools"])
+    {
+      for(const char* key : { "path", "command", "working_directory", "icon_path" })
+      {
+        if(tool.isMember(key) && tool[key].isString())
+          tool[key] = generalizeSteamPath(tool[key].asString());
+      }
+    }
+  }
+
+  bundle["config"] = config;
+
+  sfs::path out_path = target;
+  if(sfs::is_directory(target))
+    out_path = target / INSTANCE_BUNDLE_FILE_NAME;
+
+  log_(Log::LOG_INFO,
+       std::format("Exporting instance '{}' to '{}'", name_, out_path.string()));
+  sfs::path tmp_path = out_path;
+  tmp_path += ".tmp";
+  std::ofstream file(tmp_path, std::fstream::binary);
+  if(!file.is_open())
+    throw std::runtime_error("Error: Could not write to \"" + out_path.string() + "\".");
+  file << bundle;
+  file.close();
+  sfs::rename(tmp_path, out_path);
+}
+
+Json::Value ModdedApplication::parseInstanceBundle(const sfs::path& bundle)
+{
+  sfs::path in_path = bundle;
+  if(sfs::is_directory(bundle))
+    in_path = bundle / INSTANCE_BUNDLE_FILE_NAME;
+
+  std::ifstream file(in_path, std::fstream::binary);
+  if(!file.is_open())
+    throw std::runtime_error("Error: Could not read from \"" + in_path.string() + "\".");
+  Json::Value root;
+  file >> root;
+  file.close();
+
+  if(!root.isMember("format") || root["format"].asString() != "limo_instance")
+    throw ParseError("\"" + in_path.string() + "\" is not a valid Limo instance bundle.");
+  if(root.isMember("version") && root["version"].asInt() > INSTANCE_BUNDLE_VERSION)
+    throw ParseError(std::format(
+      "Instance bundle \"{}\" was created by a newer version of Limo (bundle version {}).",
+      in_path.string(),
+      root["version"].asInt()));
+  if(!root.isMember("config"))
+    throw ParseError("Instance bundle \"" + in_path.string() + "\" is missing its config.");
+
+  return root["config"];
+}
+
+void ModdedApplication::importInstanceInto(const sfs::path& bundle, const sfs::path& staging_dir)
+{
+  if(sfs::exists(staging_dir / CONFIG_FILE_NAME))
+    throw std::runtime_error("Error: A config file already exists in \"" + staging_dir.string() +
+                             "\". Refusing to overwrite an existing instance.");
+
+  Json::Value config = parseInstanceBundle(bundle);
+
+  sfs::create_directories(staging_dir);
+  sfs::path config_path = staging_dir / CONFIG_FILE_NAME;
+  sfs::path tmp_path = staging_dir / (CONFIG_FILE_NAME + ".tmp");
+  std::ofstream file(tmp_path, std::fstream::binary);
+  if(!file.is_open())
+    throw std::runtime_error("Error: Could not write to \"" + config_path.string() + "\".");
+  file << config;
+  file.close();
+  sfs::rename(tmp_path, config_path);
+  // A ModdedApplication constructed on staging_dir will now load this config. Steam/home
+  // path tokens and STAGING_TOKEN are resolved lazily during that load, so the imported
+  // instance is immediately usable on the new machine.
+}
+
 void ModdedApplication::updateIgnoredFiles(int deployer)
 {
   if(deployers_[deployer]->getType() != DeployerFactory::REVERSEDEPLOYER)
@@ -1953,9 +2057,12 @@ void ModdedApplication::updateSettings(bool write)
   {
     json_settings_["deployers"][depl]["dest_path"] = deployers_[depl]->getDestPath();
     if(deployers_[depl]->isAutonomous())
-      json_settings_["deployers"][depl]["source_path"] = deployers_[depl]->sourcePath().string();
+      json_settings_["deployers"][depl]["source_path"] =
+        relativizeToStaging(deployers_[depl]->sourcePath());
     else
-      json_settings_["deployers"][depl]["source_path"] = staging_dir_.string();
+      // Non-autonomous deployers always source from the staging directory; store this in a
+      // relocatable form so the instance can be moved to a different staging path.
+      json_settings_["deployers"][depl]["source_path"] = STAGING_TOKEN;
     json_settings_["deployers"][depl]["name"] = deployers_[depl]->getName();
     json_settings_["deployers"][depl]["type"] = deployers_[depl]->getType();
     json_settings_["deployers"][depl]["deploy_mode"] = deployers_[depl]->getDeployMode();
@@ -2213,7 +2320,7 @@ void ModdedApplication::updateState(bool read)
       deploy_mode = static_cast<Deployer::DeployMode>(deployers[depl]["deploy_mode"].asInt());
     deployers_.push_back(
       DeployerFactory::makeDeployer(type,
-                                    sfs::path(deployers[depl]["source_path"].asString()),
+                                    resolveFromStaging(deployers[depl]["source_path"].asString()),
                                     sfs::path(deployers[depl]["dest_path"].asString()),
                                     deployers[depl]["name"].asString(),
                                     deploy_mode));
@@ -2660,7 +2767,40 @@ void ModdedApplication::performUpdateCheck(const std::vector<int>& target_mod_in
   updateSettings(true);
 }
 
-std::string ModdedApplication::generalizeSteamPath(const std::string& path)
+std::string ModdedApplication::relativizeToStaging(const sfs::path& path) const
+{
+  std::error_code ec;
+  const sfs::path canonical_staging = sfs::weakly_canonical(staging_dir_, ec);
+  const sfs::path base = ec ? staging_dir_ : canonical_staging;
+  const sfs::path canonical_path = sfs::weakly_canonical(path, ec);
+  const sfs::path target = ec ? path : canonical_path;
+
+  const std::string base_str = base.string();
+  const std::string target_str = target.string();
+  if(base_str.empty() || target_str.size() < base_str.size() ||
+     target_str.compare(0, base_str.size(), base_str) != 0)
+    return path.string();
+  // Only treat as relative if the staging prefix ends on a path boundary.
+  if(target_str.size() > base_str.size() && target_str[base_str.size()] != '/')
+    return path.string();
+
+  std::string remainder = target_str.substr(base_str.size());
+  return STAGING_TOKEN + remainder;
+}
+
+sfs::path ModdedApplication::resolveFromStaging(const std::string& path) const
+{
+  if(!path.starts_with(STAGING_TOKEN))
+    return sfs::path(path);
+  std::string remainder = path.substr(STAGING_TOKEN.size());
+  if(!remainder.empty() && remainder.front() == '/')
+    remainder.erase(0, 1);
+  if(remainder.empty())
+    return staging_dir_;
+  return staging_dir_ / remainder;
+}
+
+std::string ModdedApplication::generalizeSteamPath(const std::string& path) const
 {
   std::string modified_path = path;
   std::regex install_regex(R"((\/.*\/steamapps\/common\/.*?)(?:\/.*)?)");
