@@ -271,6 +271,36 @@ void LootDeployer::sortModsByConflicts(std::optional<ProgressNode*> progress_nod
                    num_master_plugins,
                    num_standard_plugins,
                    num_light_plugins));
+  // Surface LOOT's per-plugin messages so users see issues even before the
+  // dedicated UI surface lands (see UI hookup note in lootdeployer.h).
+  const auto plugin_messages = getPluginMessages();
+  if(!plugin_messages.empty())
+  {
+    int num_warnings = 0;
+    int num_errors = 0;
+    for(const auto& message : plugin_messages)
+    {
+      if(message.severity == MessageSeverity::warn)
+        num_warnings++;
+      else if(message.severity == MessageSeverity::error)
+        num_errors++;
+    }
+    log_(Log::LOG_WARNING,
+         std::format("LOOT: {} plugin message(s) ({} warning(s), {} error(s)). "
+                     "Use getPluginMessages() to inspect them.",
+                     plugin_messages.size(),
+                     num_warnings,
+                     num_errors));
+    for(const auto& message : plugin_messages)
+    {
+      if(message.severity == MessageSeverity::say)
+        continue;
+      const Log::LogLevel level =
+        message.severity == MessageSeverity::error ? Log::LOG_ERROR : Log::LOG_WARNING;
+      log_(level, std::format("LOOT: '{}': {}", message.plugin_name, message.text));
+    }
+  }
+
   if(enable_unsafe_sorting_)
     plugins_ = new_plugins;
   writePluginTags();
@@ -371,6 +401,107 @@ void LootDeployer::writePluginUserMetadata(const std::vector<PluginUserMetadata>
        std::format("LOOT: Wrote user metadata for {} plugins to '{}'",
                    metadata.size(),
                    user_list_path.string()));
+}
+
+std::vector<LootDeployer::PluginMessage> LootDeployer::getPluginMessages() const
+{
+  std::vector<PluginMessage> messages;
+  try
+  {
+    auto loot_handle = loot::CreateGameHandle(app_type_, source_path_, dest_path_);
+    auto& database = loot_handle->GetDatabase();
+
+    const sfs::path master_list_path = dest_path_ / "masterlist.yaml";
+    sfs::path user_list_path(dest_path_ / "userlist.yaml");
+    if(!sfs::exists(user_list_path))
+      user_list_path = "";
+    sfs::path prelude_path(dest_path_ / "prelude.yaml");
+    if(!sfs::exists(prelude_path))
+      prelude_path = "";
+    loadLists(database, sfs::exists(master_list_path) ? master_list_path : sfs::path(),
+              user_list_path, prelude_path);
+
+    // Load the plugins so condition evaluation has the data it needs.
+    std::vector<sfs::path> plugin_paths;
+    plugin_paths.reserve(plugins_.size());
+    for(const auto& [path, s] : plugins_)
+      plugin_paths.emplace_back(source_path_ / path);
+    loot_handle->LoadPlugins(plugin_paths, false);
+
+    const auto select_text = [](const std::vector<loot::MessageContent>& content) -> std::string
+    {
+      const auto selected =
+        loot::SelectMessageContent(content, std::string(loot::MessageContent::DEFAULT_LANGUAGE));
+      if(selected)
+        return selected->GetText();
+      if(!content.empty())
+        return content.front().GetText();
+      return {};
+    };
+    const auto to_severity = [](loot::MessageType type)
+    {
+      switch(type)
+      {
+        case loot::MessageType::warn:
+          return MessageSeverity::warn;
+        case loot::MessageType::error:
+          return MessageSeverity::error;
+        default:
+          return MessageSeverity::say;
+      }
+    };
+
+    for(const auto& [plugin, enabled] : plugins_)
+    {
+      // Evaluate conditions so only messages relevant to the current setup are returned.
+      const auto meta_data = database.GetPluginMetadata(plugin, true, true);
+      if(!meta_data)
+        continue;
+
+      for(const auto& message : meta_data->GetMessages())
+      {
+        std::string text = select_text(message.GetContent());
+        if(text.empty())
+          continue;
+        messages.push_back({ plugin, to_severity(message.GetType()), std::move(text) });
+      }
+
+      for(const auto& req : meta_data->GetRequirements())
+      {
+        const std::string file = static_cast<std::string>(req.GetName());
+        if(!pu::pathExists(file, source_path_))
+          messages.push_back(
+            { plugin, MessageSeverity::error, "Missing requirement: '" + file + "'" });
+      }
+
+      for(const auto& inc : meta_data->GetIncompatibilities())
+      {
+        const std::string file = static_cast<std::string>(inc.GetName());
+        if(pu::pathExists(file, source_path_))
+          messages.push_back(
+            { plugin, MessageSeverity::warn, "Incompatible with installed '" + file + "'" });
+      }
+
+      for(const auto& dirty : meta_data->GetDirtyInfo())
+      {
+        std::string text = "Dirty plugin: " + std::to_string(dirty.GetITMCount()) +
+                           " ITM, " + std::to_string(dirty.GetDeletedReferenceCount()) +
+                           " deleted references, " + std::to_string(dirty.GetDeletedNavmeshCount()) +
+                           " deleted navmeshes (clean with " + dirty.GetCleaningUtility() + ")";
+        const std::string detail = select_text(dirty.GetDetail());
+        if(!detail.empty())
+          text += ": " + detail;
+        messages.push_back({ plugin, MessageSeverity::warn, std::move(text) });
+      }
+    }
+  }
+  catch(const std::exception& e)
+  {
+    log_(Log::LOG_WARNING,
+         std::format("LOOT: Could not collect plugin messages: {}", e.what()));
+    return {};
+  }
+  return messages;
 }
 
 void LootDeployer::writePlugins() const
@@ -699,4 +830,20 @@ void LootDeployer::updatePluginTagsPrivate()
     }
   }
   writePluginTags();
+}
+
+void LootDeployer::loadLists(loot::DatabaseInterface& database,
+                            const sfs::path& master_list_path,
+                            const sfs::path& user_list_path,
+                            const sfs::path& prelude_path)
+{
+  if(!master_list_path.empty())
+  {
+    if(!prelude_path.empty())
+      database.LoadMasterlistWithPrelude(master_list_path, prelude_path);
+    else
+      database.LoadMasterlist(master_list_path);
+  }
+  if(!user_list_path.empty())
+    database.LoadUserlist(user_list_path);
 }
