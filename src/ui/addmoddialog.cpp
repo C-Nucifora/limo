@@ -99,9 +99,14 @@ void AddModDialog::showError(const std::runtime_error& error)
 
 int AddModDialog::detectRootLevel(int deployer) const
 {
+  if(deployer < 0 || deployer >= static_cast<int>(case_invariant_deployers_.size()) ||
+     deployer >= deployer_paths_.size())
+    return 0;
   bool is_case_invariant = case_invariant_deployers_[deployer];
   sfs::path deployer_path = deployer_paths_[deployer].toStdString();
   auto cur_item = ui->content_tree->invisibleRootItem();
+  if(!cur_item)
+    return 0;
   if(cur_item->childCount() != 1)
     return 0;
 
