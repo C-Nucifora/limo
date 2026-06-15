@@ -1,5 +1,7 @@
 #include "lootdeployer.h"
 #include "pathutils.h"
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cpr/cpr.h>
 #include <fstream>
@@ -401,6 +403,164 @@ void LootDeployer::writePluginUserMetadata(const std::vector<PluginUserMetadata>
        std::format("LOOT: Wrote user metadata for {} plugins to '{}'",
                    metadata.size(),
                    user_list_path.string()));
+}
+
+namespace
+{
+/*!
+ * \brief Idempotently sets a key=value pair inside the given section of an INI file.
+ *
+ * Existing sections/keys are reused (value updated in place) rather than duplicated and
+ * all other content (other sections, keys, comments, blank lines) is preserved. Missing
+ * sections or keys are created. The section/key match is case insensitive, mirroring how
+ * the Bethesda engines parse these files.
+ *
+ * \param ini_path Path to the INI file. Created if it does not exist.
+ * \param section Section name without the surrounding brackets, e.g. "Archive".
+ * \param key Key name, e.g. "bInvalidateOlderFiles".
+ * \param value Value to store, e.g. "1".
+ */
+void setIniValue(const sfs::path& ini_path,
+                 const std::string& section,
+                 const std::string& key,
+                 const std::string& value)
+{
+  const auto to_lower = [](std::string s)
+  {
+    std::transform(s.begin(),
+                   s.end(),
+                   s.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return s;
+  };
+  const auto trim = [](const std::string& s)
+  {
+    const auto begin = s.find_first_not_of(" \t\r\n");
+    if(begin == std::string::npos)
+      return std::string();
+    const auto end = s.find_last_not_of(" \t\r\n");
+    return s.substr(begin, end - begin + 1);
+  };
+
+  // Read the existing file line by line, if it exists.
+  std::vector<std::string> lines;
+  if(sfs::exists(ini_path))
+  {
+    std::ifstream in(ini_path, std::ios::binary);
+    std::string line;
+    while(std::getline(in, line))
+    {
+      if(!line.empty() && line.back() == '\r')
+        line.pop_back();
+      lines.push_back(line);
+    }
+  }
+
+  const std::string section_lc = to_lower(section);
+  const std::string key_lc = to_lower(key);
+  const std::string new_line = key + "=" + value;
+
+  int section_start = -1; // index of the "[section]" header line
+  int section_end = -1;   // index one past the last line belonging to the section
+  bool in_target_section = false;
+  for(int i = 0; i < static_cast<int>(lines.size()); i++)
+  {
+    const std::string trimmed = trim(lines[i]);
+    if(trimmed.size() >= 2 && trimmed.front() == '[' && trimmed.back() == ']')
+    {
+      const std::string name = to_lower(trim(trimmed.substr(1, trimmed.size() - 2)));
+      if(in_target_section)
+      {
+        section_end = i;
+        break;
+      }
+      if(name == section_lc)
+      {
+        in_target_section = true;
+        section_start = i;
+      }
+    }
+  }
+  if(in_target_section && section_end == -1)
+    section_end = static_cast<int>(lines.size());
+
+  if(section_start == -1)
+  {
+    // Section does not exist: append it (with a separating blank line if needed).
+    if(!lines.empty() && !trim(lines.back()).empty())
+      lines.emplace_back();
+    lines.push_back("[" + section + "]");
+    lines.push_back(new_line);
+  }
+  else
+  {
+    // Section exists: look for the key within it and update in place.
+    bool key_found = false;
+    for(int i = section_start + 1; i < section_end; i++)
+    {
+      const std::string trimmed = trim(lines[i]);
+      if(trimmed.empty() || trimmed.front() == ';' || trimmed.front() == '#')
+        continue;
+      const auto eq = trimmed.find('=');
+      if(eq == std::string::npos)
+        continue;
+      if(to_lower(trim(trimmed.substr(0, eq))) == key_lc)
+      {
+        lines[i] = new_line;
+        key_found = true;
+        break;
+      }
+    }
+    if(!key_found)
+    {
+      // Insert the key at the end of the section, after the last non-blank line.
+      int insert_at = section_end;
+      while(insert_at - 1 > section_start && trim(lines[insert_at - 1]).empty())
+        insert_at--;
+      lines.insert(lines.begin() + insert_at, new_line);
+    }
+  }
+
+  sfs::create_directories(ini_path.parent_path());
+  std::ofstream out(ini_path, std::ios::binary | std::ios::trunc);
+  if(!out.is_open())
+    throw std::runtime_error("Could not write to INI file '" + ini_path.string() + "'.");
+  for(const auto& line : lines)
+    out << line << "\n";
+}
+}
+
+void LootDeployer::applyArchiveInvalidation(bool enable) const
+{
+  // Maps the applicable game types to the preferences INI file names (relative to
+  // dest_path_, i.e. the game's "My Games" directory) that hold the [Archive] section.
+  static const std::map<loot::GameType, std::vector<std::string>> INI_FILES = {
+    { loot::GameType::tes4, { "Oblivion.ini" } },
+    { loot::GameType::fo3, { "Fallout.ini", "FalloutPrefs.ini" } },
+    { loot::GameType::fonv, { "Fallout.ini", "FalloutPrefs.ini" } }
+  };
+
+  const auto iter = INI_FILES.find(app_type_);
+  if(iter == INI_FILES.end())
+  {
+    // Archive Invalidation does not apply to this game type: no-op.
+    log_(Log::LOG_DEBUG,
+         std::format("Deployer '{}': Archive Invalidation not applicable for this game.", name_));
+    return;
+  }
+
+  const std::string value = enable ? "1" : "0";
+  for(const auto& ini_name : iter->second)
+  {
+    const sfs::path ini_path = dest_path_ / ini_name;
+    setIniValue(ini_path, "Archive", "bInvalidateOlderFiles", value);
+    if(app_type_ == loot::GameType::tes4)
+      setIniValue(ini_path, "Archive", "bLoadFaceGenHeadEGTFiles", value);
+  }
+  log_(Log::LOG_INFO,
+       std::format("Deployer '{}': {} Archive Invalidation.",
+                   name_,
+                   enable ? "Enabled" : "Disabled"));
 }
 
 std::vector<LootDeployer::PluginMessage> LootDeployer::getPluginMessages() const
