@@ -5,12 +5,14 @@
 #include <archive.h>
 #include <archive_entry.h>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <ranges>
 #include <regex>
 #include <string>
 #include <system_error>
+#include <zlib.h>
 #ifdef LIMO_WITH_UNRAR
 #define _UNIX
 #include <dll.hpp>
@@ -49,6 +51,20 @@ void Installer::extract(const sfs::path& source_path,
       sfs::rename(source_path, dest_path);
     else
       sfs::copy(source_path, dest_path, sfs::copy_options::recursive);
+    return;
+  }
+
+  if(sourceIsOmod(source_path))
+  {
+    extractOmodArchive(source_path, dest_path);
+    for(const auto& dir_entry : sfs::recursive_directory_iterator(dest_path))
+    {
+      auto permissions = sfs::perms::owner_read | sfs::perms::owner_write | sfs::perms::group_read |
+                         sfs::perms::group_write | sfs::perms::others_read;
+      if(dir_entry.is_directory())
+        permissions |= sfs::perms::owner_exec | sfs::perms::group_exec | sfs::perms::others_exec;
+      sfs::permissions(dir_entry.path(), permissions);
+    }
     return;
   }
 
@@ -708,4 +724,353 @@ void Installer::storeInCache(const sfs::path& source, const sfs::path& extracted
     // Caching is a best-effort optimization; never let it break installation.
     log(Log::LOG_DEBUG, "Failed to store extraction cache (ignored)");
   }
+}
+
+bool Installer::sourceIsOmod(const sfs::path& source_path)
+{
+  std::string extension = source_path.extension().string();
+  std::transform(extension.begin(),
+                 extension.end(),
+                 extension.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return extension == ".omod";
+}
+
+bool Installer::readOmodMember(const sfs::path& archive_path,
+                               const std::string& member_name,
+                               std::vector<unsigned char>& out_data)
+{
+  auto to_lower = [](std::string s)
+  {
+    std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
+    return s;
+  };
+  const std::string wanted = to_lower(member_name);
+
+  struct archive* source = archive_read_new();
+  archive_read_support_format_all(source);
+  archive_read_support_filter_all(source);
+  if(archive_read_open_filename(source, archive_path.string().c_str(), 10240) != ARCHIVE_OK)
+  {
+    archive_read_free(source);
+    return false;
+  }
+
+  bool found = false;
+  struct archive_entry* entry;
+  while(archive_read_next_header(source, &entry) == ARCHIVE_OK)
+  {
+    const char* name = archive_entry_pathname(entry);
+    if(name == nullptr)
+      continue;
+    if(to_lower(name) != wanted)
+      continue;
+    found = true;
+    out_data.clear();
+    const void* buff;
+    size_t size;
+    int64_t offset;
+    int return_code;
+    while((return_code = archive_read_data_block(source, &buff, &size, &offset)) == ARCHIVE_OK)
+    {
+      const auto* bytes = static_cast<const unsigned char*>(buff);
+      out_data.insert(out_data.end(), bytes, bytes + size);
+    }
+    if(return_code != ARCHIVE_EOF)
+      found = false;
+    break;
+  }
+
+  archive_read_free(source);
+  return found;
+}
+
+bool Installer::inflateZlibBuffer(const std::vector<unsigned char>& input,
+                                  std::vector<unsigned char>& output)
+{
+  output.clear();
+  if(input.empty())
+    return true;
+
+  z_stream stream{};
+  // 47 = automatic header detection (zlib or gzip) with a 32K window.
+  if(inflateInit2(&stream, 47) != Z_OK)
+    return false;
+
+  stream.next_in = const_cast<unsigned char*>(input.data());
+  stream.avail_in = static_cast<uInt>(input.size());
+
+  std::vector<unsigned char> chunk(262144);
+  int return_code = Z_OK;
+  do
+  {
+    stream.next_out = chunk.data();
+    stream.avail_out = static_cast<uInt>(chunk.size());
+    return_code = inflate(&stream, Z_NO_FLUSH);
+    if(return_code != Z_OK && return_code != Z_STREAM_END)
+    {
+      inflateEnd(&stream);
+      return false;
+    }
+    output.insert(output.end(), chunk.data(), chunk.data() + (chunk.size() - stream.avail_out));
+  } while(return_code != Z_STREAM_END && stream.avail_in > 0);
+
+  inflateEnd(&stream);
+  return return_code == Z_STREAM_END;
+}
+
+bool Installer::decompressBufferWithLibarchive(const std::vector<unsigned char>& input,
+                                               std::vector<unsigned char>& output)
+{
+  output.clear();
+  if(input.empty())
+    return true;
+
+  struct archive* source = archive_read_new();
+  // The OMOD data blob is a raw compressed stream (no archive wrapper), so
+  // enable the raw format together with all available filters (lzma/xz/7z).
+  archive_read_support_filter_all(source);
+  archive_read_support_format_raw(source);
+  if(archive_read_open_memory(source, input.data(), input.size()) != ARCHIVE_OK)
+  {
+    archive_read_free(source);
+    return false;
+  }
+
+  struct archive_entry* entry;
+  if(archive_read_next_header(source, &entry) != ARCHIVE_OK)
+  {
+    archive_read_free(source);
+    return false;
+  }
+
+  const void* buff;
+  size_t size;
+  int64_t offset;
+  int return_code;
+  while((return_code = archive_read_data_block(source, &buff, &size, &offset)) == ARCHIVE_OK)
+  {
+    const auto* bytes = static_cast<const unsigned char*>(buff);
+    output.insert(output.end(), bytes, bytes + size);
+  }
+
+  bool success = return_code == ARCHIVE_EOF;
+  archive_read_free(source);
+  return success;
+}
+
+void Installer::extractOmodArchive(const sfs::path& source_path, const sfs::path& dest_path)
+{
+  log(Log::LOG_DEBUG, "Beginning OMOD extraction");
+  log(Log::LOG_WARNING,
+      "OMOD install scripts are not executed; only the contained mod files are extracted.");
+
+  // Helpers for reading the little-endian, .NET-BinaryReader style 'config' and
+  // '*.crc' member streams.
+  struct Reader
+  {
+    const std::vector<unsigned char>& data;
+    size_t pos = 0;
+    bool ok = true;
+
+    explicit Reader(const std::vector<unsigned char>& d) : data(d) {}
+
+    bool remaining(size_t n) const { return pos + n <= data.size(); }
+
+    unsigned char readByte()
+    {
+      if(!remaining(1))
+      {
+        ok = false;
+        return 0;
+      }
+      return data[pos++];
+    }
+
+    uint32_t readUInt32()
+    {
+      if(!remaining(4))
+      {
+        ok = false;
+        return 0;
+      }
+      uint32_t value = static_cast<uint32_t>(data[pos]) | (static_cast<uint32_t>(data[pos + 1]) << 8) |
+                       (static_cast<uint32_t>(data[pos + 2]) << 16) |
+                       (static_cast<uint32_t>(data[pos + 3]) << 24);
+      pos += 4;
+      return value;
+    }
+
+    int64_t readInt64()
+    {
+      if(!remaining(8))
+      {
+        ok = false;
+        return 0;
+      }
+      uint64_t value = 0;
+      for(int i = 0; i < 8; i++)
+        value |= static_cast<uint64_t>(data[pos + i]) << (8 * i);
+      pos += 8;
+      return static_cast<int64_t>(value);
+    }
+
+    // .NET BinaryReader 7-bit-encoded length prefixed UTF-8 string.
+    std::string readString()
+    {
+      uint32_t length = 0;
+      int shift = 0;
+      while(true)
+      {
+        if(!remaining(1) || shift > 35)
+        {
+          ok = false;
+          return {};
+        }
+        unsigned char b = data[pos++];
+        length |= static_cast<uint32_t>(b & 0x7F) << shift;
+        if((b & 0x80) == 0)
+          break;
+        shift += 7;
+      }
+      if(!remaining(length))
+      {
+        ok = false;
+        return {};
+      }
+      std::string result(reinterpret_cast<const char*>(data.data() + pos), length);
+      pos += length;
+      return result;
+    }
+  };
+
+  // Compression type as stored in the OMOD config (0 = SevenZip, 1 = Zip).
+  enum class OmodCompression
+  {
+    seven_zip,
+    zip
+  };
+
+  // Parse the 'config' member to determine which compression the data blobs use.
+  OmodCompression compression = OmodCompression::seven_zip;
+  std::vector<unsigned char> config_data;
+  if(readOmodMember(source_path, "config", config_data))
+  {
+    Reader reader(config_data);
+    const unsigned char file_version = reader.readByte();
+    reader.readString();    // ModName
+    reader.readUInt32();    // MajorVersion
+    reader.readUInt32();    // MinorVersion
+    reader.readString();    // Author
+    reader.readString();    // Email
+    reader.readString();    // Website
+    reader.readString();    // Description
+    if(file_version >= 2)
+      reader.readInt64();    // CreationTime (.NET DateTime ticks)
+    const unsigned char compression_byte = reader.readByte();
+    if(reader.ok)
+      compression = compression_byte == 1 ? OmodCompression::zip : OmodCompression::seven_zip;
+    else
+      log(Log::LOG_WARNING, "Could not parse OMOD config; assuming 7-zip compression.");
+  }
+  else
+    log(Log::LOG_WARNING, "OMOD has no readable config; assuming 7-zip compression.");
+
+  // Each pair maps a CRC member (the file list) to its data blob member.
+  const std::vector<std::pair<std::string, std::string>> payloads{ { "data.crc", "data" },
+                                                                   { "plugins.crc", "plugins" } };
+
+  bool extracted_any = false;
+  for(const auto& [crc_name, data_name] : payloads)
+  {
+    std::vector<unsigned char> crc_data;
+    if(!readOmodMember(source_path, crc_name, crc_data))
+      continue;    // Optional member (e.g. an OMOD with no loose plugins).
+
+    std::vector<unsigned char> blob;
+    if(!readOmodMember(source_path, data_name, blob))
+    {
+      log(Log::LOG_WARNING, "OMOD lists '" + crc_name + "' but has no '" + data_name + "' member.");
+      continue;
+    }
+
+    // Decompress the concatenated data blob.
+    std::vector<unsigned char> payload;
+    bool decompressed = false;
+    if(compression == OmodCompression::zip)
+      decompressed = inflateZlibBuffer(blob, payload);
+    else
+      decompressed = decompressBufferWithLibarchive(blob, payload);
+    // Fall back to the other method in case the config lied about its type.
+    if(!decompressed)
+    {
+      if(compression == OmodCompression::zip)
+        decompressed = decompressBufferWithLibarchive(blob, payload);
+      else
+        decompressed = inflateZlibBuffer(blob, payload);
+    }
+    if(!decompressed)
+    {
+      log(Log::LOG_WARNING,
+          "Could not decompress OMOD '" + data_name +
+            "' blob. The OMOD may use an unsupported compression; skipping it.");
+      continue;
+    }
+
+    // Parse the file list and slice the decompressed payload accordingly.
+    // CRC entry layout per file: string path, uint32 crc, int64 length.
+    Reader reader(crc_data);
+    size_t payload_offset = 0;
+    while(reader.pos < crc_data.size())
+    {
+      const std::string entry_path = reader.readString();
+      reader.readUInt32();    // crc (unused)
+      const int64_t length = reader.readInt64();
+      if(!reader.ok || length < 0)
+      {
+        log(Log::LOG_WARNING, "Malformed OMOD file list in '" + crc_name + "'; stopping early.");
+        break;
+      }
+      if(payload_offset + static_cast<size_t>(length) > payload.size())
+      {
+        log(Log::LOG_WARNING,
+            "OMOD payload smaller than declared in '" + crc_name + "'; stopping early.");
+        break;
+      }
+
+      // OMOD paths use backslashes; normalise and guard against traversal.
+      std::string normalised = entry_path;
+      std::replace(normalised.begin(), normalised.end(), '\\', '/');
+      sfs::path rel_path = sfs::path(normalised).lexically_normal();
+      bool is_safe = !rel_path.empty() && !rel_path.is_absolute();
+      for(const auto& part : rel_path)
+        if(part == "..")
+          is_safe = false;
+      if(!is_safe)
+      {
+        log(Log::LOG_WARNING, "Skipping unsafe OMOD entry path: " + entry_path);
+        payload_offset += static_cast<size_t>(length);
+        continue;
+      }
+
+      const sfs::path out_path = dest_path / rel_path;
+      std::error_code ec;
+      sfs::create_directories(out_path.parent_path(), ec);
+      std::FILE* file = std::fopen(out_path.string().c_str(), "wb");
+      if(file == nullptr)
+      {
+        log(Log::LOG_WARNING, "Could not write OMOD file: " + out_path.string());
+        payload_offset += static_cast<size_t>(length);
+        continue;
+      }
+      if(length > 0)
+        std::fwrite(payload.data() + payload_offset, 1, static_cast<size_t>(length), file);
+      std::fclose(file);
+      payload_offset += static_cast<size_t>(length);
+      extracted_any = true;
+    }
+  }
+
+  if(!extracted_any)
+    throw CompressionError("Could not extract any files from OMOD archive.");
 }

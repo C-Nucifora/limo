@@ -1050,7 +1050,6 @@ private:
   /*! \brief If steam_app_id_ == -1: Try to determine the app id. */
   void updateSteamAppId();
   /*!
-<<<<<<< HEAD
    * \brief Builds the set of mod ids that are enabled in at least one deployer for the
    * current profile.
    * \return Set of enabled mod ids.
