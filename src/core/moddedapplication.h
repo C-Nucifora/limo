@@ -104,6 +104,15 @@ public:
    * used during installation is used.
    */
   void uninstallMods(const std::vector<int>& mod_ids, const std::string& installer_type = "");
+  /*!
+   * \brief Merges the staged files of multiple source mods into one target mod, then removes the
+   * now-merged source mods. The target must be one of the given source ids and keeps its id, name,
+   * tags, rules and load order position. (fork #148)
+   * \param source_mod_ids Ids of the mods to merge. Must include target_mod_id.
+   * \param target_mod_id Id of the mod that receives all merged files and is kept.
+   * \return True if the merge completed, false if validation failed.
+   */
+  bool mergeMods(const std::vector<int>& source_mod_ids, int target_mod_id);
   void commitChanges();
   /*!
    * \brief Appends a new mod to the load order for given Deployer.

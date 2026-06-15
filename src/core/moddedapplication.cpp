@@ -311,6 +311,85 @@ void ModdedApplication::uninstallMods(const std::vector<int>& mod_ids,
   updateSettings(true);
 }
 
+// fork #148: Merge the staged files of several mods into one target entry, then remove the
+// source mods using the normal uninstall path so all metadata stays consistent.
+bool ModdedApplication::mergeMods(const std::vector<int>& source_mod_ids, int target_mod_id)
+{
+  const auto is_installed = [this](int id)
+  { return str::find_if(installed_mods_, [id](const Mod& m) { return m.id == id; }) !=
+             installed_mods_.end(); };
+
+  // Validate the target.
+  if(!is_installed(target_mod_id))
+  {
+    log_(Log::LOG_WARNING,
+         std::format("Merge aborted: target mod (id {}) does not exist.", target_mod_id));
+    return false;
+  }
+  if(str::find(source_mod_ids, target_mod_id) == source_mod_ids.end())
+  {
+    log_(Log::LOG_WARNING,
+         std::format("Merge aborted: target mod (id {}) is not part of the selection.",
+                     target_mod_id));
+    return false;
+  }
+
+  const sfs::path target_dir = staging_dir_ / std::to_string(target_mod_id);
+  std::vector<int> merged_sources;
+  // Copy each source's staged files into the target, in the given order (later sources may
+  // overwrite earlier ones). Source files are only removed after their copy fully succeeded.
+  for(int source_id : source_mod_ids)
+  {
+    if(source_id == target_mod_id)
+      continue;
+    if(!is_installed(source_id))
+    {
+      log_(Log::LOG_WARNING,
+           std::format("Merge: skipping source mod (id {}) which does not exist.", source_id));
+      continue;
+    }
+    const sfs::path source_dir = staging_dir_ / std::to_string(source_id);
+    std::error_code ec;
+    if(!sfs::exists(source_dir, ec))
+    {
+      log_(Log::LOG_WARNING,
+           std::format("Merge: staging directory for source mod (id {}) is missing, merging "
+                       "metadata only.",
+                       source_id));
+      merged_sources.push_back(source_id);
+      continue;
+    }
+    sfs::copy(source_dir,
+              target_dir,
+              sfs::copy_options::recursive | sfs::copy_options::overwrite_existing,
+              ec);
+    if(ec)
+    {
+      log_(Log::LOG_ERROR,
+           std::format("Merge: failed to copy files of source mod (id {}) into target (id {}): {}",
+                       source_id,
+                       target_mod_id,
+                       ec.message()));
+      // Do not remove a source whose copy failed; abort the merge and keep what is already done.
+      if(!merged_sources.empty())
+        uninstallMods(merged_sources);
+      return false;
+    }
+    merged_sources.push_back(source_id);
+  }
+
+  // Remove the now-merged source mods through the regular uninstall path so groups, tags, notes,
+  // colors, categories, deployer membership, load order and mod rules are all cleaned up.
+  if(!merged_sources.empty())
+    uninstallMods(merged_sources);
+
+  log_(Log::LOG_INFO,
+       std::format("Merged {} mod(s) into target mod (id {}).",
+                   merged_sources.size(),
+                   target_mod_id));
+  return true;
+}
+
 void ModdedApplication::commitChanges()
 {
   updateSettings(true);

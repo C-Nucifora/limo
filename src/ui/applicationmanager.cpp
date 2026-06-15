@@ -629,6 +629,16 @@ void ApplicationManager::uninstallMods(int app_id,
   emit completedOperations(std::format("Mod{} removed", mod_ids.size() == 1 ? "" : "s").c_str());
 }
 
+// fork #148
+void ApplicationManager::mergeMods(int app_id,
+                                   std::vector<int> source_mod_ids,
+                                   int target_mod_id)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::mergeMods>(app_id, source_mod_ids, target_mod_id);
+  emit completedOperations("Mods merged");
+}
+
 void ApplicationManager::commitChanges(int app_id, int deployer)
 {
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
