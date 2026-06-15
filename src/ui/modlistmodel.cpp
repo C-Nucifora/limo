@@ -41,6 +41,8 @@ QVariant ModListModel::headerData(int section, Qt::Orientation orientation, int 
       return QString("Deployers");
     if(section == tags_col)
       return QString("Tags");
+    if(section == status_col)
+      return QString("Status");
   }
   return QVariant();
 }
@@ -52,7 +54,7 @@ int ModListModel::rowCount(const QModelIndex& parent) const
 
 int ModListModel::columnCount(const QModelIndex& parent) const
 {
-  return 8;
+  return 9;
 }
 
 QVariant ModListModel::data(const QModelIndex& index, int role) const
@@ -120,9 +122,34 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
         tags.insert(0, "[Has Update]");
       return tags.join(", ");
     }
+    if(col == status_col)
+    {
+      const ModStatus status = modStatus(row);
+      if(role == sort_role)
+        return static_cast<int>(status);
+      switch(status)
+      {
+        case ModStatus::update_available:
+          return QString("Update available");
+        case ModStatus::up_to_date:
+          return QString("Up to date");
+        case ModStatus::local:
+        default:
+          return QString("Local");
+      }
+    }
   }
   if(role == Qt::ForegroundRole)
   {
+    if(col == status_col)
+    {
+      const ModStatus status = modStatus(row);
+      if(status == ModStatus::update_available)
+        return QBrush(colors::GREEN);
+      if(status == ModStatus::local)
+        return QBrush(QApplication::palette().color(QPalette::Disabled, QPalette::Text));
+      return QVariant();
+    }
     if(modHasUpdate(row))
       return QBrush(colors::GREEN);
   }
@@ -347,4 +374,13 @@ bool ModListModel::modHasUpdate(int row) const
     return false;
   return mod.remote_update_time > mod.install_time &&
          mod.remote_update_time > mod.suppress_update_time;
+}
+
+ModListModel::ModStatus ModListModel::modStatus(int row) const
+{
+  if(active_mods_.at(row).mod.remote_source.empty())
+    return ModStatus::local;
+  if(modHasUpdate(row))
+    return ModStatus::update_available;
+  return ModStatus::up_to_date;
 }

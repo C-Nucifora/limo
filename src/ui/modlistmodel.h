@@ -43,6 +43,8 @@ public:
   static constexpr int deployers_col = 6;
   /*! \brief Index of the tags column. */
   static constexpr int tags_col = 7;
+  /*! \brief Index of the status column. */
+  static constexpr int status_col = 8;
 
   /*! \brief Role representing the version of a mod. */
   static constexpr int version_list_role = 256;
@@ -86,6 +88,21 @@ public:
   static constexpr int mod_pinned_role = 278;
   /*! \brief Role representing the pinned version string of a mod. */
   static constexpr int mod_pinned_version_role = 279;
+
+  /*!
+   * \brief Represents the overall state of a mod as shown in the status column.
+   *
+   * Values are ordered so they form a stable, sortable key.
+   */
+  enum class ModStatus
+  {
+    /*! \brief Mod has no remote source and is only tracked locally. */
+    local = 0,
+    /*! \brief Mod has a remote source and matches the latest known remote version. */
+    up_to_date = 1,
+    /*! \brief Mod has a remote source and a newer version is available remotely. */
+    update_available = 2
+  };
 
   /*!
    * \brief Returns the horizontal header section names.
@@ -213,4 +230,10 @@ private:
    * \return True of the mod has an update.
    */
   bool modHasUpdate(int row) const;
+  /*!
+   * \brief Computes the status of the mod at the given row from its ModInfo fields.
+   * \param row Row of the mod.
+   * \return The mods status.
+   */
+  ModStatus modStatus(int row) const;
 };
