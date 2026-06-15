@@ -190,6 +190,17 @@ public:
    */
   void changeModName(int mod_id, const std::string& new_name);
   /*!
+   * \brief Exports the staged files of an installed mod into a single zip archive.
+   *
+   * Walks the mod's staging directory and writes every regular file into the target
+   * archive using paths relative to the staging directory. Uses libarchive's write API.
+   * \param mod_id Id of the mod to be exported.
+   * \param target_archive Path of the zip archive to be written.
+   * \throw std::runtime_error If the mod id is unknown, the staging directory is missing
+   * or any libarchive operation fails.
+   */
+  void exportModArchive(int mod_id, const std::filesystem::path& target_archive) const;
+  /*!
    * \brief Checks for file conflicts of given mod with all other mods in the load order for
    * one Deployer.
    * \param deployer The target Deployer

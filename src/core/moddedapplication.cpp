@@ -10,7 +10,10 @@
 #include "reversedeployer.h"
 #include "tw3mergeutil.h"
 #include "tw3scriptmerge.h"
+#include <archive.h>
+#include <archive_entry.h>
 #include <algorithm>
+#include <array>
 #include <fstream>
 #include <memory>
 #include <ranges>
@@ -485,6 +488,82 @@ void ModdedApplication::changeModName(int mod_id, const std::string& new_name)
     throw std::runtime_error("Error: Unknown mod id: " + std::to_string(mod_id));
   iter->name = new_name;
   updateSettings(true);
+}
+
+void ModdedApplication::exportModArchive(int mod_id,
+                                         const std::filesystem::path& target_archive) const
+{
+  auto iter = std::find_if(
+    installed_mods_.begin(), installed_mods_.end(), [mod_id](Mod m) { return m.id == mod_id; });
+  if(iter == installed_mods_.end())
+    throw std::runtime_error("Error: Unknown mod id: " + std::to_string(mod_id));
+
+  const sfs::path source_dir = staging_dir_ / std::to_string(mod_id);
+  if(!pu::exists(source_dir) || !sfs::is_directory(source_dir))
+    throw std::runtime_error("Error: Staging directory for mod " + std::to_string(mod_id) +
+                             " does not exist.");
+
+  log_(Log::LOG_INFO,
+       std::format("Exporting mod '{}' to '{}'", iter->name, target_archive.string()));
+
+  struct archive* dest = archive_write_new();
+  if(dest == nullptr)
+    throw std::runtime_error("Error: Could not allocate archive for export.");
+  // Ensure the archive is always freed, even if an exception is thrown below.
+  struct ArchiveGuard
+  {
+    struct archive* a;
+    ~ArchiveGuard() { archive_write_free(a); }
+  } guard{ dest };
+
+  archive_write_set_format_zip(dest);
+  if(archive_write_open_filename(dest, target_archive.string().c_str()) != ARCHIVE_OK)
+    throw std::runtime_error("Error: Could not open archive '" + target_archive.string() +
+                             "' for writing: " + archive_error_string(dest));
+
+  std::array<char, 16384> buffer;
+  for(const auto& dir_entry : sfs::recursive_directory_iterator(source_dir))
+  {
+    if(!dir_entry.is_regular_file())
+      continue;
+
+    const sfs::path& path = dir_entry.path();
+    const std::string entry_name = sfs::relative(path, source_dir).string();
+
+    struct archive_entry* entry = archive_entry_new();
+    struct EntryGuard
+    {
+      struct archive_entry* e;
+      ~EntryGuard() { archive_entry_free(e); }
+    } entry_guard{ entry };
+
+    archive_entry_set_pathname(entry, entry_name.c_str());
+    archive_entry_set_size(entry, static_cast<la_int64_t>(sfs::file_size(path)));
+    archive_entry_set_filetype(entry, AE_IFREG);
+    archive_entry_set_perm(entry, 0644);
+
+    if(archive_write_header(dest, entry) != ARCHIVE_OK)
+      throw std::runtime_error("Error: Could not write archive header for '" + entry_name +
+                               "': " + archive_error_string(dest));
+
+    std::ifstream file(path, std::ios::binary);
+    if(!file.is_open())
+      throw std::runtime_error("Error: Could not open file '" + path.string() + "' for export.");
+    while(file)
+    {
+      file.read(buffer.data(), buffer.size());
+      const std::streamsize read_count = file.gcount();
+      if(read_count <= 0)
+        break;
+      if(archive_write_data(dest, buffer.data(), static_cast<size_t>(read_count)) < 0)
+        throw std::runtime_error("Error: Could not write data for '" + entry_name +
+                                 "': " + archive_error_string(dest));
+    }
+  }
+
+  if(archive_write_close(dest) != ARCHIVE_OK)
+    throw std::runtime_error("Error: Could not finalize archive '" + target_archive.string() +
+                             "': " + archive_error_string(dest));
 }
 
 std::vector<ConflictInfo> ModdedApplication::getFileConflicts(int deployer,
