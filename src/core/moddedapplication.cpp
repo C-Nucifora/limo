@@ -230,6 +230,8 @@ void ModdedApplication::uninstallMods(const std::vector<int>& mod_ids,
 
     for(auto& tag : manual_tags_)
       tag.removeMod(mod_id);
+
+    update_ignore_list_.erase(mod_id);
   }
 
   ProgressNode node(progress_callback_, weights);
@@ -1565,8 +1567,10 @@ void ModdedApplication::checkForModUpdates()
   {
     // Pinned mods are included too: performUpdateCheck only suppresses the notification while the
     // remote version still equals the pin, so a strictly newer remote version still surfaces
-    // (limo-app/limo: pinned mods were ignored forever).
-    if(nexus::Api::modUrlIsValid(mod.remote_source) && mod.remote_update_time <= mod.install_time)
+    // (limo-app/limo: pinned mods were ignored forever). Mods explicitly marked update-ignored
+    // (limo-app/limo#144) are excluded entirely.
+    if(!isUpdateIgnored(mod.id) && nexus::Api::modUrlIsValid(mod.remote_source) &&
+       mod.remote_update_time <= mod.install_time)
       target_mod_indices.push_back(i);
   }
   performUpdateCheck(target_mod_indices);
@@ -1577,7 +1581,7 @@ void ModdedApplication::checkModsForUpdates(const std::vector<int>& mod_ids)
   std::vector<int> target_mod_indices;
   for(const auto& [i, mod] : str::enumerate_view(installed_mods_))
   {
-    if(str::find(mod_ids, mod.id) != mod_ids.end() &&
+    if(str::find(mod_ids, mod.id) != mod_ids.end() && !isUpdateIgnored(mod.id) &&
        nexus::Api::modUrlIsValid(mod.remote_source) && mod.remote_update_time <= mod.install_time)
       target_mod_indices.push_back(i);
   }
@@ -1596,6 +1600,24 @@ void ModdedApplication::suppressUpdateNotification(const std::vector<int>& mod_i
         std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   }
   updateSettings(true);
+}
+
+void ModdedApplication::setUpdateIgnored(int mod_id, bool ignored)
+{
+  if(ignored)
+    update_ignore_list_.insert(mod_id);
+  else
+    update_ignore_list_.erase(mod_id);
+  log_(Log::LOG_DEBUG,
+       std::format("Updates for mod {} are now {}.",
+                   mod_id,
+                   ignored ? "ignored" : "checked"));
+  updateSettings(true);
+}
+
+bool ModdedApplication::isUpdateIgnored(int mod_id) const
+{
+  return update_ignore_list_.contains(mod_id);
 }
 
 ExternalChangesInfo ModdedApplication::getExternalChanges(int deployer)
@@ -1841,6 +1863,12 @@ void ModdedApplication::updateSettings(bool write)
   // reset to 0 on the next launch.
   json_settings_["current_profile"] = current_profile_;
 
+  {
+    int i = 0;
+    for(int mod_id : update_ignore_list_)
+      json_settings_["update_ignore_list"][i++] = mod_id;
+  }
+
   if(write)
     writeSettings();
 }
@@ -1931,6 +1959,7 @@ void ModdedApplication::updateState(bool read)
   auto_tag_map_.clear();
   installer_map_.clear();
   mod_rules_.clear();
+  update_ignore_list_.clear();
 
   if(read)
   {
@@ -2149,6 +2178,13 @@ void ModdedApplication::updateState(bool read)
   {
     for(const auto& rule_entry : json_settings_["mod_rules"])
       mod_rules_.emplace_back(rule_entry);
+  }
+
+  if(json_settings_.isMember("update_ignore_list"))
+  {
+    const Json::Value update_ignore_list = json_settings_["update_ignore_list"];
+    for(int i = 0; i < update_ignore_list.size(); i++)
+      update_ignore_list_.insert(update_ignore_list[i].asInt());
   }
 
   updateSteamIconPath();
@@ -2428,6 +2464,13 @@ void ModdedApplication::performUpdateCheck(const std::vector<int>& target_mod_in
   int num_available_updates = 0;
   for(int i : target_mod_indices)
   {
+    // Mods explicitly marked update-ignored (limo-app/limo#144) are skipped entirely so their
+    // remote_update_time is never advanced and they never surface as out of date.
+    if(isUpdateIgnored(installed_mods_[i].id))
+    {
+      node.advance();
+      continue;
+    }
     const auto remote_mod = nexus::Api::getNexusPage(installed_mods_[i].remote_source).mod;
     installed_mods_[i].remote_update_time = remote_mod.updated_time;
     // A pinned mod stays quiet while the remote version still matches the pin; once the remote

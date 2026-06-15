@@ -105,6 +105,23 @@ unsigned long Installer::install(const sfs::path& source,
 
   if(type != SIMPLEINSTALLER && type != FOMODINSTALLER)
     throw std::runtime_error("Error: Unknown Installer type \"" + type + "\"!");
+
+  // Some games load mods as archive files directly (e.g. Doom source ports load
+  // .pk3/.pk4 zip archives as-is). When the no_extract flag is set, deploy the
+  // source archive itself as a single opaque file instead of extracting it.
+  if(options & no_extract)
+  {
+    if(sfs::is_directory(source))
+      throw std::runtime_error("Cannot install a directory without extraction.");
+    sfs::create_directories(destination);
+    const auto target = destination / source.filename();
+    sfs::copy_file(source, target, sfs::copy_options::overwrite_existing);
+    auto permissions = sfs::perms::owner_read | sfs::perms::owner_write | sfs::perms::group_read |
+                       sfs::perms::group_write | sfs::perms::others_read;
+    sfs::permissions(target, permissions);
+    return sfs::is_regular_file(target) ? sfs::file_size(target) : 0;
+  }
+
   unsigned tmp_id = 0;
   sfs::path tmp_dir;
   do

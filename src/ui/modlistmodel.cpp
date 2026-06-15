@@ -57,7 +57,7 @@ int ModListModel::columnCount(const QModelIndex& parent) const
 
 QVariant ModListModel::data(const QModelIndex& index, int role) const
 {
-  // 0:Action | 1:Name | 2:Version | 3:ID | 4:Installation Time | 5:Deployers
+  // 0:Action | 1:Name | 2:Version | 3:ID | 4:Installation Time | 5:Size | 6:Deployers | 7:Tags
   if(!index.isValid())
     return QVariant();
   const int row = index.row();
@@ -89,12 +89,18 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
       return active_mods_[row].mod.id;
     if(col == time_col)
     {
+      if(role == sort_role)
+        return static_cast<qlonglong>(active_mods_[row].mod.install_time);
       std::stringstream ss;
       ss << std::put_time(std::localtime(&active_mods_[row].mod.install_time), "%F %T");
       return QString::fromStdString(ss.str());
     }
     if(col == size_col)
+    {
+      if(role == sort_role)
+        return static_cast<qulonglong>(active_mods_[row].mod.size_on_disk);
       return mod_size_strings_.at(active_mods_[row].mod.id);
+    }
     if(col == deployers_col)
     {
       QStringList deployers;

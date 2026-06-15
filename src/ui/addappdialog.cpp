@@ -320,6 +320,11 @@ void AddAppDialog::initDefaultAppConfig()
     "Import deployers targeting the installation and prefix directories");
 }
 
+void AddAppDialog::updateDetectedPath()
+{
+  ui->detected_path_label->setText(steam_install_path_);
+}
+
 void AddAppDialog::setEditMode(const QString& name,
                                const QString& app_version,
                                const QString& path,
@@ -356,6 +361,7 @@ void AddAppDialog::setEditMode(const QString& name,
     ui->icon_picker_button->setIcon(QIcon::fromTheme("folder-open"));
   ui->path_field->setText(path);
   ui->command_field->setText(command);
+  updateDetectedPath();
   dialog_completed_ = false;
 }
 
@@ -383,6 +389,7 @@ void AddAppDialog::setAddMode()
   enableOkButton(false);
   edit_mode_ = false;
   ui->move_dir_box->setVisible(false);
+  updateDetectedPath();
   dialog_completed_ = false;
 }
 
@@ -430,6 +437,7 @@ void AddAppDialog::onApplicationImported(QString name,
   steam_app_id_ = app_id.toLong();
   steam_install_path_ = install_dir;
   steam_prefix_path_ = prefix_path;
+  updateDetectedPath();
   ui->icon_field->setText(icon_path);
   ui->icon_picker_button->setIcon(QIcon(icon_path));
   initConfigForApp();
