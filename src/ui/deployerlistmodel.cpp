@@ -258,6 +258,40 @@ void DeployerListModel::addSeparator()
   emit layoutChanged();
 }
 
+// fork #10: returns whether the given index points at a separator entry.
+bool DeployerListModel::isSeparator(const QModelIndex& index) const
+{
+  if (!index.isValid())
+    return false;
+  auto item = qModelIndexToShared<TreeItem<DeployerEntry>>(index);
+  return item != nullptr && item->getData()->isSeparator;
+}
+
+// fork #10: delete a separator and promote its children to the separator's parent level,
+// inserted at the separator's former position (preserving order). The child mods are NOT
+// deleted, only re-parented up one level. The now-childless separator is then removed.
+void DeployerListModel::removeSeparator(const QModelIndex& index)
+{
+  if (!isSeparator(index))
+    return;
+
+  auto separator = qModelIndexToShared<TreeItem<DeployerEntry>>(index);
+  auto parent = separator->parent();
+  if (parent == nullptr)
+    return;
+
+  emit layoutAboutToBeChanged();
+
+  // TreeItem::remove() extracts the separator, steals its children (moving them out of
+  // the separator), erases the separator, then re-inserts those children at the
+  // separator's former position with their parent pointer fixed up to the separator's
+  // parent. This is exactly "promote children up one level, preserving order" and is
+  // safe when the separator has no children. The child mods themselves are not deleted.
+  parent->remove(separator);
+
+  emit layoutChanged();
+}
+
 Qt::ItemFlags DeployerListModel::flags(const QModelIndex &index) const
 {
   if (!index.isValid())
