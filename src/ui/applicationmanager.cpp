@@ -59,9 +59,15 @@ bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
   // be updated with byte counts and an approximate speed, and so the active download
   // can be aborted on cancellation.
   const auto download_start = std::chrono::steady_clock::now();
+  // fork #140: apply the configurable download bandwidth cap (KB/s, 0 = unlimited).
+  QSettings download_settings(QCoreApplication::applicationName());
+  const int download_limit_kbps = download_settings.value("download_speed_limit_kbps", 0).toInt();
+  const cpr::LimitRate limit_rate(
+    download_limit_kbps > 0 ? static_cast<std::int64_t>(download_limit_kbps) * 1024 : 0, 0);
   cpr::Response response = cpr::Download(
     fstream,
     cpr::Url(info.remote_download_url),
+    limit_rate,
     cpr::ProgressCallback(
       [app_mgr, &message_sent, &file_name, &download_start, progress_callback](
         auto download_total,

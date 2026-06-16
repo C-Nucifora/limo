@@ -46,6 +46,7 @@
 #include "ui/pruneversionsdialog.h" // fork #145
 #include "ui/bsabrowserdialog.h" // fork #201
 #include "ui/assetpreviewdialog.h" // fork #209
+#include "ui/nexusnewsdialog.h" // fork #211
 #include "ui/restorepointsdialog.h" // fork #54
 #include "ui/pluginflagsdialog.h" // fork #202
 #include "core/plugindeployer.h" // fork #202
@@ -1359,6 +1360,8 @@ private slots:
   void onShowRestorePoints();
   /*! \brief fork #54: Receives restore points and opens the dialog. */
   void onRestorePoints(std::vector<RestorePoint> restore_points, int app_id);
+  /*! \brief fork #211: Opens the Nexus news/announcements dialog. */
+  void onShowNexusNews();
   /*! \brief fork #202: Requests and then shows the plugin ESM/ESL flags dialog. */
   void onShowPluginFlags();
   /*! \brief fork #202: Receives plugin flag info and opens the dialog. */
