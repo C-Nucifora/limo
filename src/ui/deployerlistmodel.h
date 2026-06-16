@@ -102,6 +102,10 @@ public:
   bool hasChildren(const QModelIndex &parent) const override;
   bool setData(const QModelIndex &index, const QVariant &value, int role) override;
   void addSeparator();
+  // fork #10: delete a separator, promoting its children to the separator's parent level.
+  void removeSeparator(const QModelIndex& index);
+  // fork #10: convenience query so the UI can enable/disable a separator context action.
+  bool isSeparator(const QModelIndex& index) const;
   Qt::ItemFlags flags(const QModelIndex &index) const override;
 
 private:

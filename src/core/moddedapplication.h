@@ -98,6 +98,24 @@ public:
    */
   int createEmptyMod(const std::string& name, const std::string& version = "");
   /*!
+   * \brief Replaces the staged files of an already installed mod with the contents of the given
+   * source archive, without performing a full reinstall. (fork #66)
+   *
+   * Unlike a normal reinstall, this keeps the mod's entire Limo configuration intact: its id, name,
+   * version, tags, notes, colour, category, load order position, rules, group and deployer
+   * membership are all left untouched. Only the files on disk inside
+   * <staging>/<mod_id>/ are replaced. This is useful for mod authors iterating on their own mod.
+   *
+   * The source is extracted to a temporary directory using the same extraction mechanism the
+   * Installer uses for a normal install. Only after a successful extraction are the mod's existing
+   * files removed and the freshly extracted files moved into place, so a failed extraction leaves
+   * the current files intact. The mod's local_source is refreshed to point at the new archive so a
+   * future update reuses the latest archive.
+   * \param mod_id Id of the (installed) mod whose files should be replaced.
+   * \param source_archive Path to the archive (or directory) containing the new files.
+   */
+  void updateModFromLocal(int mod_id, const std::filesystem::path& source_archive);
+  /*!
    * \brief Uninstalls the given mods, this includes deleting all installed files.
    * \param mod_id Ids of the mods to be uninstalled.
    * \param installer_type The Installer type used. If an empty string is given, the Installer

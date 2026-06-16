@@ -243,6 +243,97 @@ int ModdedApplication::createEmptyMod(const std::string& name, const std::string
   return mod_id;
 }
 
+// fork #66
+void ModdedApplication::updateModFromLocal(int mod_id, const sfs::path& source_archive)
+{
+  auto iter = std::find_if(
+    installed_mods_.begin(), installed_mods_.end(), [mod_id](Mod m) { return m.id == mod_id; });
+  if(iter == installed_mods_.end())
+    throw std::runtime_error("Error: Unknown mod id: " + std::to_string(mod_id));
+
+  const sfs::path mod_dir = staging_dir_ / std::to_string(mod_id);
+  if(!pu::exists(mod_dir) || !sfs::is_directory(mod_dir))
+    throw std::runtime_error("Error: Staging directory for mod " + std::to_string(mod_id) +
+                             " does not exist.");
+
+  if(!pu::exists(source_archive))
+    throw std::runtime_error("Error: Source \"" + source_archive.string() + "\" does not exist.");
+  // Accept the same sources a normal install accepts: a directory or a supported archive.
+  if(!sfs::is_directory(source_archive) && !Installer::sourceIsArchive(source_archive))
+    throw std::runtime_error("Error: Source \"" + source_archive.string() +
+                             "\" is not a supported archive.");
+
+  log_(Log::LOG_INFO,
+       std::format("Updating files of mod '{}' from '{}'", iter->name, source_archive.string()));
+
+  // Extract into a fresh temporary directory first. Only after a successful extraction do we
+  // destroy the existing files, so any failure leaves the current mod intact. The temp dir lives
+  // under the staging directory so that the subsequent move/rename stays on the same file system
+  // (and so a directory source, whose parent differs, is copied rather than consumed by extract()).
+  unsigned tmp_id = 0;
+  sfs::path tmp_dir;
+  do
+    tmp_dir = staging_dir_ / (".lmm_update_" + std::to_string(mod_id) + "_" + std::to_string(tmp_id));
+  while(pu::exists(tmp_dir) && tmp_id++ < std::numeric_limits<unsigned>::max());
+  if(tmp_id == std::numeric_limits<unsigned>::max())
+    throw std::runtime_error("Error: Could not create temporary directory.");
+
+  try
+  {
+    Installer::extract(source_archive, tmp_dir, {});
+  }
+  catch(const std::exception& error)
+  {
+    std::error_code ec;
+    sfs::remove_all(tmp_dir, ec);
+    throw;
+  }
+
+  // Atomic-ish swap: move the freshly extracted files into a temporary "old" location, move the
+  // new files into place, then delete the old files. The destructive removal of the old files only
+  // happens after the new files are already in place.
+  std::error_code ec;
+  const sfs::path old_dir =
+    staging_dir_ / (".lmm_update_old_" + std::to_string(mod_id) + "_" + std::to_string(tmp_id));
+  sfs::rename(mod_dir, old_dir, ec);
+  if(ec)
+  {
+    sfs::remove_all(tmp_dir, ec);
+    throw std::runtime_error("Error: Could not replace mod files: " + ec.message());
+  }
+  sfs::rename(tmp_dir, mod_dir, ec);
+  if(ec)
+  {
+    // Roll back to the original files so the mod is not left without a staging directory.
+    std::error_code restore_ec;
+    sfs::rename(old_dir, mod_dir, restore_ec);
+    sfs::remove_all(tmp_dir, restore_ec);
+    throw std::runtime_error("Error: Could not replace mod files: " + ec.message());
+  }
+  sfs::remove_all(old_dir, ec);
+
+  // Refresh the recorded file size and local source, but keep all other metadata untouched.
+  iter->local_source = source_archive;
+  unsigned long mod_size = 0;
+  for(const auto& dir_entry : sfs::recursive_directory_iterator(mod_dir, ec))
+  {
+    if(dir_entry.is_regular_file(ec))
+      mod_size += dir_entry.file_size(ec);
+  }
+  iter->size_on_disk = mod_size;
+
+  // Re-run the auto tags for this mod, as the changed files may match different conditions.
+  for(auto& tag : auto_tags_)
+    tag.updateMods(staging_dir_, std::vector<int>{ mod_id });
+  updateAutoTagMap();
+
+  // The on-disk files changed, so conflict groups for every deployer managing this mod must be
+  // recomputed before the next deploy, mirroring the normal install path.
+  updateDeployerGroups();
+
+  updateSettings(true);
+}
+
 void ModdedApplication::uninstallMods(const std::vector<int>& mod_ids,
                                       const std::string& installer_type)
 {

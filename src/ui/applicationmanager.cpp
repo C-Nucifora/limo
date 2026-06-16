@@ -738,6 +738,16 @@ void ApplicationManager::changeModName(int app_id, int mod_id, QString new_name)
     handleExceptions<&ModdedApplication::changeModName>(app_id, mod_id, new_name.toStdString());
 }
 
+// fork #66
+void ApplicationManager::updateModFromLocal(int app_id,
+                                            int mod_id,
+                                            std::filesystem::path source_archive)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::updateModFromLocal>(app_id, mod_id, source_archive);
+  emit completedOperations("Mod files updated");
+}
+
 void ApplicationManager::getFileConflicts(int app_id, int deployer, int mod_id, bool show_disabled)
 {
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
