@@ -159,8 +159,11 @@ static void installTranslations(QApplication& app)
 
   // Candidate directories for the bundled .qm files: install location first,
   // then a local-build fallback (mirrors steam_app_configs resolution).
+  // getenv returns nullptr when "container" is unset; comparing a null char* to a
+  // std::string dereferences null, so guard for non-null before the comparison.
+  const char* container_env = getenv("container");
   const bool is_flatpak = std::filesystem::exists("/.flatpak-info") ||
-                          getenv("container") == std::string("flatpak");
+                          (container_env && std::string(container_env) == "flatpak");
   std::vector<QString> dirs;
   dirs.push_back(QString::fromStdString(
     (std::filesystem::path(is_flatpak ? "/app" : APP_INSTALL_PREFIX) / "share/limo/translations")
