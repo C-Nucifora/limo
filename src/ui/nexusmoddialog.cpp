@@ -115,7 +115,11 @@ void NexusModDialog::setupDialog(int app_id, int mod_id, const nexus::Page& page
     if(!file.version.empty())
       mod_text.append(("<br /><b>Version: " + file.version + "</b>").c_str());
     std::stringstream ss;
-    ss << std::put_time(std::localtime(&file.uploaded_time), "%F %T");
+    std::tm tm_buf{};
+    if(localtime_r(&file.uploaded_time, &tm_buf) != nullptr)
+      ss << std::put_time(&tm_buf, "%F %T");
+    else
+      ss << "unknown";
     mod_text.append(("<br /><b>Upload Time: " + ss.str() + "</b>").c_str());
     QString size_string;
     long size = file.size_in_bytes;
@@ -126,7 +130,7 @@ void NexusModDialog::setupDialog(int app_id, int mod_id, const nexus::Page& page
       long last_size = 0;
       int exp = 0;
       const std::vector<QString> units{ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB" };
-      while(size > 1024 && exp < units.size())
+      while(size > 1024 && static_cast<size_t>(exp) < units.size())
       {
         last_size = size;
         size /= 1024;
@@ -140,7 +144,7 @@ void NexusModDialog::setupDialog(int app_id, int mod_id, const nexus::Page& page
         size_string += "." + QString::number(first_digit);
       if(second_digit != 0)
         size_string += QString::number(second_digit);
-      size_string += " " + units[exp];
+      size_string += " " + units[std::min(static_cast<size_t>(exp), units.size() - 1)];
     }
     mod_text.append("<br /><b>Size: " + size_string + "</b><br />");
     if(file.external_virus_scan_url.empty())

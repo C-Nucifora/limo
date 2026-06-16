@@ -9,9 +9,11 @@
 #include <QImageReader>
 #include <QPixmap>
 #include <QResizeEvent>
+#include <QStringConverter>
 #include <QTextStream>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <set>
 
 
@@ -210,6 +212,8 @@ AssetPreviewDialog::~AssetPreviewDialog()
 void AssetPreviewDialog::scanForFiles(const QString& root)
 {
   const QDir base(root);
+  // Canonical staging path used to keep the scan inside the staging directory.
+  const QString canonical_root = QFileInfo(root).canonicalFilePath();
   QDirIterator it(root, QDir::Files | QDir::NoDotAndDotDot, QDirIterator::Subdirectories);
   while(it.hasNext() && file_paths_.size() < MAX_FILES)
   {
@@ -220,6 +224,15 @@ void AssetPreviewDialog::scanForFiles(const QString& root)
     if(relative.count('/') > MAX_DEPTH)
       continue;
     if(!isPreviewable(info.suffix().toLower()))
+      continue;
+
+    // Skip symlinks and any file that resolves outside the staging directory so
+    // the preview cannot follow a link out of the mod's staging path.
+    if(info.isSymLink())
+      continue;
+    const QString canonical = info.canonicalFilePath();
+    if(canonical_root.isEmpty() || canonical.isEmpty() ||
+       !(canonical == canonical_root || canonical.startsWith(canonical_root + '/')))
       continue;
 
     file_paths_.append(info.absoluteFilePath());
@@ -282,7 +295,25 @@ void AssetPreviewDialog::previewText(const QString& path)
   const QByteArray bytes = file.read(MAX_TEXT_SIZE);
   file.close();
 
-  setText(QString::fromUtf8(bytes));
+  // Detect the encoding from a BOM if present, otherwise try UTF-8 and fall
+  // back to Latin-1 when the bytes are not valid UTF-8, so non-UTF-8 files are
+  // not silently mangled.
+  std::optional<QStringConverter::Encoding> bom =
+    QStringConverter::encodingForData(bytes);
+  QStringConverter::Encoding encoding = bom.value_or(QStringConverter::Utf8);
+  QStringDecoder decoder(encoding);
+  QString text = decoder.decode(bytes);
+  QString encoding_name = QStringConverter::nameForEncoding(encoding);
+  if(!bom && decoder.hasError())
+  {
+    QStringDecoder latin1(QStringConverter::Latin1);
+    text = latin1.decode(bytes);
+    encoding_name = QStringConverter::nameForEncoding(QStringConverter::Latin1);
+  }
+
+  ui->header_label->setText(
+    QString("%1  [%2]").arg(ui->header_label->text(), QString::fromLatin1(encoding_name)));
+  setText(text);
 }
 
 void AssetPreviewDialog::previewImage(const QString& path, const QString& suffix)

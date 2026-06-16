@@ -53,7 +53,7 @@ TagConditionNode::TagConditionNode(std::string expression,
       throw std::runtime_error(
         std::format("Error: Could not parse condition in expression '{}'", expression));
     int condition_index = std::stoi(expression);
-    if(condition_index >= conditions.size())
+    if(static_cast<size_t>(condition_index) >= conditions.size())
       throw std::runtime_error(std::format(
         "Error: Condition index {} out of range in expression '{}'", condition_index, expression));
     condition_id_ = condition_index;
@@ -140,7 +140,7 @@ bool TagConditionNode::evaluateWithoutInversion(
 
 void TagConditionNode::removeEnclosingParentheses(std::string& expression)
 {
-  while(expression.front() == '(' && expression.back() == ')')
+  while(expression.size() >= 2 && expression.front() == '(' && expression.back() == ')')
   {
     int level = 0;
     for(auto [i, c] : str::enumerate_view(expression))
@@ -343,7 +343,7 @@ bool TagConditionNode::operatorOrderIsValid(std::string expression)
     }
     else if(c == 'n')
     {
-      token_borders.emplace_back(i, i + 2);
+      token_borders.emplace_back(i, 3);
       token_types.push_back(type_not);
       i += 3;
     }

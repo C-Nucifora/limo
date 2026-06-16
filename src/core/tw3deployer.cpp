@@ -71,6 +71,8 @@ sfs::path Tw3Deployer::rewriteTopLevelModFolder(const sfs::path& relative_path, 
   // Keep the leading "mod" the game requires, insert the zero-padded index plus an underscore
   // directly after it, and drop the original leading "mod" from the remainder.
   // e.g. "modFoo" at index 3 -> "mod0003_Foo".
+  // The starts_with("mod") guard above guarantees first_component.size() >= 3, so substr(3) is
+  // always valid (it yields an empty remainder when the name is exactly "mod").
   const std::string remainder = first_component.substr(3);
   const std::string new_first =
     std::format("mod{:0{}}_{}", index, LOAD_ORDER_PREFIX_DIGITS, remainder);

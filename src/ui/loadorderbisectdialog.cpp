@@ -136,6 +136,15 @@ void LoadOrderBisectDialog::reportResult()
       "load order. Restart to try again.");
     return;
   }
+  if(entries_.size() <= 1)
+  {
+    ui->status_label->setText("Bisection not applicable.");
+    ui->instructions_label->setText(
+      "There is only a single mod/plugin in the current load order, so there "
+      "is nothing to bisect. Test it on its own to determine whether it is the "
+      "cause of the problem.");
+    return;
+  }
 
   const int entry_idx = candidates_.front();
   ui->status_label->setText("Suspected culprit found.");

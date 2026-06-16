@@ -21,6 +21,8 @@ MoveModDialog::~MoveModDialog()
 
 void MoveModDialog::on_buttonBox_accepted()
 {
+  if(!ui->target_field->hasAcceptableInput())
+    return;
   emit modMovedTo(source_, ui->target_field->text().toInt() - 1);
 }
 

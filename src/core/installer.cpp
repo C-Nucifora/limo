@@ -161,12 +161,18 @@ unsigned long Installer::install(const sfs::path& source,
     return sfs::is_regular_file(target) ? sfs::file_size(target) : 0;
   }
 
-  unsigned tmp_id = 0;
   sfs::path tmp_dir;
-  do
+  bool found_free_id = false;
+  for(unsigned tmp_id = 0; tmp_id < std::numeric_limits<unsigned>::max(); tmp_id++)
+  {
     tmp_dir = destination.parent_path() / (EXTRACT_TMP_DIR + std::to_string(tmp_id));
-  while(pu::exists(tmp_dir) && tmp_id++ < std::numeric_limits<unsigned>::max());
-  if(tmp_id == std::numeric_limits<unsigned>::max())
+    if(!pu::exists(tmp_dir))
+    {
+      found_free_id = true;
+      break;
+    }
+  }
+  if(!found_free_id)
     throw std::runtime_error("Could not create directory!");
 
   // Try to populate the temporary directory from a previously cached extraction
@@ -641,12 +647,12 @@ void Installer::setIsAFlatpak(bool is_a_flatpak)
 
 void Installer::throwCompressionError(struct archive* source)
 {
+  // Capture libarchive's error string immediately while the handle is still valid.
+  const char* error_string = source != nullptr ? archive_error_string(source) : nullptr;
+  if(error_string != nullptr)
+    throw CompressionError(
+      (std::string("Error during archive extraction: ") + error_string).c_str());
   throw CompressionError("Error during archive extraction.");
-
-  // The following code sometimes crashes during execution of archive_error_string:
-
-  // throw CompressionError(
-  // ("Error during archive extraction: " + std::string(archive_error_string(source))).c_str());
 }
 
 void Installer::copyArchive(struct archive* source, struct archive* dest)
@@ -753,7 +759,6 @@ void Installer::extractWithProgress(const sfs::path& source_path,
       sfs::current_path(working_dir);
       throwCompressionError(source);
     }
-    archive_entry_set_pathname(entry, archive_entry_pathname(entry));
     if(archive_write_header(dest, entry) < ARCHIVE_OK)
     {
       sfs::current_path(working_dir);
@@ -1290,11 +1295,22 @@ void Installer::extractOmodArchive(const sfs::path& source_path, const sfs::path
         payload_offset += static_cast<size_t>(length);
         continue;
       }
+      bool write_ok = true;
       if(length > 0)
-        std::fwrite(payload.data() + payload_offset, 1, static_cast<size_t>(length), file);
+      {
+        const size_t written =
+          std::fwrite(payload.data() + payload_offset, 1, static_cast<size_t>(length), file);
+        if(written != static_cast<size_t>(length))
+        {
+          write_ok = false;
+          log(Log::LOG_WARNING,
+              "Short write while extracting OMOD file: " + out_path.string());
+        }
+      }
       std::fclose(file);
       payload_offset += static_cast<size_t>(length);
-      extracted_any = true;
+      if(write_ok)
+        extracted_any = true;
     }
   }
 

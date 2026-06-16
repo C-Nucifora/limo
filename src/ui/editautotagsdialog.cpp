@@ -249,7 +249,7 @@ void EditAutoTagsDialog::onConditionRemoved(int row, int col)
 {
   const std::string current_tag = ui->tag_cb->currentText().toStdString();
   auto& conditions = auto_tags_[current_tag].second;
-  if(row >= conditions.size())
+  if(row < 0 || static_cast<size_t>(row) >= conditions.size())
     return;
   conditions.erase(conditions.begin() + row);
   tags_with_updated_conditions_.insert(current_tag);

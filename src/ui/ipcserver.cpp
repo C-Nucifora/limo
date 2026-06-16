@@ -19,6 +19,15 @@ IpcServer::~IpcServer()
 bool IpcServer::setup()
 {
   bool started = server_->listen(server_name);
+  if(!started)
+  {
+    // A stale socket left behind by a crashed previous instance prevents listen() from
+    // succeeding. Remove it and retry so nxm:// handling does not silently break.
+    QLocalServer::removeServer(server_name);
+    started = server_->listen(server_name);
+    if(!started)
+      qWarning() << "IpcServer: failed to start IPC server:" << server_->errorString();
+  }
   connect(server_, &QLocalServer::newConnection, this, &IpcServer::setupConnection);
 
   return started;

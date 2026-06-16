@@ -104,7 +104,7 @@ bool DeployerListProxyModel::filterAcceptsRow(int source_row,
     for(const auto& [tag, enabled] : tag_filters_)
     {
       const bool contains_tag = tags.contains(tag);
-      show *= contains_tag && enabled || !contains_tag && !enabled;
+      show = show && ((contains_tag && enabled) || (!contains_tag && !enabled));
     }
   }
   return show;

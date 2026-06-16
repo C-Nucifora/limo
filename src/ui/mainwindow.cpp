@@ -64,6 +64,7 @@
 #include <ranges>
 #include <regex>
 #include <unordered_map>
+#include <sys/wait.h>
 
 #include <iostream>
 
@@ -1535,7 +1536,8 @@ int MainWindow::getColumnIndex(QTableWidget* table, QString col_name)
 {
   for(int i = 0; i < table->columnCount(); i++)
   {
-    if(table->horizontalHeaderItem(i)->text() == col_name)
+    QTableWidgetItem* item = table->horizontalHeaderItem(i);
+    if(item && item->text() == col_name)
       return i;
   }
   return -1;
@@ -1628,7 +1630,16 @@ QPair<QString, int> MainWindow::runCommand(QString command, bool ignore_flatpak)
     if(fgets(buffer.data(), buffer.size(), pipe) != nullptr)
       output += buffer.data();
   }
-  int ret_code = pclose(pipe) / 256;
+  int status = pclose(pipe);
+  int ret_code;
+  if(status == -1)
+    ret_code = -1;
+  else if(WIFEXITED(status))
+    ret_code = WEXITSTATUS(status);
+  else if(WIFSIGNALED(status))
+    ret_code = -WTERMSIG(status);
+  else
+    ret_code = -1;
   return { output, ret_code };
 }
 
@@ -1941,8 +1952,8 @@ void MainWindow::initUiWithoutApps(bool has_apps)
 
 void MainWindow::checkForContainers()
 {
-  if(getenv("container"))
-    is_a_flatpak_ = getenv("container") == std::string("flatpak");
+  const char* container = getenv("container");
+  is_a_flatpak_ = container && std::string(container) == "flatpak";
   Installer::setIsAFlatpak(is_a_flatpak_);
   Log::debug(is_a_flatpak_ ? "Running as a flatpak" : "Running natively");
 }
@@ -2064,7 +2075,7 @@ void MainWindow::initRootLevelConditions()
 
   if(!json.isMember(JSON_ROOT_LEVEL_KEY))
     return;
-  for(int i = 0; i < json[JSON_ROOT_LEVEL_KEY].size(); i++)
+  for(Json::ArrayIndex i = 0; i < json[JSON_ROOT_LEVEL_KEY].size(); i++)
   {
     try
     {
@@ -2098,7 +2109,7 @@ void MainWindow::onModAdded(QList<QUrl> paths)
     ImportModInfo info;
     info.app_id = currentApp();
     info.action_type = ImportModInfo::extract;
-    info.local_source = url.path().toStdString();
+    info.local_source = url.toLocalFile().toStdString();
     info.target_path = ui->info_sdir_label->text().toStdString();
     info.target_path /= temp_dir_.toStdString();
     mod_import_queue_.push(info);
@@ -2897,8 +2908,13 @@ void MainWindow::onExtractionComplete(ImportModInfo info)
     add_mod_dialog_->show();
   }
   else
+  {
     onReceiveError("Error",
                    ("Failed to import mod from \"" + info.local_source.string() + "\"").c_str());
+    setBusyStatus(false);
+    if(!mod_import_queue_.empty())
+      importMod();
+  }
 }
 
 void MainWindow::onSettingsDialogComplete()
@@ -3361,10 +3377,22 @@ void MainWindow::onVerifyDeployerMenuClicked()
      deployer >= static_cast<int>(deployer_target_paths_.size()))
     return;
 
-  const QString name =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Name"))->text();
-  const QString deploy_mode_string =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Mode"))->text();
+  const int name_col = getColumnIndex(ui->info_deployer_list, "Name");
+  const int mode_col = getColumnIndex(ui->info_deployer_list, "Mode");
+  if(name_col < 0 || mode_col < 0)
+  {
+    Log::error("Could not determine deployer list columns");
+    return;
+  }
+  QTableWidgetItem* name_item = ui->info_deployer_list->item(deployer, name_col);
+  QTableWidgetItem* mode_item = ui->info_deployer_list->item(deployer, mode_col);
+  if(!name_item || !mode_item)
+  {
+    Log::error("Could not read deployer list cell");
+    return;
+  }
+  const QString name = name_item->text();
+  const QString deploy_mode_string = mode_item->text();
   Deployer::DeployMode deploy_mode = Deployer::hard_link;
   if(deploy_mode_string == deploy_mode_sym_link)
     deploy_mode = Deployer::sym_link;
@@ -3399,10 +3427,22 @@ void MainWindow::onDeployedFilesTreeMenuClicked()
      deployer >= static_cast<int>(deployer_target_paths_.size()))
     return;
 
-  const QString name =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Name"))->text();
-  const QString deploy_mode_string =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Mode"))->text();
+  const int name_col = getColumnIndex(ui->info_deployer_list, "Name");
+  const int mode_col = getColumnIndex(ui->info_deployer_list, "Mode");
+  if(name_col < 0 || mode_col < 0)
+  {
+    Log::error("Could not determine deployer list columns");
+    return;
+  }
+  QTableWidgetItem* name_item = ui->info_deployer_list->item(deployer, name_col);
+  QTableWidgetItem* mode_item = ui->info_deployer_list->item(deployer, mode_col);
+  if(!name_item || !mode_item)
+  {
+    Log::error("Could not read deployer list cell");
+    return;
+  }
+  const QString name = name_item->text();
+  const QString deploy_mode_string = mode_item->text();
   Deployer::DeployMode deploy_mode = Deployer::hard_link;
   if(deploy_mode_string == deploy_mode_sym_link)
     deploy_mode = Deployer::sym_link;
@@ -3451,10 +3491,22 @@ void MainWindow::onHealthCheckDeployerMenuClicked()
      deployer >= static_cast<int>(deployer_target_paths_.size()))
     return;
 
-  const QString name =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Name"))->text();
-  const QString deploy_mode_string =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Mode"))->text();
+  const int name_col = getColumnIndex(ui->info_deployer_list, "Name");
+  const int mode_col = getColumnIndex(ui->info_deployer_list, "Mode");
+  if(name_col < 0 || mode_col < 0)
+  {
+    Log::error("Could not determine deployer list columns");
+    return;
+  }
+  QTableWidgetItem* name_item = ui->info_deployer_list->item(deployer, name_col);
+  QTableWidgetItem* mode_item = ui->info_deployer_list->item(deployer, mode_col);
+  if(!name_item || !mode_item)
+  {
+    Log::error("Could not read deployer list cell");
+    return;
+  }
+  const QString name = name_item->text();
+  const QString deploy_mode_string = mode_item->text();
   Deployer::DeployMode deploy_mode = Deployer::hard_link;
   if(deploy_mode_string == deploy_mode_sym_link)
     deploy_mode = Deployer::sym_link;
@@ -3898,9 +3950,16 @@ void MainWindow::updateProgress(float progress)
     const long msecs_elapsed =
       std::chrono::duration_cast<std::chrono::milliseconds>(now - last_progress_update_time_)
         .count();
-    const int remaining_sec =
-      (static_cast<double>(msecs_elapsed) * static_cast<double>((1.0 - progress) / progress)) /
-      1000.0;
+    const double clamped_progress = std::clamp(static_cast<double>(progress), 0.0, 1.0);
+    int remaining_sec = 0;
+    if(clamped_progress > 0.0)
+    {
+      const double eta_sec =
+        (static_cast<double>(msecs_elapsed) * ((1.0 - clamped_progress) / clamped_progress)) /
+        1000.0;
+      // Clamp to a sane range to avoid nonsensical ETAs on non-monotonic progress.
+      remaining_sec = static_cast<int>(std::clamp(eta_sec, 0.0, 359999.0));
+    }
     const int hours = remaining_sec / 3600;
     const int minutes = (remaining_sec / 60) % 60;
     const int seconds = remaining_sec % 60;
@@ -4996,6 +5055,12 @@ void MainWindow::onReceiveIpcMessage(QString message)
   if(nexus::Api::nxmUrlIsValid(message_str))
   {
     Log::debug("Received download request for \"" + message.toStdString() + "\".");
+    if(currentApp() < 0)
+    {
+      setStatusMessage("Cannot start download: no application selected", 5000);
+      Log::error("Ignoring IPC download request: no valid application selected");
+      return;
+    }
     ImportModInfo info;
     info.app_id = currentApp();
     info.action_type = ImportModInfo::download;
@@ -5560,6 +5625,14 @@ void MainWindow::on_actionExport_Mod_List_triggered()
     auto csv_field = [](const QString& s) -> QString
     {
       QString escaped = s;
+      // Neutralise CSV formula injection (OWASP): prefix risky leading characters.
+      if(!escaped.isEmpty())
+      {
+        const QChar first = escaped.at(0);
+        if(first == '=' || first == '+' || first == '-' || first == '@' ||
+           first == QChar('\t') || first == QChar('\r'))
+          escaped.prepend('\'');
+      }
       escaped.replace("\"", "\"\"");
       return "\"" + escaped + "\"";
     };

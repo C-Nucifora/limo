@@ -136,6 +136,29 @@ int stripMergeRegions(pugi::xml_node parent, const std::set<int>& restrict_ids)
       if(parseMarker(child.value(), id, is_begin) && is_begin &&
          (restrict_ids.empty() || restrict_ids.contains(id)))
       {
+        // First confirm a matching end marker exists among the following siblings. If it does
+        // not (an unmatched begin from a hand-edited/truncated file), we must NOT delete to the
+        // end of the parent; per the documented contract we conservatively remove only the stray
+        // begin marker comment and leave the surrounding content untouched.
+        bool has_match = false;
+        for(pugi::xml_node scan = child.next_sibling(); scan; scan = scan.next_sibling())
+        {
+          if(scan.type() != pugi::node_comment)
+            continue;
+          int sid = 0;
+          bool sbegin = false;
+          if(parseMarker(scan.value(), sid, sbegin) && !sbegin && sid == id)
+          {
+            has_match = true;
+            break;
+          }
+        }
+        if(!has_match)
+        {
+          parent.remove_child(child);
+          child = next;
+          continue;
+        }
         // Delete everything from this begin marker through its matching end marker.
         pugi::xml_node cursor = child;
         bool closed = false;

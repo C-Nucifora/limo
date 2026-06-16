@@ -23,9 +23,6 @@ void DeployerListView::setModel(QAbstractItemModel* model)
   // Expansion state is stored in the source model and serialized in the config, so we need to restore it on each layout change
   connect(model, &QAbstractItemModel::layoutChanged,
           this, [this]() {
-            QTimer *timer = new QTimer(this);
-            timer->setSingleShot(true);
-            timer->start();
             this->expandSeparators(this->rootIndex());
           });
   QTreeView::setModel(model);

@@ -338,6 +338,14 @@ std::vector<std::pair<std::string, std::filesystem::path>> findScriptFiles(
       ec.clear();
       continue;
     }
+    // Skip symbolic links entirely: a symlinked .ws file (or directory) could resolve outside
+    // the mod's scripts tree, so reading it would step outside the mod root. is_regular_file()
+    // follows links, so this guard must come first.
+    if(it->is_symlink(ec) || ec)
+    {
+      ec.clear();
+      continue;
+    }
     if(!it->is_regular_file(ec))
       continue;
 

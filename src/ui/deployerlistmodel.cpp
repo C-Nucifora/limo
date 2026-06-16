@@ -91,6 +91,8 @@ QVariant DeployerListModel::data(const QModelIndex& index, int role) const
           return id;
         if(id == -1)
           return modinfo->sourceName.c_str();
+        if(row < 0 || static_cast<size_t>(row) >= deployer_info_.source_mod_names_.size())
+          return QString::number(id);
         return std::format("{} [{}]", deployer_info_.source_mod_names_[row], id).c_str();
       }
       return QString("");
@@ -134,7 +136,10 @@ QVariant DeployerListModel::data(const QModelIndex& index, int role) const
   if(role == valid_mod_actions_role)
   {
     QVariant var;
-    var.setValue(deployer_info_.valid_mod_actions[row]);
+    if(row >= 0 && static_cast<size_t>(row) < deployer_info_.valid_mod_actions.size())
+      var.setValue(deployer_info_.valid_mod_actions[row]);
+    else
+      var.setValue(std::vector<int>());
     return var;
   }
   if (role == ModListModel::expansion_role) {

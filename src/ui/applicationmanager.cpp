@@ -18,9 +18,16 @@ namespace pu = path_utils;
 
 bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
 {
+  // Security: the remote URL may carry a signed token / expiry in its query string; strip the
+  // query before logging so those credentials are not written to the debug log.
+  QUrl log_url(QString::fromStdString(info.remote_download_url));
+  const std::string log_url_str =
+    log_url.isValid()
+      ? log_url.toString(QUrl::RemoveQuery | QUrl::RemoveUserInfo).toStdString()
+      : info.remote_download_url;
   app_mgr->sendLogMessage(Log::LOG_DEBUG,
-                          std::format("Downloading from : '{}'", info.remote_download_url));
-  std::regex url_regex(R"(.*/(.*)\?.*)");
+                          std::format("Downloading from : '{}'", log_url_str));
+  std::regex url_regex(R"(.*/([^/?]+)(?:\?.*)?$)");
   std::smatch match;
   if(!std::regex_match(info.remote_download_url, match, url_regex))
     throw std::runtime_error(std::format("Invalid download URL \"{}\"", info.remote_download_url));
@@ -79,11 +86,11 @@ bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
         if(!message_sent && download_total > 0)
         {
           std::string size_string;
-          long last_size = 0;
-          long size = download_total;
+          long long last_size = 0;
+          long long size = download_total;
           int exp = 0;
           const std::vector<std::string> units{ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB" };
-          while(size > 1024 && exp < units.size())
+          while(size > 1024 && exp < static_cast<int>(units.size()))
           {
             last_size = size;
             size /= 1024;
@@ -227,7 +234,17 @@ void ApplicationManager::runScheduledUpdateCheck()
   // Reuse the existing update-check path; this emits the usual update-available signalling
   // (via completedOperations / ModdedApplication state) so the UI's normal "updates
   // available" indication fires. Runs on this (worker) thread, not the UI thread.
-  checkForModUpdates(auto_update_check_app_id_);
+  // Clear the in-progress guard even if checkForModUpdates throws, so future scheduled
+  // checks are not permanently blocked.
+  try
+  {
+    checkForModUpdates(auto_update_check_app_id_);
+  }
+  catch(...)
+  {
+    auto_update_check_in_progress_ = false;
+    throw;
+  }
   auto_update_check_in_progress_ = false;
 }
 
@@ -411,6 +428,8 @@ bool ApplicationManager::appIndexIsValid(int app_id, bool show_error)
 
 bool ApplicationManager::deployerIndexIsValid(int app_id, int deployer, bool show_error)
 {
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return false;
   if(deployer >= 0 && deployer < apps_[app_id].getNumDeployers())
     return true;
   if(show_error)
@@ -917,7 +936,7 @@ void ApplicationManager::setModColor(int app_id, int mod_id, QString color)
 
 QString ApplicationManager::getModColor(int app_id, int mod_id)
 {
-  if(!appIndexIsValid(app_id))
+  if(!appIndexIsValid(app_id, false))
     return {};
   auto color = handleExceptions(&ModdedApplication::getModColor, apps_[app_id], mod_id);
   if(color)
@@ -1518,6 +1537,7 @@ void ApplicationManager::downloadMod(ImportModInfo info)
         it.speed = 0.0;
       }
     active_download_id_ = -1;
+    cancel_active_download_ = false;
     saveDownloadQueueLocked();
     emitDownloadQueueLocked();
   }
@@ -1572,6 +1592,10 @@ void ApplicationManager::saveDownloadQueueLocked()
     }
     std::ofstream file(path, std::fstream::binary);
     file << json;
+    file.flush();
+    if(!file.good())
+      sendLogMessage(Log::LOG_WARNING,
+                     std::string("Could not write download queue to \"") + path.string() + "\".");
   }
   catch(const std::exception& error)
   {
@@ -1681,6 +1705,9 @@ void ApplicationManager::cancelDownload(int id)
   {
     // the running transfer will abort at the next progress callback
     cancel_active_download_ = true;
+    // Emit a queue snapshot now so the UI can reflect the cancellation request
+    // immediately rather than waiting for the next progress tick.
+    emitDownloadQueueLocked();
     return;
   }
   for(auto& it : download_queue_)

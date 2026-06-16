@@ -320,7 +320,7 @@ std::vector<std::pair<sfs::path, int>> ReverseDeployer::getExternallyModifiedFil
   for(const auto& [i, pair] : str::enumerate_view(deployed_loadorder_))
   {
     const auto& [path, enabled] = pair;
-    if(enabled && !sfs::exists(dest_path_ / path) ||
+    if((enabled && !sfs::exists(dest_path_ / path)) ||
        !sfs::exists(getSourcePath(path, deployed_profile_)))
       modified_files.emplace_back(path, i);
     if(progress_node)

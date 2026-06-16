@@ -240,10 +240,10 @@ bool FomodDialog::selectionIsValid()
       if(button->isChecked())
         num_selected++;
     }
-    if(type == fomod::PluginGroup::at_least_one && num_selected == 0 ||
-       type == fomod::PluginGroup::at_most_one && num_selected > 1 ||
-       type == fomod::PluginGroup::all && num_selected != button_groups_[i]->buttons().size() ||
-       type == fomod::PluginGroup::exactly_one && num_selected != 1)
+    if((type == fomod::PluginGroup::at_least_one && num_selected == 0) ||
+       (type == fomod::PluginGroup::at_most_one && num_selected > 1) ||
+       (type == fomod::PluginGroup::all && num_selected != button_groups_[i]->buttons().size()) ||
+       (type == fomod::PluginGroup::exactly_one && num_selected != 1))
       return false;
   }
   return true;
@@ -384,9 +384,14 @@ void FomodDialog::loadChoices()
     }
     for(const auto& key : root.getMemberNames())
     {
+      if(!root[key].isArray())
+        continue;
       std::set<std::string> plugin_names;
       for(const auto& name : root[key])
-        plugin_names.insert(name.asString());
+      {
+        if(name.isString())
+          plugin_names.insert(name.asString());
+      }
       saved_choices_[key] = std::move(plugin_names);
     }
   }

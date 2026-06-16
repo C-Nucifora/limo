@@ -68,6 +68,27 @@ long parseLong(const std::string& text)
     return -1;
   return value;
 }
+
+/*!
+ * \brief Returns true if \p url begins with an http:// or https:// scheme
+ * (case-insensitive). Used to reject unsafe schemes such as file:// or ftp://.
+ */
+bool hasHttpScheme(const std::string& url)
+{
+  auto starts_with_ci = [&url](const std::string& prefix)
+  {
+    if(url.size() < prefix.size())
+      return false;
+    for(std::size_t i = 0; i < prefix.size(); i++)
+    {
+      if(std::tolower(static_cast<unsigned char>(url[i])) !=
+         std::tolower(static_cast<unsigned char>(prefix[i])))
+        return false;
+    }
+    return true;
+  };
+  return starts_with_ci("http://") || starts_with_ci("https://");
+}
 } // namespace
 
 OmmRepository::OmmRepository(std::string url, std::string user, std::string password) :
@@ -114,7 +135,10 @@ std::optional<std::string> OmmRepository::resolveDownloadUrl(const RemotePackage
     Log::warning(std::format("OMM: package \"{}\" has no downloadable file.", package.name));
     return {};
   }
-  return resolveUrl(raw);
+  std::string resolved = resolveUrl(raw);
+  if(resolved.empty())
+    return {};
+  return resolved;
 }
 
 std::optional<RemotePackage> OmmRepository::checkForUpdate(const std::string& package_name,
@@ -187,7 +211,26 @@ bool OmmRepository::fetchAndParse()
   cpr::Session session;
   session.SetUrl(cpr::Url(url_));
   if(!user_.empty() || !password_.empty())
+  {
+    auto starts_with_ci = [](const std::string& value, const std::string& prefix)
+    {
+      if(value.size() < prefix.size())
+        return false;
+      for(std::size_t i = 0; i < prefix.size(); i++)
+      {
+        if(std::tolower(static_cast<unsigned char>(value[i])) !=
+           std::tolower(static_cast<unsigned char>(prefix[i])))
+          return false;
+      }
+      return true;
+    };
+    if(!starts_with_ci(url_, "https://"))
+      Log::warning(std::format(
+        "OMM: sending basic-auth credentials over a non-https URL \"{}\"; "
+        "credentials may be exposed in cleartext.",
+        url_));
     session.SetAuth(cpr::Authentication(user_, password_, cpr::AuthMode::BASIC));
+  }
   const cpr::Response response = session.Get();
 
   if(response.error)
@@ -291,6 +334,20 @@ bool OmmRepository::fetchAndParse()
             tail = tail.substr(0, query);
           file.file_name = tail;
         }
+
+        // Sanitise the file name so it is always a safe basename: strip any path
+        // separators and reject path-traversal components, falling back to the
+        // package name when nothing safe remains.
+        if(!file.file_name.empty())
+        {
+          const auto last_sep = file.file_name.find_last_of("/\\");
+          if(last_sep != std::string::npos)
+            file.file_name = file.file_name.substr(last_sep + 1);
+          if(file.file_name == "." || file.file_name == "..")
+            file.file_name.clear();
+        }
+        if(file.file_name.empty())
+          file.file_name = package.name;
       }
 
       if(package.name.empty() && package.files.empty())
@@ -311,25 +368,39 @@ std::string OmmRepository::resolveUrl(const std::string& raw_url) const
 {
   if(raw_url.empty())
     return raw_url;
+
+  std::string resolved;
   // Already absolute.
   if(raw_url.find("://") != std::string::npos)
-    return raw_url;
-
-  // Resolve against an explicit base URL if present.
-  std::string base = base_url_;
-  if(base.empty())
+    resolved = raw_url;
+  else
   {
-    // Fall back to the directory of the descriptor URL.
-    const auto slash = url_.find_last_of('/');
-    if(slash != std::string::npos)
-      base = url_.substr(0, slash);
+    // Resolve against an explicit base URL if present.
+    std::string base = base_url_;
+    if(base.empty())
+    {
+      // Fall back to the directory of the descriptor URL.
+      const auto slash = url_.find_last_of('/');
+      if(slash != std::string::npos)
+        base = url_.substr(0, slash);
+    }
+    if(base.empty())
+      resolved = raw_url;
+    else if(base.back() == '/' && raw_url.front() == '/')
+      resolved = base + raw_url.substr(1);
+    else if(base.back() != '/' && raw_url.front() != '/')
+      resolved = base + "/" + raw_url;
+    else
+      resolved = base + raw_url;
   }
-  if(base.empty())
-    return raw_url;
 
-  if(base.back() == '/' && raw_url.front() == '/')
-    return base + raw_url.substr(1);
-  if(base.back() != '/' && raw_url.front() != '/')
-    return base + "/" + raw_url;
-  return base + raw_url;
+  // Only permit http(s) downloads; reject unsafe schemes such as file:// or ftp://.
+  if(!hasHttpScheme(resolved))
+  {
+    Log::warning(std::format(
+      "OMM: rejecting download URL \"{}\" with disallowed scheme (only http/https allowed).",
+      resolved));
+    return {};
+  }
+  return resolved;
 }

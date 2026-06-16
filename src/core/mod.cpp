@@ -54,7 +54,8 @@ Mod::Mod(const Json::Value& json)
   local_source = json["local_source"].asString();
   remote_source = json["remote_source"].asString();
   remote_update_time = json["remote_update_time"].asInt64();
-  size_on_disk = json["size_on_disk"].asInt64();
+  const Json::Int64 raw_size_on_disk = json["size_on_disk"].asInt64();
+  size_on_disk = raw_size_on_disk < 0 ? 0ul : static_cast<unsigned long>(raw_size_on_disk);
   suppress_update_time = json["suppress_update_time"].asInt64();
   note = "";
   if(json.isMember("note"))

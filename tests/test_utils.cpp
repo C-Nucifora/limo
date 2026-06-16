@@ -17,6 +17,7 @@ std::vector<std::string> getFiles(sfs::path dir, bool get_contents = false)
     if(get_contents && dir_entry.is_regular_file())
     {
       std::ifstream file(dir_entry.path());
+      entry.push_back('\0');
       entry.append(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
       file.close();
     }

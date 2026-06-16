@@ -181,12 +181,32 @@ void CyberpunkDeployer::deployFilesWithRemap(
     sfs::create_directories(parent_path);
     removeManagedDirFile(parent_path);
     sfs::remove(dest_path);
-    if(deploy_mode_ == copy)
-      sfs::copy_file(source_path, dest_path);
-    else if(deploy_mode_ == sym_link)
-      sfs::create_symlink(source_path, dest_path);
-    else
-      sfs::create_hard_link(source_path, dest_path);
+    try
+    {
+      if(deploy_mode_ == copy)
+        sfs::copy_file(source_path, dest_path);
+      else if(deploy_mode_ == sym_link)
+        sfs::create_symlink(source_path, dest_path);
+      else
+        sfs::create_hard_link(source_path, dest_path);
+    }
+    catch(const sfs::filesystem_error& e)
+    {
+      // Hard links can't span filesystems; under Flatpak the sandbox can also place the staging and
+      // target dirs on different mounts. Give actionable guidance instead of the raw errno
+      // (limo-app/limo#13, #143). Mirrors Deployer::deployFiles.
+      if(deploy_mode_ == hard_link && e.code() == std::errc::cross_device_link)
+        throw std::runtime_error(std::format(
+          "Deployer '{}': cannot hard link onto the target because the staging directory and the "
+          "game directory are on different filesystems (or separated by the Flatpak sandbox). Use "
+          "the 'Sym Link' or 'Copy' deploy mode, move the staging directory onto the same filesystem "
+          "as the game, or grant Limo access to both locations (e.g. via Flatseal). Affected file: "
+          "'{}' -> '{}'.",
+          name_,
+          source_path.string(),
+          dest_path.string()));
+      throw;
+    }
 
     if(progress_node)
       (*progress_node)->advance();

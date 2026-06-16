@@ -342,7 +342,7 @@ void AddAppDialog::initConfigForApp()
       if(!deployer[JSON_DEPLOYERS_SEPARATE_DIRS].isNull())
         info.separate_profile_dirs = deployer[JSON_DEPLOYERS_SEPARATE_DIRS].asBool();
       if(!deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].isNull())
-        info.separate_profile_dirs = deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].asBool();
+        info.update_ignore_list = deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].asBool();
       deployers_.push_back(info);
     }
     Log::debug(std::format("Found {} deployers", deployers_.size()));
@@ -657,7 +657,16 @@ void AddAppDialog::onApplicationImported(QString name,
 {
   ui->name_field->setText(name);
   ui->command_field->setText("xdg-open steam://rungameid/" + app_id);
-  steam_app_id_ = app_id.toLong();
+  bool app_id_ok = false;
+  const long parsed_app_id = app_id.toLong(&app_id_ok);
+  if(app_id_ok && parsed_app_id > 0)
+    steam_app_id_ = parsed_app_id;
+  else
+  {
+    steam_app_id_ = -1;
+    Log::debug("Imported Steam app id '" + app_id.toStdString() +
+               "' is not a valid positive integer; using default config.");
+  }
   steam_install_path_ = install_dir;
   steam_prefix_path_ = prefix_path;
   updateDetectedPath();
@@ -680,12 +689,13 @@ void AddAppDialog::on_icon_picker_button_clicked()
   QString path = ui->icon_field->text();
   if(!path.isEmpty() && std::filesystem::exists(path.toStdString()))
     starting_dir = std::filesystem::path(path.toStdString()).parent_path().string().c_str();
-  auto dialog = new QFileDialog;
+  auto dialog = new QFileDialog(this);
   dialog->setWindowTitle("Select Icon");
   dialog->setFilter(QDir::AllDirs | QDir::Hidden);
   dialog->setDirectory(starting_dir);
   connect(dialog, &QFileDialog::fileSelected, this, &AddAppDialog::onIconPathDialogComplete);
   dialog->exec();
+  dialog->deleteLater();
 }
 
 void AddAppDialog::onIconPathDialogComplete(const QString& path)
@@ -914,7 +924,7 @@ void AddAppDialog::initConfigForGog(const QString& install_path,
     if(!deployer[JSON_DEPLOYERS_SEPARATE_DIRS].isNull())
       info.separate_profile_dirs = deployer[JSON_DEPLOYERS_SEPARATE_DIRS].asBool();
     if(!deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].isNull())
-      info.separate_profile_dirs = deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].asBool();
+      info.update_ignore_list = deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].asBool();
 
     deployers_.push_back(info);
   }
@@ -996,13 +1006,14 @@ void AddAppDialog::on_gog_prefix_picker_button_clicked()
   const QString current = ui->gog_prefix_field->text().trimmed();
   if(!current.isEmpty() && sfs::exists(current.toStdString()))
     starting_dir = current;
-  auto dialog = new QFileDialog;
+  auto dialog = new QFileDialog(this);
   dialog->setWindowTitle("Select Prefix Directory");
   dialog->setFilter(QDir::AllDirs | QDir::Hidden);
   dialog->setFileMode(QFileDialog::Directory);
   dialog->setDirectory(starting_dir);
   connect(dialog, &QFileDialog::fileSelected, this, &AddAppDialog::onGogPrefixDialogAccepted);
   dialog->exec();
+  dialog->deleteLater();
 }
 
 void AddAppDialog::onGogPrefixDialogAccepted(const QString& path)

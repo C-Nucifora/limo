@@ -160,6 +160,34 @@ bool OverlayDeployer::loadState() const
 // mount / unmount helpers
 // ---------------------------------------------------------------------------
 
+namespace
+{
+// Decodes the octal escape sequences (\040 space, \011 tab, \012 newline,
+// \134 backslash, …) that the kernel uses for the mountpoint field in
+// /proc/mounts so the value can be compared against a real path.
+std::string decodeProcMountsField(const std::string& field)
+{
+  std::string out;
+  out.reserve(field.size());
+  for(std::size_t i = 0; i < field.size(); i++)
+  {
+    if(field[i] == '\\' && i + 3 < field.size() &&
+       field[i + 1] >= '0' && field[i + 1] <= '7' &&
+       field[i + 2] >= '0' && field[i + 2] <= '7' &&
+       field[i + 3] >= '0' && field[i + 3] <= '7')
+    {
+      const int value = (field[i + 1] - '0') * 64 + (field[i + 2] - '0') * 8 +
+                        (field[i + 3] - '0');
+      out += static_cast<char>(value);
+      i += 3;
+    }
+    else
+      out += field[i];
+  }
+  return out;
+}
+}
+
 bool OverlayDeployer::isMounted() const
 {
   // Parse /proc/mounts looking for our mount point
@@ -167,7 +195,11 @@ bool OverlayDeployer::isMounted() const
   if(!mounts.is_open())
     return false;
 
-  const std::string target = dest_path_.string();
+  // Canonicalize the target so that symlinks / '..' / trailing slashes do not
+  // cause a spurious mismatch against the kernel-reported mount point.
+  std::error_code ec;
+  sfs::path canonical_target = sfs::weakly_canonical(dest_path_, ec);
+  const std::string target = (ec ? dest_path_ : canonical_target).string();
   std::string line;
   while(std::getline(mounts, line))
   {
@@ -175,7 +207,14 @@ bool OverlayDeployer::isMounted() const
     std::istringstream ss(line);
     std::string device, mountpoint;
     ss >> device >> mountpoint;
+    // The mountpoint field is octal-escaped (e.g. spaces as \040); decode it
+    // before comparing.
+    mountpoint = decodeProcMountsField(mountpoint);
     if(mountpoint == target)
+      return true;
+    std::error_code ec2;
+    sfs::path canonical_mp = sfs::weakly_canonical(mountpoint, ec2);
+    if(!ec2 && canonical_mp.string() == target)
       return true;
   }
   return false;
@@ -329,6 +368,20 @@ std::map<int, unsigned long> OverlayDeployer::deploy(
 
   // The original game content is the bottom-most lowerdir
   lowerdirs.push_back(origDir().string());
+
+  // fuse-overlayfs uses ':' to separate lowerdirs and ',' to separate options;
+  // a '\' is its own escape character.  Paths containing any of these cannot be
+  // expressed unambiguously in the option string, so reject them with a clear
+  // error rather than silently producing a corrupted mount.
+  for(const std::string& dir : lowerdirs)
+  {
+    if(dir.find_first_of(":,\\") != std::string::npos)
+      throw std::runtime_error(
+        std::format("OverlayDeployer '{}': lowerdir path '{}' contains a ':' , ',' or "
+                    "'\\' character, which cannot be used in a fuse-overlayfs lowerdir "
+                    "option.  Please rename the offending directory.",
+                    name_, dir));
+  }
 
   // Build the colon-separated lowerdir option string
   std::string lowerdir_opt;

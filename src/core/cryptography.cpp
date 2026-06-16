@@ -21,7 +21,8 @@ void throwError(const std::string& step)
     error.append("\n");
     code = ERR_get_error();
   }
-  ERR_free_strings();
+  // Do not call ERR_free_strings() here: it deinitializes the process-wide OpenSSL error-string
+  // tables, affecting all threads. The loop above already drained this thread's error queue.
   throw CryptographyError(error);
 }
 

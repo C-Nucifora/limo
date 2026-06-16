@@ -622,6 +622,8 @@ void ModdedApplication::addDeployer(const EditDeployerInfo& info)
 
 void ModdedApplication::removeDeployer(int deployer, bool cleanup)
 {
+  if(deployer < 0 || deployer >= static_cast<int>(deployers_.size()))
+    return;
   if(cleanup)
     deployers_[deployer]->cleanup();
   deployers_.erase(deployers_.begin() + deployer);
@@ -895,7 +897,9 @@ AppInfo ModdedApplication::getAppInfo() const
   info.staging_dir = staging_dir_.string();
   info.command = command_;
   info.num_mods = installed_mods_.size();
-  info.app_version = app_versions_[current_profile_];
+  info.app_version = (current_profile_ >= 0 && current_profile_ < static_cast<int>(app_versions_.size()))
+                       ? app_versions_[current_profile_]
+                       : std::string{};
   info.steam_app_id = steam_app_id_;
   for(const auto& deployer : deployers_)
   {
@@ -1068,6 +1072,7 @@ std::tuple<int, std::string, std::string> ModdedApplication::verifyDeployerDirec
     if(cur_code)
     {
       ret = { cur_code, depl->destPath(), message };
+      return ret;
     }
   }
   return ret;
@@ -1354,7 +1359,7 @@ int ModdedApplication::verifyStagingDir(sfs::path staging_dir)
   {
     return 1;
   }
-  catch(Json::RuntimeError& e)
+  catch(Json::Exception& e)
   {
     return 2;
   }
@@ -2136,6 +2141,8 @@ void ModdedApplication::exportConfiguration(const std::vector<int>& deployers,
   log_(Log::LOG_INFO,
        std::format("Exporting configuration for '{}' to '{}'", name_, path.string()));
   std::ofstream file(path, std::fstream::binary);
+  if(!file.is_open())
+    throw std::runtime_error("Error: Could not write to \"" + path.string() + "\".");
   file << json;
 }
 
@@ -2205,7 +2212,14 @@ Json::Value ModdedApplication::parseInstanceBundle(const sfs::path& bundle)
   if(!file.is_open())
     throw std::runtime_error("Error: Could not read from \"" + in_path.string() + "\".");
   Json::Value root;
-  file >> root;
+  try
+  {
+    file >> root;
+  }
+  catch(const Json::Exception& e)
+  {
+    throw ParseError("Could not parse instance bundle \"" + in_path.string() + "\": " + e.what());
+  }
   file.close();
 
   if(!root.isMember("format") || root["format"].asString() != "limo_instance")
@@ -2559,10 +2573,8 @@ void ModdedApplication::createRestorePoint(const std::string& name)
   // Trim to the most recent MAX_RESTORE_POINTS, dropping the oldest (front) entries.
   while((int)restore_points_.size() > MAX_RESTORE_POINTS)
   {
-    Json::Value trimmed(Json::arrayValue);
-    for(int i = 1; i < (int)restore_points_.size(); i++)
-      trimmed.append(restore_points_[i]);
-    restore_points_ = trimmed;
+    Json::Value removed;
+    restore_points_.removeIndex(0, &removed);
   }
 
   updateSettings(true);
@@ -3213,13 +3225,15 @@ void ModdedApplication::updateState(bool read)
       group_map_[mod_id] = group;
       groups_[group].push_back(mod_id);
     }
+    if(!groups[group].isMember("active_member"))
+      throw ParseError("Invalid active group member: missing in \"" +
+                       (staging_dir_ / CONFIG_FILE_NAME).string() + "\"");
     int active_member = groups[group]["active_member"].asInt();
     if(std::find(groups_[group].begin(), groups_[group].end(), active_member) ==
-         groups_[group].end() ||
-       !groups[group].isMember("active_member"))
+       groups_[group].end())
       throw ParseError("Invalid active group member: " + std::to_string(active_member) + " in \"" +
                        (staging_dir_ / CONFIG_FILE_NAME).string() + "\"");
-    active_group_members_.push_back(groups[group]["active_member"].asInt());
+    active_group_members_.push_back(active_member);
     group_names_.push_back(groups[group].get("name", "").asString());
     group_notes_.push_back(groups[group].get("notes", "").asString());
   }
@@ -3260,6 +3274,15 @@ void ModdedApplication::updateState(bool read)
         {
           for(int mod = 0; mod < loadorder.size(); mod++)
           {
+            // Skip malformed legacy entries instead of trusting implicit JSON conversions.
+            if(!loadorder[mod].isObject() || !loadorder[mod].isMember("id") ||
+               !loadorder[mod].isMember("enabled"))
+            {
+              log_(Log::LOG_WARNING,
+                   "Skipping malformed load order entry in \"" +
+                     (staging_dir_ / CONFIG_FILE_NAME).string() + "\"");
+              continue;
+            }
             int mod_id = loadorder[mod]["id"].asInt();
             if(std::find_if(installed_mods_.begin(),
                             installed_mods_.end(),
@@ -3267,8 +3290,10 @@ void ModdedApplication::updateState(bool read)
                             { return m.id == mod_id; }) == installed_mods_.end())
               throw ParseError("Unknown mod id in deployers: " + std::to_string(mod_id) + " in \"" +
                               (staging_dir_ / CONFIG_FILE_NAME).string() + "\"");
-            if(!group_map_.contains(mod_id) || active_group_members_[group_map_[mod_id]] == mod_id &&
-                                                !(deployers_[depl]->isAutonomous()))
+            // The enclosing `if(!isAutonomous())` already excludes autonomous deployers, so the
+            // membership check only needs the group/active-member condition.
+            if(!group_map_.contains(mod_id) ||
+               active_group_members_[group_map_[mod_id]] == mod_id)
               deployers_[depl]->addMod(mod_id, loadorder[mod]["enabled"].asBool(), false);
           }
         }
@@ -3784,14 +3809,28 @@ void ModdedApplication::updateSteamAppId()
   std::string path_str = icon_path_.string();
   if(std::regex_match(path_str, match, old_path_regex))
   {
-    steam_app_id_ = std::stol(match[1]);
+    try
+    {
+      steam_app_id_ = std::stol(match[1]);
+    }
+    catch(const std::exception& e)
+    {
+      steam_app_id_ = -1;
+    }
     return;
   }
 
   std::regex new_path_regex(R"(.*?/steam/appcache/librarycache/(\d+)/.*)");
   if(std::regex_match(path_str, match, new_path_regex))
   {
-    steam_app_id_ = std::stol(match[1]);
+    try
+    {
+      steam_app_id_ = std::stol(match[1]);
+    }
+    catch(const std::exception& e)
+    {
+      steam_app_id_ = -1;
+    }
     return;
   }
 
@@ -3802,7 +3841,14 @@ void ModdedApplication::updateSteamAppId()
     std::string path = depl->getDestPath();
     if(std::regex_search(path, match, steam_regex))
     {
-      steam_app_id_ = std::stol(match[1]);
+      try
+      {
+        steam_app_id_ = std::stol(match[1]);
+      }
+      catch(const std::exception& e)
+      {
+        continue;
+      }
       return;
     }
   }

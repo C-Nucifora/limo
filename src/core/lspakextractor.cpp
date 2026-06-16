@@ -1,4 +1,5 @@
 #include "lspakextractor.h"
+#include <cstring>
 #include <format>
 #include <fstream>
 #include <iostream>
@@ -47,11 +48,18 @@ void LsPakExtractor::init()
       std::format("file_list_offset ({}) is out of bounds for archive of size {}.",
                   file_list_offset, archive_size));
 
-  auto compressed_size = readFileList(archive_size);
-  if(compressed_size + 8 != header_->file_list_size)
+  // Copy the packed field to a local to avoid taking a reference to a misaligned member.
+  const uint32_t file_list_size = header_->file_list_size;
+  if(file_list_size < 8)
+    throw std::runtime_error(std::format(
+      "Header file_list_size ({}) is too small to contain the file-list prefix.", file_list_size));
+
+  const uint64_t compressed_size = readFileList(archive_size);
+  // Perform the comparison in uint64_t to avoid any wraparound.
+  if(compressed_size + 8u != static_cast<uint64_t>(file_list_size))
   {
     throw std::runtime_error(std::format("Mismatch for file list size! Expected {}, found {}.",
-                                         static_cast<unsigned int>(header_->file_list_size - 8),
+                                         static_cast<uint64_t>(file_list_size) - 8u,
                                          compressed_size));
   }
 }
@@ -120,11 +128,13 @@ std::string LsPakExtractor::extractData(unsigned long offset,
     std::vector<char> output_buffer(uncompressed_size);
     stream.avail_out = uncompressed_size;
     stream.next_out = reinterpret_cast<Bytef*>(output_buffer.data());
-    inflateInit(&stream);
-    int code = inflate(&stream, Z_NO_FLUSH);
+    int code = inflate(&stream, Z_FINISH);
+    const uint64_t produced = static_cast<uint64_t>(stream.total_out);
     inflateEnd(&stream);
-    if(code < 0)
+    if(code != Z_STREAM_END)
       throw std::runtime_error(std::format("zlib decompression failed with code: {}", code));
+    if(produced != uncompressed_size)
+      throw std::runtime_error(std::format("zlib decompression produced unexpected size: {}.", produced));
     return { output_buffer.data(), uncompressed_size };
   }
   else
@@ -135,12 +145,22 @@ std::vector<std::filesystem::path> LsPakExtractor::getFileList()
 {
   std::vector<sfs::path> path_list;
   for(const auto& f : file_list_)
-    path_list.emplace_back(f.path);
+  {
+    // f.path is a fixed char[256] that may not be null-terminated; bound the
+    // length explicitly to avoid an out-of-bounds read.
+    const std::string path_str(f.path, ::strnlen(f.path, sizeof(f.path)));
+    if(path_str.empty())
+      continue;
+    path_list.emplace_back(path_str);
+  }
   return path_list;
 }
 
 std::string LsPakExtractor::extractFile(int file_id)
 {
+  if(file_id < 0 || static_cast<size_t>(file_id) >= file_list_.size())
+    throw std::out_of_range(std::format("File id {} is out of range (file list size: {}).",
+                                        file_id, file_list_.size()));
   const auto& file = file_list_[file_id];
   return extractData(
     file.offset, file.compressed_size, file.uncompressed_size, file.flags & COMPRESSION_MASK);
@@ -173,6 +193,8 @@ unsigned int LsPakExtractor::readFileList(uint64_t archive_size)
   uint32_t num_files = *reinterpret_cast<uint32_t*>(buffer.data());
   file.read(buffer.data(), 4);
   uint32_t compressed_size = *reinterpret_cast<uint32_t*>(buffer.data());
+  if(!file)
+    throw std::runtime_error("Unexpected end of archive while reading the file-list header.");
 
   // Reject implausibly large entry counts.
   if(num_files > MAX_FILE_ENTRIES)

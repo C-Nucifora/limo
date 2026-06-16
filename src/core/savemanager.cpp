@@ -93,8 +93,8 @@ bool SaveManager::deleteSave(const sfs::path& save_path)
   std::error_code ec;
   if(!sfs::exists(save_path, ec) || ec)
     return false;
-  const bool removed = sfs::remove(save_path);
-  if(removed)
+  const bool removed = sfs::remove(save_path, ec);
+  if(removed && !ec)
     Log::debug("Deleted save file '" + save_path.string() + "'");
   return removed;
 }

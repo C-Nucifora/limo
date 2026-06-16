@@ -52,7 +52,7 @@ OpenMwPluginDeployer::OpenMwPluginDeployer(const sfs::path& source_path,
 void OpenMwPluginDeployer::unDeploy(std::optional<ProgressNode*> progress_node)
 {
   const std::string plugin_backup_path =
-    dest_path_ / ("." + plugin_file_name_ + UNDEPLOY_BACKUP_EXTENSION);
+    dest_path_ / (hideFile(plugin_file_name_) + UNDEPLOY_BACKUP_EXTENSION);
   if(!pu::exists(plugin_backup_path))
     sfs::copy(dest_path_ / plugin_file_name_, plugin_backup_path);
 
@@ -174,11 +174,19 @@ bool OpenMwPluginDeployer::sortPluginsWithLoot(std::optional<ProgressNode*> prog
   }
 
   if(enable_unsafe_sorting_)
+  {
     plugins_ = new_plugins;
-  log_(Log::LOG_INFO,
-       std::format("Deployer '{}': Sorted {} OpenMW content files using LOOT.",
-                   name_,
-                   new_plugins.size()));
+    log_(Log::LOG_INFO,
+         std::format("Deployer '{}': Sorted {} OpenMW content files using LOOT.",
+                     name_,
+                     new_plugins.size()));
+  }
+  else
+    log_(Log::LOG_INFO,
+         std::format("Deployer '{}': Computed a LOOT sort for {} OpenMW content files but "
+                     "kept the existing order (unsafe sorting disabled).",
+                     name_,
+                     new_plugins.size()));
   if(progress_node)
     (*progress_node)->child(3).advance();
   return true;
@@ -364,11 +372,17 @@ bool OpenMwPluginDeployer::initPluginFile()
   {
     std::smatch match;
     if(std::regex_match(line, match, plugin_regex))
-      plugins_.emplace_back(match[1], true);
+    {
+      // Only the bare file name is a valid plugin identifier; strip any path components
+      // that may have been written into the content= value.
+      const std::string plugin_name = sfs::path(match[1].str()).filename().string();
+      plugins_.emplace_back(plugin_name, true);
+    }
     else if(std::regex_match(line, match, groundcover_regex))
     {
-      plugins_.emplace_back(match[1], true);
-      groundcover_plugins_.insert(match[1]);
+      const std::string plugin_name = sfs::path(match[1].str()).filename().string();
+      plugins_.emplace_back(plugin_name, true);
+      groundcover_plugins_.insert(plugin_name);
       num_groundcover_plugins_++;
     }
   }
@@ -695,7 +709,21 @@ void OpenMwPluginDeployer::writeDataEntries(bool write_entries) const
       {
         out_file << DATA_BLOCK_BEGIN_MARKER << "\n";
         for(const auto& path : data_paths)
+        {
+          // A double quote inside the path would terminate the quoted data= value early and
+          // corrupt openmw.cfg. There is no portable way to represent such a path here, so the
+          // entry is skipped with a warning rather than writing a broken line.
+          if(path.find('"') != std::string::npos)
+          {
+            log_(Log::LOG_WARNING,
+                 std::format("Deployer '{}': Skipping data= entry for path '{}' because it "
+                             "contains a double quote character.",
+                             name_,
+                             path));
+            continue;
+          }
           out_file << "data=\"" << path << "\"\n";
+        }
         out_file << DATA_BLOCK_END_MARKER << "\n";
       }
     }
@@ -789,8 +817,18 @@ std::vector<std::pair<std::string, std::string>> OpenMwPluginDeployer::parsePlox
     if(line.front() == '[')
     {
       const auto close = line.find(']');
-      std::string header =
-        close == std::string::npos ? line.substr(1) : line.substr(1, close - 1);
+      if(close == std::string::npos)
+      {
+        // Malformed header (missing closing bracket): make the rule-file error visible
+        // and skip the line rather than partially parsing it as a section header.
+        log_(Log::LOG_WARNING,
+             std::format("Deployer '{}': Ignoring malformed PLOX section header (missing "
+                         "closing ']'): '{}'.",
+                         name_,
+                         line));
+        continue;
+      }
+      std::string header = line.substr(1, close - 1);
       const std::string header_lc = to_lower(trim(header));
       if(header_lc == "order")
         active_block = 1;

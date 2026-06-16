@@ -152,7 +152,7 @@ int ModListView::getMouseRegion() const
 
 int ModListView::getNumSelectedRows() const
 {
-  return selectionModel()->selection().indexes().size() / model()->columnCount();
+  return selectionModel()->selectedRows().size();
 }
 
 std::vector<int> ModListView::getSelectedModIds() const
@@ -170,13 +170,7 @@ std::vector<int> ModListView::getSelectedModIds() const
 
 QModelIndexList ModListView::getSelectedRowIndices() const
 {
-  const auto all_indices = selectedIndexes();
-  QModelIndexList row_indices;
-  for(int i = 0; i < all_indices.size(); i += model()->columnCount())
-  {
-    row_indices.append(all_indices[i]);
-  }
-  return row_indices;
+  return selectionModel()->selectedRows();
 }
 
 QModelIndex ModListView::getHoverRow() const

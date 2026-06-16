@@ -33,6 +33,8 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
   connect(icon_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
   icon_picker_ = new QPushButton(this);
   icon_picker_->setIcon(QIcon::fromTheme("folder-open"));
+  icon_picker_->setAccessibleName("Browse for icon");
+  icon_picker_->setToolTip("Browse for icon");
   connect(icon_picker_, &QPushButton::clicked, this, &EditToolWidget::iconPickerClicked);
 
   executable_label_ = new QLabel("Tool executable:", this);
@@ -41,6 +43,8 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
   connect(executable_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
   executable_picker_ = new QPushButton(this);
   executable_picker_->setIcon(QIcon::fromTheme("folder-open"));
+  executable_picker_->setAccessibleName("Browse for executable");
+  executable_picker_->setToolTip("Browse for executable");
   connect(
     executable_picker_, &QPushButton::clicked, this, &EditToolWidget::executablePickerClicked);
 
@@ -69,6 +73,8 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
   connect(prefix_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
   prefix_picker_ = new QPushButton(this);
   prefix_picker_->setIcon(QIcon::fromTheme("folder-open"));
+  prefix_picker_->setAccessibleName("Browse for Wine prefix");
+  prefix_picker_->setToolTip("Browse for Wine prefix");
   connect(prefix_picker_, &QPushButton::clicked, this, &EditToolWidget::prefixPickerClicked);
 
   app_id_label_ = new QLabel("Steam App ID:", this);
@@ -93,6 +99,8 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
     working_directory_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
   working_directory_picker_ = new QPushButton(this);
   working_directory_picker_->setIcon(QIcon::fromTheme("folder-open"));
+  working_directory_picker_->setAccessibleName("Browse for working directory");
+  working_directory_picker_->setToolTip("Browse for working directory");
   connect(working_directory_picker_,
           &QPushButton::clicked,
           this,
@@ -124,6 +132,8 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
   command_label_ = new QLabel("Command:", this);
   command_label_->setToolTip("Command to run");
   command_field_ = new ValidatingLineEdit(this);
+  command_field_->setToolTip("Command to run");
+  command_field_->setPlaceholderText("Command to run");
   connect(command_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
 
 

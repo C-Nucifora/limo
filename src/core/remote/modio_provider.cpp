@@ -55,30 +55,34 @@ void ModioProvider::requireKey() const
 RemoteMod ModioProvider::modObjectToRemoteMod(const Json::Value& obj)
 {
   RemoteMod mod;
-  mod.id      = std::to_string(obj["id"].asInt64());
-  mod.name    = obj["name"].asString();
-  mod.summary = obj["summary"].asString();
-  if(obj.isMember("submitted_by") && obj["submitted_by"].isMember("username"))
+  mod.id      = obj["id"].isIntegral() ? std::to_string(obj["id"].asInt64()) : "";
+  mod.name    = obj["name"].isString() ? obj["name"].asString() : "";
+  mod.summary = obj["summary"].isString() ? obj["summary"].asString() : "";
+  if(obj.isMember("submitted_by") && obj["submitted_by"].isMember("username")
+     && obj["submitted_by"]["username"].isString())
     mod.author = obj["submitted_by"]["username"].asString();
 
   // Logo URL — use "original" if available, else first size
   if(obj.isMember("logo"))
   {
     const Json::Value& logo = obj["logo"];
-    mod.icon_url = logo.isMember("original") ? logo["original"].asString()
-                   : logo.isMember("thumb_320x180") ? logo["thumb_320x180"].asString()
+    mod.icon_url = logo["original"].isString() ? logo["original"].asString()
+                   : logo["thumb_320x180"].isString() ? logo["thumb_320x180"].asString()
                    : "";
   }
 
   // mod.io exposes stats.downloads_total
-  if(obj.isMember("stats") && obj["stats"].isMember("downloads_total"))
+  if(obj.isMember("stats") && obj["stats"].isMember("downloads_total")
+     && obj["stats"]["downloads_total"].isIntegral())
     mod.total_downloads = obj["stats"]["downloads_total"].asInt64();
 
   // Latest release version from modfile subobject (if present)
-  if(obj.isMember("modfile") && !obj["modfile"].isNull())
+  if(obj.isMember("modfile") && obj["modfile"].isObject()
+     && obj["modfile"]["version"].isString())
     mod.version = obj["modfile"]["version"].asString();
 
-  mod.page_url = obj.isMember("profile_url") ? obj["profile_url"].asString() : "";
+  mod.page_url =
+    obj["profile_url"].isString() ? obj["profile_url"].asString() : "";
 
   Json::FastWriter writer;
   mod.extra_json = writer.write(obj);
@@ -88,19 +92,20 @@ RemoteMod ModioProvider::modObjectToRemoteMod(const Json::Value& obj)
 RemoteFile ModioProvider::modfileToRemoteFile(const Json::Value& obj)
 {
   RemoteFile file;
-  file.id      = std::to_string(obj["id"].asInt64());
-  file.version = obj.isMember("version") ? obj["version"].asString() : "";
+  file.id      = obj["id"].isIntegral() ? std::to_string(obj["id"].asInt64()) : "";
+  file.version = obj["version"].isString() ? obj["version"].asString() : "";
   // "filename" is the original archive name
-  file.name    = obj.isMember("filename") ? obj["filename"].asString() : file.id;
+  file.name    = obj["filename"].isString() ? obj["filename"].asString() : file.id;
   // mod.io exposes file size in bytes under "filesize"
-  file.size_bytes  = obj.isMember("filesize") ? obj["filesize"].asInt64() : 0;
-  file.description = obj.isMember("changelog") ? obj["changelog"].asString() : "";
+  file.size_bytes  = obj["filesize"].isIntegral() ? obj["filesize"].asInt64() : 0;
+  file.description = obj["changelog"].isString() ? obj["changelog"].asString() : "";
   // date_added is a Unix timestamp
-  file.uploaded_at = obj.isMember("date_added")
+  file.uploaded_at = obj["date_added"].isIntegral()
                        ? std::to_string(obj["date_added"].asInt64())
                        : "";
   // binary_url is the direct CDN link; present for public mods without auth
-  if(obj.isMember("download") && !obj["download"].isNull())
+  if(obj.isMember("download") && obj["download"].isObject()
+     && obj["download"]["binary_url"].isString())
     file.download_url = obj["download"]["binary_url"].asString();
   return file;
 }

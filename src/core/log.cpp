@@ -1,5 +1,6 @@
 #include "log.h"
 #include <chrono>
+#include <ctime>
 #include <deque>
 #include <fstream>
 #include <iomanip>
@@ -31,8 +32,10 @@ std::string getTimestamp(Log::LogLevel log_level)
 {
   const auto now = std::chrono::system_clock::now();
   auto cur_time = std::chrono::system_clock::to_time_t(now);
+  std::tm tm_buf{};
+  localtime_r(&cur_time, &tm_buf);
   std::stringstream ss;
-  ss << std::put_time(std::localtime(&cur_time), "%F %T");
+  ss << std::put_time(&tm_buf, "%F %T");
   if(log_level == Log::LOG_DEBUG)
     ss << "."
        << std::chrono::time_point_cast<std::chrono::milliseconds>(now).time_since_epoch().count() %
@@ -46,7 +49,8 @@ void writeLog(const std::string& message, Log::LogLevel log_level, int target_pr
   // in-app log viewer, regardless of the active log level or printers.
   recordLogEntry(message, log_level);
 
-  if(Log::log_level >= log_level && Log::log_printers.size() > target_printer)
+  if(Log::log_level >= log_level && target_printer >= 0 &&
+     static_cast<std::size_t>(target_printer) < Log::log_printers.size())
     Log::log_printers[target_printer](message, log_level);
 
   if(Log::log_file_path.empty())
@@ -62,7 +66,7 @@ void writeLog(const std::string& message, Log::LogLevel log_level, int target_pr
   }
   catch(...)
   {
-    if(Log::log_printers.size() > target_printer)
+    if(target_printer >= 0 && static_cast<std::size_t>(target_printer) < Log::log_printers.size())
       Log::log_printers[target_printer]("Failed to write to log file!", Log::LOG_DEBUG);
   }
 }

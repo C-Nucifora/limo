@@ -19,14 +19,33 @@ Bg3PakFile::Bg3PakFile(const sfs::path& source_file, const sfs::path& prefix) :
 Bg3PakFile::Bg3PakFile(const Json::Value& json_value, const sfs::path& prefix) :
   source_path_prefix_(prefix)
 {
-  source_file_ = json_value["source_file"].asString();
-  modified_time_ = json_value["modified_time"].asInt64();
-  if(modified_time_ == getTimestamp(source_path_prefix_ / source_file_))
+  source_file_ =
+    json_value.isMember("source_file") && json_value["source_file"].isString()
+      ? json_value["source_file"].asString()
+      : std::string();
+  modified_time_ =
+    json_value.isMember("modified_time") && json_value["modified_time"].isIntegral()
+      ? json_value["modified_time"].asInt64()
+      : 0;
+  std::time_t current_time = 0;
+  bool timestamp_valid = false;
+  try
   {
-    for(int i = 0; i < json_value["files"].size(); i++)
-      file_list_.push_back(json_value["files"][i].asString());
-    for(int i = 0; i < json_value["plugins"].size(); i++)
-      plugins_.emplace_back(json_value["plugins"][i]["meta_data_xml"].asString());
+    current_time = getTimestamp(source_path_prefix_ / source_file_);
+    timestamp_valid = true;
+  }
+  catch(const std::filesystem::filesystem_error&)
+  {
+    timestamp_valid = false;
+  }
+  if(timestamp_valid && modified_time_ == current_time)
+  {
+    const Json::Value& files = json_value["files"];
+    for(Json::ArrayIndex i = 0; i < files.size(); i++)
+      file_list_.push_back(files[i].asString());
+    const Json::Value& json_plugins = json_value["plugins"];
+    for(Json::ArrayIndex i = 0; i < json_plugins.size(); i++)
+      plugins_.emplace_back(json_plugins[i]["meta_data_xml"].asString());
   }
   else
     init();

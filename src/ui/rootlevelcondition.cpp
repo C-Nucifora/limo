@@ -71,7 +71,16 @@ std::optional<int> RootLevelCondition::detectRootLevel(QTreeWidgetItem* root_nod
 
   std::regex expression_regex;
   if(matcher_type_ == regex)
-    expression_regex.assign(expression_);
+  {
+    try
+    {
+      expression_regex.assign(expression_);
+    }
+    catch(const std::regex_error&)
+    {
+      return {};
+    }
+  }
 
   while(!remaining_nodes.empty())
   {

@@ -210,8 +210,19 @@ void TreeItem<T>::erase(std::weak_ptr<T> item) {
   auto found = std::ranges::find_if(
     traversal_cache.begin(),
     traversal_cache.end(),
-    [item](const std::weak_ptr<TreeItem<T>> e) { return e.lock()->getData() == item.lock(); });
-  (*found).lock()->parent()->remove(*found);
+    [item](const std::weak_ptr<TreeItem<T>> e) {
+      auto locked = e.lock();
+      return locked && locked->getData() == item.lock();
+    });
+  if (found == traversal_cache.end())
+    return;
+  auto foundItem = found->lock();
+  if (!foundItem)
+    return;
+  auto foundParent = foundItem->parent();
+  if (!foundParent)
+    return;
+  foundParent->remove(*found);
 }
 
 template <typename T>

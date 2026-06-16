@@ -10,6 +10,7 @@
 
 TEST_CASE("Mods are added and removed", "[deployer]")
 {
+  resetAppDir();
   Deployer depl = Deployer(DATA_DIR / "source", DATA_DIR / "app", "");
   depl.addProfile();
   depl.addMod(2, true);

@@ -150,10 +150,16 @@ void NexusBrowserDialog::onResultSelectionChanged()
       .arg(QString::fromStdString(result.domain_name))
       .arg(mod.mod_id);
 
+  // Only accept http(s) thumbnail URLs to avoid embedding/fetching arbitrary schemes.
+  const QUrl picture_qurl(QString::fromStdString(mod.picture_url));
+  const bool picture_url_valid =
+    !mod.picture_url.empty() && picture_qurl.isValid() &&
+    (picture_qurl.scheme() == "http" || picture_qurl.scheme() == "https");
+
   QString html;
-  if(!mod.picture_url.empty())
+  if(picture_url_valid)
     html += QString("<img src=\"%1\" width=\"320\"><br><br>")
-              .arg(QString::fromStdString(mod.picture_url));
+              .arg(QString::fromStdString(mod.picture_url).toHtmlEscaped());
   html += QString("<h2>%1</h2>").arg(QString::fromStdString(mod.name).toHtmlEscaped());
   if(!mod.version.empty())
     html += QString("<p><b>Version:</b> %1</p>")
@@ -170,9 +176,9 @@ void NexusBrowserDialog::onResultSelectionChanged()
 
   // Lazily load the thumbnail off the UI thread and feed it into the document. Degrades
   // gracefully: on any error the alt text already shown by QTextBrowser remains.
-  if(!mod.picture_url.empty())
+  if(picture_url_valid)
   {
-    QNetworkRequest request{ QUrl(QString::fromStdString(mod.picture_url)) };
+    QNetworkRequest request{ picture_qurl };
     QNetworkReply* reply = network_manager_.get(request);
     QTextBrowser* browser = ui->detail_browser;
     const QString picture_url = QString::fromStdString(mod.picture_url);

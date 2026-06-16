@@ -95,6 +95,20 @@ Mo2ParseResult Mo2Importer::parseProfile(const sfs::path& instance_path,
   int idx = 0;
   for(const auto& [name, enabled] : modlist)
   {
+    // Reject path-traversal / non-filename entries: a mod name must be a single,
+    // normal path component (no separators, no '.' or '..').  This prevents a
+    // crafted modlist.txt from escaping the mods directory.
+    const sfs::path name_path(name);
+    if(name.empty() || name.find('/') != std::string::npos ||
+       name.find('\\') != std::string::npos || !name_path.has_filename() ||
+       name_path.filename() != name_path || name == "." || name == "..")
+    {
+      result.warnings.push_back(std::format(
+        "Mod '{}' in modlist.txt has an invalid name (path separators or traversal) — skipped.",
+        name));
+      continue;
+    }
+
     const sfs::path mod_path = mods_dir / name;
     if(!sfs::is_directory(mod_path))
     {

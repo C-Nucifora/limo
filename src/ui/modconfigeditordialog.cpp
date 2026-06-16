@@ -64,6 +64,9 @@ void ModConfigEditorDialog::scanForFiles(const QString& root)
   };
 
   const QDir base(root);
+  // Canonical staging root used to confine every candidate path: a mod must not be
+  // able to read or write outside its staging directory via symlinks.
+  const QString canonical_root = QFileInfo(root).canonicalFilePath();
   QDirIterator it(root,
                   QDir::Files | QDir::NoDotAndDotDot,
                   QDirIterator::Subdirectories);
@@ -71,6 +74,16 @@ void ModConfigEditorDialog::scanForFiles(const QString& root)
   {
     const QString path = it.next();
     const QFileInfo info(path);
+
+    // Skip symlinks and reject any path that resolves outside the staging directory.
+    if(info.isSymLink())
+      continue;
+    const QString canonical = info.canonicalFilePath();
+    if(canonical_root.isEmpty() || canonical.isEmpty())
+      continue;
+    if(canonical != canonical_root &&
+       !canonical.startsWith(canonical_root + '/'))
+      continue;
 
     const QString relative = base.relativeFilePath(path);
     if(relative.count('/') > MAX_DEPTH)

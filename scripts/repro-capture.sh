@@ -57,7 +57,10 @@ print_bug_steps() {
     *)   echo "Unknown bug id '$1'. Known: 95 120 121 122 136 138 93 96" ;;
   esac
 }
-if [[ "${1:-}" == "--bug" ]]; then print_bug_steps "${2:-}"; exit 0; fi
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  if [[ "${args[$i]}" == "--bug" ]]; then print_bug_steps "${args[$((i + 1))]:-}"; exit 0; fi
+done
 
 mkdir -p "$OUT_DIR"
 echo "==> Capturing to: $OUT_DIR"

@@ -144,17 +144,32 @@ void Deployer::setLoadorder(Json::Value entry, std::shared_ptr<TreeItem<Deployer
   if(entry.isObject())
   {
     if (entry.isMember("status")) {
+      if(!entry["id"].isInt() || !entry["status"].isBool())
+      {
+        log_(Log::LOG_WARNING,
+             std::format("Deployer '{}': Skipping malformed load-order entry", name_));
+        return;
+      }
       current->emplace_back(
         make_shared<DeployerModInfo>(false, std::string(""), "", entry["id"].asInt(),
                             entry["status"].asBool()));
     }
     else if (entry.isMember("name")){
-      auto data = make_shared<DeployerEntry>(true, entry["name"].asString());
-      data->isExpanded = entry["expanded"].asBool();
-      current->emplace_back(data);
-      for (const auto& sub_entry : entry["children"])
+      if(!entry["name"].isString())
       {
-        setLoadorder(sub_entry, current->back());
+        log_(Log::LOG_WARNING,
+             std::format("Deployer '{}': Skipping malformed load-order group entry", name_));
+        return;
+      }
+      auto data = make_shared<DeployerEntry>(true, entry["name"].asString());
+      data->isExpanded = entry["expanded"].isBool() && entry["expanded"].asBool();
+      current->emplace_back(data);
+      if(entry["children"].isArray())
+      {
+        for (const auto& sub_entry : entry["children"])
+        {
+          setLoadorder(sub_entry, current->back());
+        }
       }
     }
   }
@@ -712,16 +727,36 @@ std::map<sfs::path, int> Deployer::loadDeployedFiles(std::optional<ProgressNode*
   if(!file.is_open())
     throw std::runtime_error("Could not read \"" + deployed_files_path.string() + "\"");
   Json::Value json_object;
-  file >> json_object;
+  try
+  {
+    file >> json_object;
+  }
+  catch(const std::exception& e)
+  {
+    log_(Log::LOG_ERROR,
+         std::format("Deployer '{}': Failed to parse deployed files record '{}': {}",
+                     name_,
+                     deployed_files_path.string(),
+                     e.what()));
+    return deployed_files;
+  }
+  if(!json_object["files"].isArray())
+  {
+    if(progress_node)
+      (*progress_node)->child(0).advance();
+    return deployed_files;
+  }
   if(progress_node)
   {
     (*progress_node)->child(0).advance();
     (*progress_node)->child(1).setTotalSteps(json_object["files"].size());
   }
-  for(int i = 0; i < json_object["files"].size(); i++)
+  for(Json::ArrayIndex i = 0; i < json_object["files"].size(); i++)
   {
-    deployed_files[json_object["files"][i]["path"].asString()] =
-      json_object["files"][i]["mod_id"].asInt();
+    const Json::Value& entry = json_object["files"][i];
+    if(entry.isMember("path") && entry["path"].isString() && entry.isMember("mod_id") &&
+       entry["mod_id"].isInt())
+      deployed_files[entry["path"].asString()] = entry["mod_id"].asInt();
     if(progress_node)
       (*progress_node)->child(1).advance();
   }

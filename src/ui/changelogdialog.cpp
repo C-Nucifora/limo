@@ -34,11 +34,19 @@ ChangelogDialog::ChangelogDialog(bool is_flatpak, QWidget* parent) :
     return;
   }
   Json::Value json;
-  file >> json;
-  file.close();
-  for(int i = 0; i < json["versions"].size(); i++)
-    versions_.emplace_back(json["versions"][i]);
-  std::sort(versions_.begin(), versions_.end());
+  try
+  {
+    file >> json;
+    file.close();
+    for(int i = 0; i < json["versions"].size(); i++)
+      versions_.emplace_back(json["versions"][i]);
+    std::sort(versions_.begin(), versions_.end());
+  }
+  catch(const std::exception& e)
+  {
+    Log::error(std::format("Failed to parse changelog file at '{}': {}", path.string(), e.what()));
+    versions_.clear();
+  }
 
   ui->version_box->blockSignals(true);
   for(const auto& version : versions_)

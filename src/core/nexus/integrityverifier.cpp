@@ -144,7 +144,7 @@ IntegrityVerifier::Result IntegrityVerifier::verify(const std::string& file_path
   }
 
   bool file_id_matches = false;
-  for(int i = 0; i < json_body.size(); i++)
+  for(Json::ArrayIndex i = 0; i < json_body.size(); i++)
   {
     const auto& details = json_body[i]["file_details"];
     if(details["file_id"].asInt64() == expected.file_id)

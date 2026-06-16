@@ -28,7 +28,7 @@ void AddToDeployerDialog::setupDialog(const QStringList& deployer_names,
   for(int i = 0; i < deployer_names.size(); i++)
   {
     auto item = new QListWidgetItem(deployer_names[i], ui->deployer_list);
-    if(auto_deployers[i])
+    if(i < static_cast<int>(auto_deployers.size()) && auto_deployers[i])
       item->setHidden(true);
     else
       item->setCheckState(std::find(mod_deployers.begin(), mod_deployers.end(), i) !=

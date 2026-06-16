@@ -11,8 +11,8 @@ ChangeApiPwDialog::ChangeApiPwDialog(bool uses_default_pw,
                                      const std::string& nonce,
                                      const std::string& tag,
                                      QWidget* parent) :
-  uses_default_pw_(uses_default_pw), cipher_(cipher), nonce_(nonce), tag_(tag), QDialog(parent),
-  ui(new Ui::ChangeApiPwDialog)
+  QDialog(parent), ui(new Ui::ChangeApiPwDialog), cipher_(cipher), nonce_(nonce), tag_(tag),
+  uses_default_pw_(uses_default_pw)
 {
   ui->setupUi(this);
   ui->new_pw_field->setPartnerField(ui->repeat_pw_field, PasswordField::repeat);
@@ -26,7 +26,6 @@ ChangeApiPwDialog::ChangeApiPwDialog(bool uses_default_pw,
           &PasswordField::passwordValidityChanged,
           this,
           &ChangeApiPwDialog::onPasswordValidityChanged);
-  uses_default_pw_ = uses_default_pw;
 }
 
 ChangeApiPwDialog::~ChangeApiPwDialog()

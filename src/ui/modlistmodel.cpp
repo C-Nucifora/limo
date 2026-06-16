@@ -14,6 +14,7 @@
 #include <QPalette>
 #include <QStandardPaths>
 #include <QTableView>
+#include <QUrl>
 
 // Qt6 requires these container types to be registered metatypes for the QVariant values below.
 Q_DECLARE_METATYPE(std::vector<int>)
@@ -110,8 +111,12 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
     {
       if(role == sort_role)
         return static_cast<qlonglong>(active_mods_[row].mod.install_time);
+      std::time_t install_time = active_mods_[row].mod.install_time;
+      std::tm tm_buf{};
+      if(localtime_r(&install_time, &tm_buf) == nullptr)
+        return QString();
       std::stringstream ss;
-      ss << std::put_time(std::localtime(&active_mods_[row].mod.install_time), "%F %T");
+      ss << std::put_time(&tm_buf, "%F %T");
       return QString::fromStdString(ss.str());
     }
     if(col == size_col)
@@ -214,13 +219,23 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
   if(role == mod_id_role)
     return active_mods_[row].mod.id;
   if(role == active_index_role)
-    return active_group_members_.at(active_mods_[row].group);
+  {
+    const int group = active_mods_[row].group;
+    const auto iter = active_group_members_.find(group);
+    if(group < 0 || iter == active_group_members_.end())
+      return QVariant();
+    return iter->second;
+  }
   if(role == mod_name_role)
     return active_mods_[row].mod.name.c_str();
   if(role == group_members_role)
   {
+    const int group = active_mods_[row].group;
+    const auto iter = groups_.find(group);
+    if(group < 0 || iter == groups_.end())
+      return QVariant();
     QVariant var;
-    var.setValue(groups_.at(active_mods_[row].group));
+    var.setValue(iter->second);
     return var;
   }
   if(role == mod_group_role)
@@ -339,10 +354,10 @@ void ModListModel::setModInfo(const std::vector<ModInfo>& mods)
 
     unsigned long size = info.mod.size_on_disk;
     unsigned long last_size = 0;
-    int exp = 0;
+    std::size_t exp = 0;
     const std::vector<QString> units{ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB" };
     QString size_string = "";
-    while(size > 1024 && exp < units.size())
+    while(size > 1024 && exp + 1 < units.size())
     {
       last_size = size;
       size /= 1024;
@@ -453,11 +468,20 @@ QString ModListModel::thumbnailUrl(const Mod& mod) const
   const QString source = QString::fromStdString(mod.remote_source);
   if(source.isEmpty())
     return {};
-  const QString lower = source.toLower();
+  const QUrl parsed(source, QUrl::StrictMode);
+  // Only fetch over HTTPS to avoid leaking requests and to prevent SSRF via mod-controlled URLs.
+  if(!parsed.isValid() || parsed.scheme().toLower() != "https")
+    return {};
+  // Restrict to an exact host suffix allow-list rather than substring matching the whole URL.
+  const QString host = parsed.host().toLower();
+  const bool host_allowed = host == "nexusmods.com" || host.endsWith(".nexusmods.com") ||
+                            host == "nexus-cdn.com" || host.endsWith(".nexus-cdn.com");
+  if(!host_allowed)
+    return {};
+  const QString lower = parsed.path().toLower();
   const bool is_image = lower.endsWith(".png") || lower.endsWith(".jpg") ||
                         lower.endsWith(".jpeg") || lower.endsWith(".webp");
-  if(is_image && (lower.contains("nexusmods") || lower.contains("nexus-cdn") ||
-                  lower.contains("staticdelivery")))
+  if(is_image)
     return source;
   return {};
 }

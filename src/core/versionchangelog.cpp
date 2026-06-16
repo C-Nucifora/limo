@@ -39,7 +39,10 @@ const std::vector<ChangelogEntry>& VersionChangelog::getChanges() const
 std::string VersionChangelog::versionAndDateString() const
 {
   std::stringstream ss;
-  ss << version_ << " (" << std::put_time(std::localtime(&date_), "%Y-%m-%d") << ")";
+  std::tm tm_buf{};
+  std::time_t date = date_;
+  localtime_r(&date, &tm_buf);
+  ss << version_ << " (" << std::put_time(&tm_buf, "%Y-%m-%d") << ")";
   return ss.str();
 }
 

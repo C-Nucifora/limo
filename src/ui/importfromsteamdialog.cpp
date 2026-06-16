@@ -276,14 +276,20 @@ void ImportFromSteamDialog::on_buttonBox_accepted()
   int row = ui->app_table->currentRow();
   if(row < 0 || row >= ui->app_table->rowCount())
     return;
-  QString name = ui->app_table->item(row, 0)->text();
-  QString icon_path = ui->app_table->item(row, 0)->data(Qt::UserRole).toString();
+  QTableWidgetItem* name_item = ui->app_table->item(row, 0);
+  QTableWidgetItem* app_id_item = ui->app_table->item(row, 1);
+  QTableWidgetItem* prefix_item = ui->app_table->item(row, 2);
+  QTableWidgetItem* path_item = ui->app_table->item(row, 3);
+  if(!name_item || !app_id_item || !prefix_item || !path_item)
+    return;
+  QString name = name_item->text();
+  QString icon_path = name_item->data(Qt::UserRole).toString();
   if(!sfs::exists(icon_path.toStdString()))
     icon_path = "";
-  QString app_id = ui->app_table->item(row, 1)->text();
-  sfs::path path(ui->app_table->item(row, 3)->text().toStdString());
+  QString app_id = app_id_item->text();
+  sfs::path path(path_item->text().toStdString());
   QString prefix_path = "";
-  if(ui->app_table->item(row, 2)->text() == "True")
+  if(prefix_item->text() == "True")
     prefix_path =
       (path.parent_path().parent_path() / "compatdata" / app_id.toStdString() / "pfx" / "drive_c")
         .c_str();

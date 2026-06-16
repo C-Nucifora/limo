@@ -23,6 +23,15 @@ DeployedFilesTreeDialog::DeployedFilesTreeDialog(const QString& deployer_name,
   ui->files_tree->setColumnCount(3);
   ui->files_tree->setHeaderLabels(QStringList{ "File", "Provided by", "Overwrites" });
 
+  if(origins.empty())
+  {
+    auto* empty_item =
+      new QTreeWidgetItem(QStringList{ QString("No deployed files."), QString(), QString() });
+    ui->files_tree->addTopLevelItem(empty_item);
+    ui->files_tree->resizeColumnToContents(0);
+    return;
+  }
+
   // Maps the relative directory path of a node to its tree item, so that directories are only
   // created once and files end up under the correct parent.
   std::map<std::string, QTreeWidgetItem*> dir_items;
@@ -76,7 +85,9 @@ DeployedFilesTreeDialog::DeployedFilesTreeDialog(const QString& deployer_name,
       ui->files_tree->addTopLevelItem(file_item);
   }
 
-  ui->files_tree->expandAll();
+  // Auto-expanding very large trees is expensive (O(n*depth)); only do it for small deployments.
+  if(origins.size() <= 5000)
+    ui->files_tree->expandAll();
   ui->files_tree->resizeColumnToContents(0);
   ui->files_tree->resizeColumnToContents(1);
 }

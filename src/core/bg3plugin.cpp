@@ -1,5 +1,7 @@
 #include "bg3plugin.h"
+#include "log.h"
 #include <algorithm>
+#include <format>
 
 namespace str = std::ranges;
 
@@ -7,7 +9,9 @@ namespace str = std::ranges;
 Bg3Plugin::Bg3Plugin(const std::string& xml_string) : xml_string_(xml_string)
 {
   pugi::xml_document xml_doc;
-  xml_doc.load_string(xml_string.c_str());
+  const pugi::xml_parse_result load_result = xml_doc.load_string(xml_string.c_str());
+  if(!load_result)
+    Log::error(std::format("Failed to parse BG3 plugin meta.lsx: {}", load_result.description()));
   pugi::xml_node root_node = xml_doc.child("save")
                                .find_child_by_attribute("id", "Config")
                                .find_child_by_attribute("id", "root")

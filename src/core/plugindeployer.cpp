@@ -473,6 +473,9 @@ void PluginDeployer::loadSettings()
   }
   num_profiles_ = settings["num_profiles"].asInt();
   current_profile_ = settings["current_profile"].asInt();
+  // Guard against corrupt / out-of-range values from the config file.
+  if(num_profiles_ < 1 || current_profile_ < 0 || current_profile_ >= num_profiles_)
+    resetSettings();
 }
 
 void PluginDeployer::resetSettings()
@@ -671,6 +674,12 @@ std::vector<std::string> PluginDeployer::readPluginMasters(const sfs::path& plug
       return masters;
     const uint32_t data_size = readLE(header, 4);
 
+    // Cap the allocation: data_size is attacker-controlled and could be up to 4 GiB.
+    // The header record block is small in any legitimate plugin; reject absurd sizes.
+    constexpr uint32_t max_header_block_size = 64u * 1024u * 1024u;
+    if(data_size > max_header_block_size)
+      return masters;
+
     std::vector<unsigned char> block(data_size);
     if(data_size > 0 && !file.read(reinterpret_cast<char*>(block.data()), data_size))
       return masters;
@@ -681,7 +690,7 @@ std::vector<std::string> PluginDeployer::readPluginMasters(const sfs::path& plug
       const std::string type(reinterpret_cast<const char*>(block.data() + pos), 4);
       const uint32_t size = readLE(block.data() + pos + 4, 4);
       pos += 8;
-      if(pos + size > data_size) // truncated / inconsistent subrecord -> stop safely
+      if(size > data_size - pos) // truncated / inconsistent subrecord -> stop safely
         break;
       if(type == "MAST" && size > 0)
         masters.push_back(parseMastPayload(block.data() + pos, size));
@@ -701,6 +710,12 @@ std::vector<std::string> PluginDeployer::readPluginMasters(const sfs::path& plug
     if(!file.read(reinterpret_cast<char*>(header), 20))
       return masters;
     const uint32_t data_size = readLE(header, 4); // bytes following the 24 byte record header
+
+    // Cap the allocation: data_size is attacker-controlled and could be up to 4 GiB.
+    // The header record block is small in any legitimate plugin; reject absurd sizes.
+    constexpr uint32_t max_header_block_size = 64u * 1024u * 1024u;
+    if(data_size > max_header_block_size)
+      return masters;
 
     std::vector<unsigned char> block(data_size);
     if(data_size > 0 && !file.read(reinterpret_cast<char*>(block.data()), data_size))

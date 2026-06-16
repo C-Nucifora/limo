@@ -13,9 +13,11 @@ PasswordField::PasswordField(QWidget* parent) : QWidget{ parent }
   connect(password_line_edit_, &QLineEdit::textEdited, this, &PasswordField::onPasswordEdited);
   layout->addWidget(password_line_edit_);
   view_button_ = new QPushButton(this);
-  view_button_->setText("");
+  // Fall back to a text label if the theme icon is unavailable so the button is not rendered empty.
+  view_button_->setText(show_icon.isNull() ? QStringLiteral("Show") : QString());
   view_button_->setIcon(show_icon);
   view_button_->setToolTip("Show Password");
+  view_button_->setAccessibleName("Show/Hide password");
   connect(view_button_, &QPushButton::pressed, this, &PasswordField::onViewButtonPressed);
   layout->addWidget(view_button_);
   setLayout(layout);

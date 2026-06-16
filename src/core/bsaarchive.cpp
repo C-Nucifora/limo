@@ -57,9 +57,12 @@ std::vector<char> inflateZlib(const std::vector<char>& input, uint64_t expected_
   stream.next_out = reinterpret_cast<Bytef*>(output.data());
 
   const int code = inflate(&stream, Z_FINISH);
+  const uint64_t produced = static_cast<uint64_t>(stream.total_out);
   inflateEnd(&stream);
-  if(code != Z_STREAM_END && code != Z_OK)
+  if(code != Z_STREAM_END)
     throw std::runtime_error("zlib decompression failed.");
+  if(produced != expected_size)
+    throw std::runtime_error("zlib decompression produced unexpected size.");
   return output;
 }
 
@@ -387,6 +390,12 @@ void BsaArchive::parseBa2(std::ifstream& file)
           first_offset = offset;
         total_unpacked += unpacked;
       }
+      // Guard against corrupt records pointing outside the archive or
+      // reporting an implausibly large unpacked size.
+      if(num_chunks > 0 && first_offset >= file_size_)
+        throw std::runtime_error("BA2 DX10 chunk offset out of bounds.");
+      if(total_unpacked > file_size_)
+        throw std::runtime_error("BA2 DX10 unpacked size exceeds archive bounds.");
       Ba2File bf;
       bf.offset = first_offset;
       bf.unpacked = total_unpacked;

@@ -45,12 +45,10 @@ constexpr int DEPLOY_MODE_SYM_LINK  = 1;
  */
 std::uintmax_t deviceId(const sfs::path& path)
 {
-  std::error_code ec;
-  const sfs::file_status st = sfs::status(path, ec);
-  if(ec || st.type() == sfs::file_type::not_found)
-    return 0;
-  // std::filesystem::space_info does not expose device IDs.
-  // Use ::stat via the POSIX API instead.
+  // std::filesystem::space_info does not expose device IDs, so use ::stat via
+  // the POSIX API.  ::stat already returns non-zero (and sets errno) when the
+  // path does not exist or cannot be queried, so a single call covers both the
+  // existence check and the device lookup.
   struct ::stat buf {};
   if(::stat(path.c_str(), &buf) != 0)
     return 0;

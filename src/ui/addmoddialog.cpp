@@ -398,7 +398,7 @@ bool AddModDialog::setupDialog(const QStringList& deployers,
   ui->fomod_deployer_box->clear();
   for(int i = 0; i < deployers.size(); i++)
   {
-    const bool is_target = selected_deployers.contains(i) | (i == cur_deployer);
+    const bool is_target = selected_deployers.contains(i) || (i == cur_deployer);
     if(!autonomous_deployers[i])
     {
       ui->fomod_deployer_box->addItem(deployers[i]);

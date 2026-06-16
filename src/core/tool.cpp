@@ -1,4 +1,5 @@
 #include "tool.h"
+#include <cctype>
 #include <cstdlib>
 #include <format>
 #include <fstream>
@@ -407,6 +408,23 @@ void Tool::appendEnvironmentVariables(
 {
   for(const auto& [variable, value] : environment_variables)
   {
+    // Only allow variable names matching ^[A-Za-z_][A-Za-z0-9_]*$ so the name,
+    // which is interpolated into the shell command unescaped, cannot inject
+    // additional shell syntax. Skip non-conforming names.
+    if(variable.empty() ||
+       (!std::isalpha(static_cast<unsigned char>(variable[0])) && variable[0] != '_'))
+      continue;
+    bool valid_name = true;
+    for(char c : variable)
+    {
+      if(!std::isalnum(static_cast<unsigned char>(c)) && c != '_')
+      {
+        valid_name = false;
+        break;
+      }
+    }
+    if(!valid_name)
+      continue;
     if(!command.empty())
       command += " ";
     if(is_flatpak)
