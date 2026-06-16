@@ -3,6 +3,7 @@
 #include "restorepointsdialog.h"
 #include "ui_restorepointsdialog.h"
 #include <QDateTime>
+#include <QMessageBox>
 
 
 RestorePointsDialog::RestorePointsDialog(const std::vector<RestorePoint>& points,
@@ -46,6 +47,12 @@ void RestorePointsDialog::on_delete_button_clicked()
 {
   const int index = ui->list->currentRow();
   if(index < 0)
+    return;
+  if(QMessageBox::question(this,
+                           "Delete Restore Point",
+                           "Are you sure you want to delete this restore point?",
+                           QMessageBox::Yes | QMessageBox::No,
+                           QMessageBox::No) != QMessageBox::Yes)
     return;
   emit deleteRequested(index);
   accept();

@@ -1,0 +1,13 @@
+{
+  "name": "Farming Simulator 19",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Mods",
+      "target_dir": "$STEAM_PREFIX_PATH$/users/steamuser/Documents/My Games/FarmingSimulator2019/mods",
+      "deploy_mode": "hard link"
+    }
+  ],
+  "default_install_flags": [ "no_extract" ]
+}

@@ -144,17 +144,32 @@ void Deployer::setLoadorder(Json::Value entry, std::shared_ptr<TreeItem<Deployer
   if(entry.isObject())
   {
     if (entry.isMember("status")) {
+      if(!entry["id"].isInt() || !entry["status"].isBool())
+      {
+        log_(Log::LOG_WARNING,
+             std::format("Deployer '{}': Skipping malformed load-order entry", name_));
+        return;
+      }
       current->emplace_back(
         make_shared<DeployerModInfo>(false, std::string(""), "", entry["id"].asInt(),
                             entry["status"].asBool()));
     }
     else if (entry.isMember("name")){
-      auto data = make_shared<DeployerEntry>(true, entry["name"].asString());
-      data->isExpanded = entry["expanded"].asBool();
-      current->emplace_back(data);
-      for (const auto& sub_entry : entry["children"])
+      if(!entry["name"].isString())
       {
-        setLoadorder(sub_entry, current->back());
+        log_(Log::LOG_WARNING,
+             std::format("Deployer '{}': Skipping malformed load-order group entry", name_));
+        return;
+      }
+      auto data = make_shared<DeployerEntry>(true, entry["name"].asString());
+      data->isExpanded = entry["expanded"].isBool() && entry["expanded"].asBool();
+      current->emplace_back(data);
+      if(entry["children"].isArray())
+      {
+        for (const auto& sub_entry : entry["children"])
+        {
+          setLoadorder(sub_entry, current->back());
+        }
       }
     }
   }
@@ -661,18 +676,28 @@ void Deployer::deployFiles(const std::map<sfs::path, int>& source_files,
     const auto parent_path = dest_path.parent_path();
     sfs::create_directories(parent_path);
     removeManagedDirFile(parent_path);
-    sfs::remove(dest_path);
+    // Build the new link/copy under a temporary name in the same directory, then atomically rename
+    // it over dest_path. sfs::rename replaces the existing target on a single filesystem, so an
+    // interrupted deploy never leaves the target absent (limo-app/limo audit F125).
+    const sfs::path temp_path =
+      parent_path / (dest_path.filename().string() + ".limo_deploy_tmp");
+    sfs::remove(temp_path);
     try
     {
       if(deploy_mode_ == copy)
-        sfs::copy_file(source_path, dest_path);
+        sfs::copy_file(source_path, temp_path);
       else if(deploy_mode_ == sym_link)
-        sfs::create_symlink(source_path, dest_path);
+        sfs::create_symlink(source_path, temp_path);
       else
-        sfs::create_hard_link(source_path, dest_path);
+        sfs::create_hard_link(source_path, temp_path);
+      sfs::rename(temp_path, dest_path);
     }
     catch(const sfs::filesystem_error& e)
     {
+      // Drop the partial temporary so a failed deploy does not leave stray files behind. The
+      // original dest_path is untouched because the rename never completed.
+      std::error_code temp_ec;
+      sfs::remove(temp_path, temp_ec);
       // Hard links can't span filesystems; under Flatpak the sandbox can also place the staging and
       // target dirs on different mounts. Give actionable guidance instead of the raw errno
       // (limo-app/limo#13, #143).
@@ -712,16 +737,36 @@ std::map<sfs::path, int> Deployer::loadDeployedFiles(std::optional<ProgressNode*
   if(!file.is_open())
     throw std::runtime_error("Could not read \"" + deployed_files_path.string() + "\"");
   Json::Value json_object;
-  file >> json_object;
+  try
+  {
+    file >> json_object;
+  }
+  catch(const std::exception& e)
+  {
+    log_(Log::LOG_ERROR,
+         std::format("Deployer '{}': Failed to parse deployed files record '{}': {}",
+                     name_,
+                     deployed_files_path.string(),
+                     e.what()));
+    return deployed_files;
+  }
+  if(!json_object["files"].isArray())
+  {
+    if(progress_node)
+      (*progress_node)->child(0).advance();
+    return deployed_files;
+  }
   if(progress_node)
   {
     (*progress_node)->child(0).advance();
     (*progress_node)->child(1).setTotalSteps(json_object["files"].size());
   }
-  for(int i = 0; i < json_object["files"].size(); i++)
+  for(Json::ArrayIndex i = 0; i < json_object["files"].size(); i++)
   {
-    deployed_files[json_object["files"][i]["path"].asString()] =
-      json_object["files"][i]["mod_id"].asInt();
+    const Json::Value& entry = json_object["files"][i];
+    if(entry.isMember("path") && entry["path"].isString() && entry.isMember("mod_id") &&
+       entry["mod_id"].isInt())
+      deployed_files[entry["path"].asString()] = entry["mod_id"].asInt();
     if(progress_node)
       (*progress_node)->child(1).advance();
   }
@@ -1218,22 +1263,52 @@ void Deployer::keepOrRevertFileModifications(const FileChangeChoices& changes_to
       continue;
     if(keep_change)
     {
-      sfs::remove(mod_file_path);
-      try
+      // The file currently providing the modification: either target_path itself (a real file that
+      // replaced the link) or, for an intact link, the file the link resolves to.
+      const bool target_is_symlink = sfs::is_symlink(target_path);
+      const sfs::path provider_path =
+        target_is_symlink ? sfs::read_symlink(target_path) : target_path;
+      // Stage the provider into a temporary beside mod_file_path, then atomically rename it into
+      // place. The original mod_file_path is only removed once the replacement is safely staged, so
+      // an interrupted/failed recovery never leaves the source file missing (audit F126).
+      const sfs::path staged_path =
+        mod_file_path.parent_path() / (mod_file_path.filename().string() + ".limo_keep_tmp");
+      std::error_code ec;
+      sfs::remove(staged_path, ec);
+      sfs::rename(provider_path, staged_path, ec);
+      if(ec)
       {
-        if(!sfs::is_symlink(target_path))
-          sfs::rename(target_path, mod_file_path);
-        else
-          sfs::rename(sfs::read_symlink(target_path), mod_file_path);
+        // Cross-filesystem or other rename failure: fall back to copy. Guard every call so a
+        // failure here cannot escape and leave the source removed.
+        ec.clear();
+        sfs::copy(provider_path, staged_path, sfs::copy_options::overwrite_existing, ec);
+        if(ec)
+        {
+          log_(Log::LOG_WARNING,
+               std::format("Deployer '{}': failed to keep modification for '{}': {}",
+                           name_,
+                           path.string(),
+                           ec.message()));
+          sfs::remove(staged_path, ec);
+          continue;
+        }
+        // The provider was copied, so drop the original provider file.
+        sfs::remove(provider_path, ec);
       }
-      catch(std::runtime_error& e)
+      // The staged copy now holds the desired content; replace mod_file_path atomically.
+      sfs::remove(mod_file_path, ec);
+      sfs::rename(staged_path, mod_file_path, ec);
+      if(ec)
       {
-        if(sfs::is_symlink(target_path))
-          sfs::copy(target_path, mod_file_path);
-        else
-          sfs::copy(sfs::read_symlink(target_path), mod_file_path);
-        sfs::remove(target_path);
+        log_(Log::LOG_WARNING,
+             std::format("Deployer '{}': failed to keep modification for '{}': {}",
+                         name_,
+                         path.string(),
+                         ec.message()));
+        continue;
       }
+      // Remove whatever remains at target_path (the now-orphaned link or leftover file).
+      sfs::remove(target_path, ec);
     }
     else
       sfs::remove(target_path);

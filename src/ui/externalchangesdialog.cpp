@@ -42,12 +42,15 @@ void ExternalChangesDialog::on_buttonBox_accepted()
 {
   FileChangeChoices changes_to_keep;
 
-  for(int i = 0; i < ui->file_list->count(); i++)
+  for(size_t i = 0; i < changes_info_.file_changes.size(); i++)
   {
-    const auto& [path, mod_id] = changes_info_.file_changes.at(i);
+    if(static_cast<int>(i) >= ui->file_list->count())
+      break;
+    const auto& [path, mod_id] = changes_info_.file_changes[i];
     changes_to_keep.paths.push_back(path);
     changes_to_keep.mod_ids.push_back(mod_id);
-    changes_to_keep.changes_to_keep.push_back(ui->file_list->item(i)->checkState() == Qt::Checked);
+    changes_to_keep.changes_to_keep.push_back(
+      ui->file_list->item(static_cast<int>(i))->checkState() == Qt::Checked);
   }
   emit externalChangesDialogCompleted(app_id_, changes_info_.deployer_id, changes_to_keep, deploy_);
 }

@@ -314,6 +314,14 @@ private:
   /*! \brief The total number of files in the target directory during previous deployment. */
   int number_of_files_in_target_ = 0;
 
+  /*!
+   * \brief Checks that a relative path stays within the given base directory.
+   * \param relative_path Untrusted relative path (e.g. loaded from JSON).
+   * \param base Base directory the path must not escape.
+   * \return True if relative_path is relative and (base / relative_path) stays within base.
+   */
+  static bool isPathWithinBase(const std::filesystem::path& relative_path,
+                               const std::filesystem::path& base);
   /*! \brief Reads a list of ignored files from the ignore list file. */
   void readIgnoredFiles();
   /*! \brief Writes the list of ignored files to disk. */

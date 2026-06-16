@@ -12,6 +12,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QSpacerItem>
+#include <QUrl>
 #include <algorithm>
 #include <ranges>
 #include <sstream>
@@ -41,24 +42,18 @@ void NexusModDialog::setupDialog(int app_id, int mod_id, const nexus::Page& page
   QString changelog;
   for(const auto& [version, changes] : page.changelog)
   {
-    changelog.append(
-      (R"(<span style="font-size:18px"><b>)" + version + R"(</b></span><ul>)").c_str());
+    changelog.append(R"(<span style="font-size:18px"><b>)" +
+                     QString::fromStdString(version).toHtmlEscaped() + R"(</b></span><ul>)");
     for(const auto& change : changes)
-      changelog.append(("<li>" + change + "</li>").c_str());
+      changelog.append("<li>" + QString::fromStdString(change).toHtmlEscaped() + "</li>");
     changelog.append("</ul><br />");
   }
   ui->changelog_box->setHtml(changelog);
 
-  for(auto child : ui->files_widget->children())
-    delete child;
+  resetFilesWidget();
 
   if(page.files.empty())
-  {
-    auto layout = ui->files_widget->layout();
-    ui->files_widget->setLayout(new QVBoxLayout());
-    delete layout;
     return;
-  }
 
   const QString mod_link =
     std::format(
@@ -88,10 +83,7 @@ void NexusModDialog::setupDialog(int app_id, int mod_id, const nexus::Page& page
                 return f1.category_id < f2.category_id;
               return f1.name < f2.name;
             });
-  auto base_layout = new QVBoxLayout();
-  auto old_layout = ui->files_widget->layout();
-  delete old_layout;
-  ui->files_widget->setLayout(base_layout);
+  auto base_layout = qobject_cast<QVBoxLayout*>(ui->files_widget->layout());
   long cur_cat_id = -1;
   QString cur_cat_name = "";
   for(const auto& file : files)
@@ -99,7 +91,9 @@ void NexusModDialog::setupDialog(int app_id, int mod_id, const nexus::Page& page
     if(file.category_id != cur_cat_id)
     {
       cur_cat_id = file.category_id;
-      cur_cat_name = file.category_name.empty() ? "Other" : file.category_name.c_str();
+      cur_cat_name = file.category_name.empty()
+                       ? QStringLiteral("Other")
+                       : QString::fromStdString(file.category_name).toHtmlEscaped();
       auto label = new QLabel();
       label->setTextFormat(Qt::RichText);
       label->setText(R"(<span style="font-size:18px"><b>)" + cur_cat_name + " Files</b></span>");
@@ -111,12 +105,19 @@ void NexusModDialog::setupDialog(int app_id, int mod_id, const nexus::Page& page
     auto frame_layout = new QVBoxLayout();
     frame->setLayout(frame_layout);
     QString mod_text;
-    mod_text.append((R"(<span style="font-size:17px"><b>)" + file.name + "</b></span>").c_str());
+    mod_text.append(R"(<span style="font-size:17px"><b>)" +
+                    QString::fromStdString(file.name).toHtmlEscaped() + "</b></span>");
     if(!file.version.empty())
-      mod_text.append(("<br /><b>Version: " + file.version + "</b>").c_str());
+      mod_text.append("<br /><b>Version: " +
+                      QString::fromStdString(file.version).toHtmlEscaped() + "</b>");
     std::stringstream ss;
-    ss << std::put_time(std::localtime(&file.uploaded_time), "%F %T");
-    mod_text.append(("<br /><b>Upload Time: " + ss.str() + "</b>").c_str());
+    std::tm tm_buf{};
+    if(localtime_r(&file.uploaded_time, &tm_buf) != nullptr)
+      ss << std::put_time(&tm_buf, "%F %T");
+    else
+      ss << "unknown";
+    mod_text.append("<br /><b>Upload Time: " +
+                    QString::fromStdString(ss.str()).toHtmlEscaped() + "</b>");
     QString size_string;
     long size = file.size_in_bytes;
     if(size < 1024)
@@ -126,7 +127,7 @@ void NexusModDialog::setupDialog(int app_id, int mod_id, const nexus::Page& page
       long last_size = 0;
       int exp = 0;
       const std::vector<QString> units{ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB" };
-      while(size > 1024 && exp < units.size())
+      while(size > 1024 && static_cast<size_t>(exp) < units.size())
       {
         last_size = size;
         size /= 1024;
@@ -140,15 +141,16 @@ void NexusModDialog::setupDialog(int app_id, int mod_id, const nexus::Page& page
         size_string += "." + QString::number(first_digit);
       if(second_digit != 0)
         size_string += QString::number(second_digit);
-      size_string += " " + units[exp];
+      size_string += " " + units[std::min(static_cast<size_t>(exp), units.size() - 1)];
     }
     mod_text.append("<br /><b>Size: " + size_string + "</b><br />");
-    if(file.external_virus_scan_url.empty())
+    const QString virus_scan_url =
+      sanitizeLinkUrl(QString::fromStdString(file.external_virus_scan_url));
+    if(virus_scan_url.isEmpty())
       mod_text.append("<b>No external virus scan</b><br />");
     else
-      mod_text.append(
-        ("<b><a href=\"" + file.external_virus_scan_url + "\">Virus scan link</a><b><br />")
-          .c_str());
+      mod_text.append("<b><a href=\"" + virus_scan_url +
+                      "\">Virus scan link</a></b><br />");
     mod_text.append("<br /><br />" + bbcodeToHtml(file.description.c_str()) + "<br />");
     if(!file.changelog_html.empty())
       mod_text.append("<br /><b>Changes</b><br />" + bbcodeToHtml(file.changelog_html.c_str()) +
@@ -223,6 +225,8 @@ QString NexusModDialog::bbcodeToHtml(const QString& bbcode)
   html.remove("\ufeff");
   html.replace("\xa0", " ");
   html.remove("\n");
+  // Escape raw HTML so embedded markup in untrusted input cannot survive token substitution.
+  html = html.toHtmlEscaped();
 
   std::vector<std::tuple<QString, QString, QString>> tokens = {
     { R"(\[center\])", R"(\[/center\])", R"(<center>\1</center>)" },
@@ -255,6 +259,32 @@ QString NexusModDialog::bbcodeToHtml(const QString& bbcode)
   }
 
   return html;
+}
+
+void NexusModDialog::resetFilesWidget()
+{
+  if(auto* old_layout = ui->files_widget->layout())
+  {
+    QLayoutItem* item;
+    while((item = old_layout->takeAt(0)) != nullptr)
+    {
+      delete item->widget();
+      delete item;
+    }
+    delete old_layout;
+  }
+  ui->files_widget->setLayout(new QVBoxLayout());
+}
+
+QString NexusModDialog::sanitizeLinkUrl(const QString& url)
+{
+  const QString trimmed = url.trimmed();
+  if(trimmed.isEmpty())
+    return {};
+  const QString scheme = QUrl(trimmed).scheme().toLower();
+  if(scheme != "http" && scheme != "https")
+    return {};
+  return trimmed.toHtmlEscaped();
 }
 
 void NexusModDialog::onDownloadClicked(int file_id, int file_id_copy)

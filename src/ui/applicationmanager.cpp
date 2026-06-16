@@ -18,9 +18,16 @@ namespace pu = path_utils;
 
 bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
 {
+  // Security: the remote URL may carry a signed token / expiry in its query string; strip the
+  // query before logging so those credentials are not written to the debug log.
+  QUrl log_url(QString::fromStdString(info.remote_download_url));
+  const std::string log_url_str =
+    log_url.isValid()
+      ? log_url.toString(QUrl::RemoveQuery | QUrl::RemoveUserInfo).toStdString()
+      : info.remote_download_url;
   app_mgr->sendLogMessage(Log::LOG_DEBUG,
-                          std::format("Downloading from : '{}'", info.remote_download_url));
-  std::regex url_regex(R"(.*/(.*)\?.*)");
+                          std::format("Downloading from : '{}'", log_url_str));
+  std::regex url_regex(R"(.*/([^/?]+)(?:\?.*)?$)");
   std::smatch match;
   if(!std::regex_match(info.remote_download_url, match, url_regex))
     throw std::runtime_error(std::format("Invalid download URL \"{}\"", info.remote_download_url));
@@ -79,11 +86,11 @@ bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
         if(!message_sent && download_total > 0)
         {
           std::string size_string;
-          long last_size = 0;
-          long size = download_total;
+          long long last_size = 0;
+          long long size = download_total;
           int exp = 0;
           const std::vector<std::string> units{ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB" };
-          while(size > 1024 && exp < units.size())
+          while(size > 1024 && exp < static_cast<int>(units.size()))
           {
             last_size = size;
             size /= 1024;
@@ -201,7 +208,7 @@ void ApplicationManager::applyAutoUpdateCheckConfig()
   }
   if(auto_update_check_enabled_)
   {
-    const int interval_hours = std::max(1, auto_update_check_interval_hours_);
+    const int interval_hours = std::max(1, auto_update_check_interval_hours_.load());
     // milliseconds; clamp the interval into QTimer's int range to avoid overflow.
     const qint64 interval_ms = static_cast<qint64>(interval_hours) * 60 * 60 * 1000;
     auto_update_timer_->setInterval(
@@ -227,7 +234,17 @@ void ApplicationManager::runScheduledUpdateCheck()
   // Reuse the existing update-check path; this emits the usual update-available signalling
   // (via completedOperations / ModdedApplication state) so the UI's normal "updates
   // available" indication fires. Runs on this (worker) thread, not the UI thread.
-  checkForModUpdates(auto_update_check_app_id_);
+  // Clear the in-progress guard even if checkForModUpdates throws, so future scheduled
+  // checks are not permanently blocked.
+  try
+  {
+    checkForModUpdates(auto_update_check_app_id_);
+  }
+  catch(...)
+  {
+    auto_update_check_in_progress_ = false;
+    throw;
+  }
   auto_update_check_in_progress_ = false;
 }
 
@@ -411,6 +428,8 @@ bool ApplicationManager::appIndexIsValid(int app_id, bool show_error)
 
 bool ApplicationManager::deployerIndexIsValid(int app_id, int deployer, bool show_error)
 {
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return false;
   if(deployer >= 0 && deployer < apps_[app_id].getNumDeployers())
     return true;
   if(show_error)
@@ -543,6 +562,10 @@ void ApplicationManager::removeApplication(int app_id, bool cleanup)
 
 void ApplicationManager::deployMods(int app_id)
 {
+  // fork audit: only report "Mods deployed" when deployment actually ran and succeeded. If the
+  // app id is invalid, directory verification reported an error, or the deploy threw (an error
+  // dialog is surfaced by handleAddDeployerError / handleExceptions), emit a neutral completion.
+  bool deployed = false;
   if(appIndexIsValid(app_id))
   {
     auto ret_val = handleExceptions(&ModdedApplication::verifyDeployerDirectories, apps_[app_id]);
@@ -551,10 +574,13 @@ void ApplicationManager::deployMods(int app_id)
       auto [code, path, message] = *ret_val;
       handleAddDeployerError(code, apps_[app_id].getStagingDir(), path, message);
       if(code == 0)
-        handleExceptions<&ModdedApplication::deployMods>(app_id);
+        deployed = !handleExceptions<&ModdedApplication::deployMods>(app_id);
     }
   }
-  emit completedOperations("Mods deployed");
+  if(deployed)
+    emit completedOperations("Mods deployed");
+  else
+    emit completedOperations();
 }
 
 void ApplicationManager::deployModsFor(int app_id, std::vector<int> deployer_ids)
@@ -917,7 +943,7 @@ void ApplicationManager::setModColor(int app_id, int mod_id, QString color)
 
 QString ApplicationManager::getModColor(int app_id, int mod_id)
 {
-  if(!appIndexIsValid(app_id))
+  if(!appIndexIsValid(app_id, false))
     return {};
   auto color = handleExceptions(&ModdedApplication::getModColor, apps_[app_id], mod_id);
   if(color)
@@ -927,7 +953,8 @@ QString ApplicationManager::getModColor(int app_id, int mod_id)
 
 std::map<int, std::string> ApplicationManager::getModColors(int app_id)
 {
-  if(!appIndexIsValid(app_id))
+  // fork audit: read-only getter, do not surface an error dialog on a stale/invalid app id.
+  if(!appIndexIsValid(app_id, false))
     return {};
   auto colors = handleExceptions(&ModdedApplication::getModColors, apps_[app_id]);
   if(colors)
@@ -944,7 +971,8 @@ void ApplicationManager::setModCategory(int app_id, int mod_id, QString category
 
 QString ApplicationManager::getModCategory(int app_id, int mod_id)
 {
-  if(!appIndexIsValid(app_id))
+  // fork audit: read-only getter, do not surface an error dialog on a stale/invalid app id.
+  if(!appIndexIsValid(app_id, false))
     return {};
   auto category = handleExceptions(&ModdedApplication::getModCategory, apps_[app_id], mod_id);
   if(category)
@@ -956,7 +984,8 @@ QString ApplicationManager::getModCategory(int app_id, int mod_id)
 std::pair<std::vector<PrunableArchive>, unsigned long>
 ApplicationManager::getPrunableArchives(int app_id)
 {
-  if(!appIndexIsValid(app_id))
+  // fork audit: read-only getter, do not surface an error dialog on a stale/invalid app id.
+  if(!appIndexIsValid(app_id, false))
     return {};
   auto result = handleExceptions(&ModdedApplication::getPrunableArchives, apps_[app_id]);
   if(result)
@@ -989,7 +1018,8 @@ void ApplicationManager::setModPinned(int app_id, int mod_id, bool pinned)
 
 void ApplicationManager::getModRulesFor(int app_id, int mod_id)
 {
-  if(!appIndexIsValid(app_id))
+  // fork audit: read-only getter, do not surface an error dialog on a stale/invalid app id.
+  if(!appIndexIsValid(app_id, false))
     return;
   auto rules = handleExceptions(&ModdedApplication::getModRulesFor, apps_[app_id], mod_id);
   if(rules)
@@ -1005,7 +1035,8 @@ void ApplicationManager::setModRulesFor(int app_id, int source_mod_id, std::vect
 
 void ApplicationManager::getGroupData(int app_id)
 {
-  if(!appIndexIsValid(app_id))
+  // fork audit: read-only getter, do not surface an error dialog on a stale/invalid app id.
+  if(!appIndexIsValid(app_id, false))
     return;
   std::vector<std::string> names;
   std::vector<std::string> notes;
@@ -1066,7 +1097,8 @@ void ApplicationManager::setTw3VanillaScriptsRoot(int app_id, QString path)
 
 QString ApplicationManager::getTw3VanillaScriptsRoot(int app_id)
 {
-  if(!appIndexIsValid(app_id))
+  // fork audit: read-only getter, do not surface an error dialog on a stale/invalid app id.
+  if(!appIndexIsValid(app_id, false))
     return {};
   auto path = handleExceptions(&ModdedApplication::getTw3VanillaScriptsRoot, apps_[app_id]);
   if(path)
@@ -1193,8 +1225,13 @@ std::vector<RestorePoint> ApplicationManager::getRestorePoints(int app_id)
 
 void ApplicationManager::extractArchive(ImportModInfo info)
 {
-  handleExceptionsForFunction(performExtraction, info, this);
-  emit extractionComplete(info);
+  // fork audit: only signal extractionComplete when extraction actually succeeded. On failure
+  // handleExceptionsForFunction returns an empty optional (and has already surfaced an error
+  // dialog), and info.last_action_was_successful stays false; emitting in that case would let
+  // consumers proceed as if a valid archive had been extracted.
+  auto result = handleExceptionsForFunction(performExtraction, info, this);
+  if(result && *result && info.last_action_was_successful)
+    emit extractionComplete(info);
 }
 
 void ApplicationManager::addBackupTarget(int app_id,
@@ -1244,7 +1281,8 @@ void ApplicationManager::setActiveBackup(int app_id, int target_id, int backup_i
 
 void ApplicationManager::getBackupTargets(int app_id)
 {
-  if(appIndexIsValid(app_id))
+  // fork audit: read-only getter, do not surface an error dialog on a stale/invalid app id.
+  if(appIndexIsValid(app_id, false))
     emit sendBackupTargets(apps_[app_id].getBackupTargets());
 }
 
@@ -1382,7 +1420,8 @@ void ApplicationManager::editModSources(int app_id,
 
 void ApplicationManager::getNexusPage(int app_id, int mod_id)
 {
-  if(appIndexIsValid(app_id))
+  // fork audit: read-only getter, do not surface an error dialog on a stale/invalid app id.
+  if(appIndexIsValid(app_id, false))
   {
     auto page = handleExceptions(&ModdedApplication::getNexusPage, apps_[app_id], mod_id);
     if(page)
@@ -1518,8 +1557,19 @@ void ApplicationManager::downloadMod(ImportModInfo info)
         it.speed = 0.0;
       }
     active_download_id_ = -1;
+    cancel_active_download_ = false;
     saveDownloadQueueLocked();
     emitDownloadQueueLocked();
+  }
+
+  // fork #8: a restored/retried queue item may carry a target_group_id whose group has since
+  // been deleted. Validate it against the app's current groups and clear it if it no longer
+  // exists so installation does not target a stale or out-of-range group index.
+  if(info.target_group_id != -1 && appIndexIsValid(info.app_id))
+  {
+    const int num_groups = apps_[info.app_id].getNumGroups();
+    if(info.target_group_id < 0 || info.target_group_id >= num_groups)
+      info.target_group_id = -1;
   }
 
   info.last_action_was_successful = true;
@@ -1530,14 +1580,11 @@ void ApplicationManager::downloadMod(ImportModInfo info)
 
 sfs::path ApplicationManager::getDownloadQueuePath() const
 {
-  sfs::path dir;
-  if(!apps_.empty())
-    dir = apps_.front().getDownloadDir();
-  else
-  {
-    dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString();
-    dir /= DOWNLOAD_DIR_NAME;
-  }
+  // fork #8: always use a single stable, app-independent location for the queue file. Deriving
+  // it from apps_.front() made the path change once the first app was added (or its ordering
+  // changed), orphaning a previously persisted queue across restarts.
+  sfs::path dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation).toStdString();
+  dir /= DOWNLOAD_DIR_NAME;
   return dir / DOWNLOAD_QUEUE_FILE_NAME;
 }
 
@@ -1572,6 +1619,10 @@ void ApplicationManager::saveDownloadQueueLocked()
     }
     std::ofstream file(path, std::fstream::binary);
     file << json;
+    file.flush();
+    if(!file.good())
+      sendLogMessage(Log::LOG_WARNING,
+                     std::string("Could not write download queue to \"") + path.string() + "\".");
   }
   catch(const std::exception& error)
   {
@@ -1681,6 +1732,9 @@ void ApplicationManager::cancelDownload(int id)
   {
     // the running transfer will abort at the next progress callback
     cancel_active_download_ = true;
+    // Emit a queue snapshot now so the UI can reflect the cancellation request
+    // immediately rather than waiting for the next progress tick.
+    emitDownloadQueueLocked();
     return;
   }
   for(auto& it : download_queue_)

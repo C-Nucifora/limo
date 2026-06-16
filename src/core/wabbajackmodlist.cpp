@@ -182,7 +182,8 @@ WabbajackModlist parseWabbajack(const std::filesystem::path& path)
         continue;
       WabbajackArchive archive;
       archive.name = readString(entry, { "Name" });
-      archive.size = static_cast<unsigned long long>(readInt(entry, { "Size" }, 0));
+      const long long raw_size = readInt(entry, { "Size" }, 0);
+      archive.size = raw_size > 0 ? static_cast<unsigned long long>(raw_size) : 0ull;
 
       const Json::Value& state = entry["State"];
       if(state.isObject())

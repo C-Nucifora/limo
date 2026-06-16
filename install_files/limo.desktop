@@ -8,3 +8,5 @@ Icon=limo
 MimeType=x-scheme-handler/nxm;
 Exec=limo %u
 Terminal=false
+StartupWMClass=limo
+Keywords=mod;mods;modding;LOOT;Nexus;

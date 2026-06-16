@@ -159,8 +159,11 @@ static void installTranslations(QApplication& app)
 
   // Candidate directories for the bundled .qm files: install location first,
   // then a local-build fallback (mirrors steam_app_configs resolution).
+  // getenv returns nullptr when "container" is unset; comparing a null char* to a
+  // std::string dereferences null, so guard for non-null before the comparison.
+  const char* container_env = getenv("container");
   const bool is_flatpak = std::filesystem::exists("/.flatpak-info") ||
-                          getenv("container") == std::string("flatpak");
+                          (container_env && std::string(container_env) == "flatpak");
   std::vector<QString> dirs;
   dirs.push_back(QString::fromStdString(
     (std::filesystem::path(is_flatpak ? "/app" : APP_INSTALL_PREFIX) / "share/limo/translations")
@@ -1005,8 +1008,13 @@ int main(int argc, char* argv[])
       if(!pa.empty())
       {
         nxm_arg = qs(pa[0]);
-        if(nxm_arg.starts_with('"'))  nxm_arg.erase(0, 1);
-        if(nxm_arg.ends_with('"'))    nxm_arg.erase(nxm_arg.size() - 1, 1);
+        // Strip only balanced surrounding double quotes; leaving a single
+        // unmatched quote in place would otherwise corrupt the URL.
+        if(nxm_arg.size() >= 2 && nxm_arg.front() == '"' && nxm_arg.back() == '"')
+        {
+          nxm_arg.erase(nxm_arg.size() - 1, 1);
+          nxm_arg.erase(0, 1);
+        }
       }
     }
   }
@@ -1138,7 +1146,7 @@ int main(int argc, char* argv[])
       std::cout << "Another instance is already running. Sending arguments...\n";
       return 2;
     }
-    std::regex nxm_regex(R"(nxm:\/\/.*\mods\/\d+\/files\/\d+\?.*)");
+    std::regex nxm_regex(R"(nxm:\/\/(.*)\/mods\/(\d+)\/files\/\d+\?.*)");
     std::smatch match;
     if(std::regex_match(nxm_arg, match, nxm_regex))
       client.sendString(nxm_arg);

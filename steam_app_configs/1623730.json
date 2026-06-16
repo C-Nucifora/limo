@@ -1,0 +1,18 @@
+{
+  "name": "Palworld",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Pak Mods",
+      "target_dir": "$STEAM_INSTALL_PATH$/Pal/Content/Paks/~mods",
+      "deploy_mode": "hard link"
+    },
+    {
+      "type": "Case Matching Deployer",
+      "name": "UE4SS Mods",
+      "target_dir": "$STEAM_INSTALL_PATH$/Pal/Binaries/Win64/ue4ss/Mods",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

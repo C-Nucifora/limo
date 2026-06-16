@@ -124,14 +124,26 @@ RemoteMod GamebananaProvider::getModInfo(const std::string& /*community*/,
   const Json::Value data = fetchItemData(mod_id, fields);
 
   // data is an array; indices match the comma-separated fields list above.
+  if(!data.isArray())
+    throw ParseError(
+      std::format("GameBanana item data for mod \"{}\" is not a JSON array.", mod_id));
+
+  // Tolerate missing/short fields: index only when present and of string type.
+  const auto field = [&data](Json::ArrayIndex i) -> std::string
+  {
+    if(i >= data.size() || data[i].isNull())
+      return "";
+    return data[i].asString();
+  };
+
   RemoteMod mod;
   mod.id      = mod_id;
-  mod.name    = data[0].asString();
-  mod.summary = data[1].asString();
-  mod.author  = data[2].asString();
-  mod.icon_url = data[3].isNull() ? "" : data[3].asString();
+  mod.name    = field(0);
+  mod.summary = field(1);
+  mod.author  = field(2);
+  mod.icon_url = field(3);
   // Version() returns a string like "1.2.3" or may be null
-  mod.version  = data[4].isNull() ? "" : data[4].asString();
+  mod.version  = field(4);
   mod.page_url = std::format("https://gamebanana.com/mods/{}", mod_id);
 
   Json::FastWriter writer;

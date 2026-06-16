@@ -7,6 +7,7 @@
 
 #include <QCheckBox>
 #include <QLabel>
+#include <QPixmap>
 
 
 /*!
@@ -54,4 +55,15 @@ private:
   QLabel* description_label_;
   /*! \brief Pointer to the QLabel which will be updated with the plugin image. */
   QLabel* image_label_;
+  /*! \brief Cached source pixmap, decoded lazily from image_path_ on first hover. */
+  QPixmap cached_pixmap_;
+  /*! \brief Whether cached_pixmap_ has already been decoded from disk. */
+  bool pixmap_loaded_ = false;
+
+  /*!
+   * \brief Returns the source pixmap for this plugin, decoding it from disk on
+   * first access and caching the result to avoid re-decoding on every hover.
+   * \return The decoded pixmap (may be null if the image could not be loaded).
+   */
+  const QPixmap& sourcePixmap();
 };

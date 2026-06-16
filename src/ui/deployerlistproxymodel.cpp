@@ -17,11 +17,12 @@ QVariant DeployerListProxyModel::data(const QModelIndex& index, int role) const
 {
   if(role == Qt::ForegroundRole)
   {
-    const int row = index.row();
-    const int col = index.column();
-    if(row >= row_text_colors_.size())
+    const int mod_id =
+      sourceModel()->data(mapToSource(index), ModListModel::mod_id_role).toInt();
+    const auto color = mod_text_colors_.find(mod_id);
+    if(color == mod_text_colors_.end())
       return QApplication::palette().text();
-    return row_text_colors_[row];
+    return color->second;
   }
   else
     return sourceModel()->data(mapToSource(index), role);
@@ -104,7 +105,7 @@ bool DeployerListProxyModel::filterAcceptsRow(int source_row,
     for(const auto& [tag, enabled] : tag_filters_)
     {
       const bool contains_tag = tags.contains(tag);
-      show *= contains_tag && enabled || !contains_tag && !enabled;
+      show = show && ((contains_tag && enabled) || (!contains_tag && !enabled));
     }
   }
   return show;
@@ -173,7 +174,7 @@ void DeployerListProxyModel::updateFilter(bool invalidate)
   if(invalidate)
     reapplyRowFilter();
 
-  row_text_colors_.clear();
+  mod_text_colors_.clear();
   int prev_group = -1;
   int misses = 0;
   const auto colors = std::vector<QBrush>{ QBrush(colors::LIGHT_BLUE), QBrush(colors::ORANGE) };
@@ -188,7 +189,7 @@ void DeployerListProxyModel::updateFilter(bool invalidate)
     const int group = conflict_groups_[mod_id];
     if(group == no_conflict_group_)
     {
-      row_text_colors_.push_back(default_color);
+      mod_text_colors_[mod_id] = default_color;
       continue;
     }
     if(group != prev_group)
@@ -196,7 +197,7 @@ void DeployerListProxyModel::updateFilter(bool invalidate)
       misses++;
       prev_group = group;
     }
-    row_text_colors_.push_back(colors.at(misses % 2));
+    mod_text_colors_[mod_id] = colors.at(misses % 2);
   }
   updateRowCountLabel();
 }

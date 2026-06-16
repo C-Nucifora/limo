@@ -97,7 +97,14 @@ bool Dependency::evaluate(const sfs::path& target_path,
   }
   else if(type_ == file_leaf)
   {
-    const bool exists = pu::pathExists(target_, target_path) ? true : false;
+    // Constrain the target path to the game directory: an absolute path or one that traverses
+    // above its root via "../" components must never be checked for existence outside the root.
+    const sfs::path normalized_target = sfs::path(target_).lexically_normal();
+    const bool escapes_root =
+      sfs::path(target_).is_absolute() ||
+      (normalized_target.begin() != normalized_target.end() &&
+       normalized_target.begin()->string() == "..");
+    const bool exists = !escapes_root && pu::pathExists(normalized_target, target_path) ? true : false;
     if(state_ == "Active")
       return exists;
     return !exists;

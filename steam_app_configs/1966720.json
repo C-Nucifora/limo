@@ -1,0 +1,12 @@
+{
+  "name": "Lethal Company",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Plugins",
+      "target_dir": "$STEAM_INSTALL_PATH$/BepInEx/plugins",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

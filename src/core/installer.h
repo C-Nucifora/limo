@@ -164,6 +164,11 @@ public:
    * \param is_a_flatpak If true: The application is running as a flatpak.
    */
   static void setIsAFlatpak(bool is_a_flatpak);
+  /*!
+   * \brief Returns whether this application is running as a flatpak.
+   * \return True if running as a flatpak.
+   */
+  static bool isAFlatpak() { return is_a_flatpak_; }
   /*! \brief Callback for logging. */
   static inline std::function<void(Log::LogLevel, const std::string&)> log =
     [](Log::LogLevel a, const std::string& b) {};

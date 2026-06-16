@@ -2,6 +2,7 @@
 #include "core/autotag.h"
 #include "core/consts.h"
 #include "core/deployerfactory.h"
+#include "core/installer.h"
 #include "core/parseerror.h"
 #include "core/moddedapplication.h"
 #include "importfromsteamdialog.h"
@@ -9,7 +10,9 @@
 #include <QDebug>
 #include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMessageBox>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <filesystem>
 #include <fstream>
@@ -38,6 +41,10 @@ AddAppDialog::AddAppDialog(bool is_flatpak, QWidget* parent) :
           &ImportFromSteamDialog::applicationImported,
           this,
           &AddAppDialog::onApplicationImported);
+  connect(import_from_steam_dialog_.get(),
+          &ImportFromSteamDialog::addAllSupportedRequested,
+          this,
+          &AddAppDialog::onAddAllSupported);
   // Populate GOG template combo at construction so it's ready when setAddMode() is called.
   // (issue #74 / limo-app/limo#51)
   populateGogTemplateCombo();
@@ -154,7 +161,52 @@ bool AddAppDialog::createStagingDirIfNeeded() // fork #78
 bool AddAppDialog::iconIsValid(const QString& path)
 {
   QString icon_path = path.isEmpty() ? ui->icon_field->text() : path;
+  if(icon_path.isEmpty())
+    return false;
+  // Cheap pre-checks before the (potentially expensive) full QIcon decode: the path must
+  // refer to an existing regular file with a recognised image suffix. This avoids decoding
+  // arbitrary / large files on the UI thread just to reject obviously-invalid icons.
+  std::error_code ec;
+  const sfs::path fs_path(icon_path.toStdString());
+  if(!sfs::is_regular_file(fs_path, ec) || ec)
+    return false;
+  static const std::set<QString> image_suffixes{ "png", "jpg", "jpeg", "bmp",
+                                                  "gif", "svg", "svgz", "ico",
+                                                  "webp", "tiff", "tif", "xpm" };
+  const QString suffix = QFileInfo(icon_path).suffix().toLower();
+  if(!image_suffixes.contains(suffix))
+    return false;
   return QIcon(icon_path).availableSizes().size() > 0;
+}
+
+bool AddAppDialog::targetDirIsSafe(const sfs::path& target_dir) const
+{
+  if(target_dir.empty() || !target_dir.is_absolute())
+    return false;
+  // Reject any ".." (or "." trickery) component outright: even a path that ends up under a
+  // known root after normalisation should not contain traversal segments coming from config.
+  for(const auto& component : target_dir)
+  {
+    if(component == "..")
+      return false;
+  }
+  // The target must be lexically contained within one of the known Steam install/prefix
+  // roots. lexically_normal avoids resolving symlinks (the dirs may not exist yet) while
+  // still collapsing any redundant separators.
+  const sfs::path normalized = target_dir.lexically_normal();
+  const auto is_within = [&normalized](const QString& root_str)
+  {
+    if(root_str.isEmpty())
+      return false;
+    const sfs::path root = sfs::path(root_str.toStdString()).lexically_normal();
+    if(root.empty())
+      return false;
+    const sfs::path rel = normalized.lexically_relative(root);
+    // lexically_relative yields an empty path when unrelated, and a leading ".." when the
+    // target escapes the root.
+    return !rel.empty() && *rel.begin() != "..";
+  };
+  return is_within(steam_install_path_) || is_within(steam_prefix_path_);
 }
 
 std::vector<sfs::path> AddAppDialog::gameConfigSearchDirs()
@@ -183,6 +235,34 @@ std::vector<sfs::path> AddAppDialog::gameConfigSearchDirs()
   dirs.push_back(bundled_dir);
 
   return dirs;
+}
+
+bool AddAppDialog::hasGameConfig(const std::string& app_id)
+{
+  if(app_id.empty())
+    return false;
+  // Mirror gameConfigSearchDirs() without needing an instance: the user-writable
+  // config dir first, then the bundled steam_app_configs dir. Uses the global flatpak
+  // flag (set during MainWindow init) so the bundled path resolves correctly.
+  const bool is_flatpak = Installer::isAFlatpak();
+  std::vector<sfs::path> dirs;
+  const QString user_loc = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+  if(!user_loc.isEmpty())
+    dirs.push_back(sfs::path(user_loc.toStdString()) / "game_configs");
+  sfs::path bundled_dir =
+    sfs::path(is_flatpak ? "/app" : APP_INSTALL_PREFIX) / "share/limo/steam_app_configs";
+  if(!is_flatpak && sfs::exists("steam_app_configs"))
+    bundled_dir = "steam_app_configs";
+  dirs.push_back(bundled_dir);
+
+  const std::string config_file_name = app_id + ".json";
+  std::error_code ec;
+  for(const auto& dir : dirs)
+  {
+    if(sfs::is_regular_file(dir / config_file_name, ec))
+      return true;
+  }
+  return false;
 }
 
 void AddAppDialog::initConfigForApp()
@@ -250,6 +330,7 @@ void AddAppDialog::initConfigForApp()
   Log::debug(std::format("Reading app config for id {}", steam_app_id_));
   try
   {
+    std::vector<std::string> skipped_unsafe_targets;
     for(int i = 0; i < json["deployers"].size(); i++)
     {
       Json::Value deployer = json["deployers"][i];
@@ -286,6 +367,21 @@ void AddAppDialog::initConfigForApp()
         // Settings/Application Data/<Game>") and is only created once the game has run. Create it
         // rather than silently dropping the deployer, so imports set up every recommended deployer
         // (limo-app/limo#224).
+        // Security: the target comes from a (potentially user-supplied/community) game config.
+        // Only create it if it resolves to a location inside the known Steam install/prefix
+        // roots and contains no ".." traversal, so a malicious config can not create
+        // directories at arbitrary filesystem locations.
+        if(!targetDirIsSafe(target_dir))
+        {
+          Log::debug(std::format(
+            "App config for deployer {} for app {} has an unsafe target {} outside the install/"
+            "prefix roots; skipping deployer",
+            i,
+            steam_app_id_,
+            target_dir));
+          skipped_unsafe_targets.push_back(target_dir);
+          continue;
+        }
         std::error_code ec;
         sfs::create_directories(target_dir, ec);
         if(ec)
@@ -342,10 +438,24 @@ void AddAppDialog::initConfigForApp()
       if(!deployer[JSON_DEPLOYERS_SEPARATE_DIRS].isNull())
         info.separate_profile_dirs = deployer[JSON_DEPLOYERS_SEPARATE_DIRS].asBool();
       if(!deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].isNull())
-        info.separate_profile_dirs = deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].asBool();
+        info.update_ignore_list = deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].asBool();
       deployers_.push_back(info);
     }
     Log::debug(std::format("Found {} deployers", deployers_.size()));
+
+    if(!skipped_unsafe_targets.empty())
+    {
+      QString details;
+      for(const auto& target : skipped_unsafe_targets)
+        details += "\n- " + QString::fromStdString(target).toHtmlEscaped();
+      QMessageBox::warning(
+        this,
+        "Skipped deployers",
+        QString("Some deployers from the game configuration were skipped because their target "
+                "directory pointed outside the game's install/prefix directories and was not "
+                "created for security reasons:%1")
+          .arg(details));
+    }
 
     for(int i = 0; i < json[JSON_AUTO_TAGS_GROUP].size(); i++)
     {
@@ -482,9 +592,27 @@ void AddAppDialog::saveHooksToConfig(const QString& staging_dir)
     sfs::path(staging_dir.toStdString()) / ModdedApplication::CONFIG_FILE_NAME;
   // Only an existing app config can carry hooks. For freshly created apps the
   // config file does not exist yet at this point; hooks can be set later by
-  // editing the application.
+  // editing the application. If the user actually entered hook commands but they
+  // cannot be persisted yet, warn them rather than silently discarding the input
+  // (limo-app/limo audit F063).
   if(!sfs::exists(config_path))
+  {
+    const bool has_hooks = !ui->pre_deploy_field->text().isEmpty() ||
+                           !ui->post_deploy_field->text().isEmpty() ||
+                           !ui->pre_undeploy_field->text().isEmpty() ||
+                           !ui->post_undeploy_field->text().isEmpty();
+    if(has_hooks)
+    {
+      Log::debug("App config does not exist yet; deploy hooks could not be saved at: " +
+                 config_path.string());
+      QMessageBox::warning(
+        this,
+        "Deploy hooks not saved",
+        "The deploy hooks could not be saved yet because the application has not been fully "
+        "created. Please re-open this application for editing to set its deploy hooks.");
+    }
     return;
+  }
 
   Json::Value json;
   {
@@ -645,8 +773,78 @@ void AddAppDialog::on_buttonBox_accepted()
 
 void AddAppDialog::on_import_button_clicked()
 {
+  batch_import_done_ = false;
   import_from_steam_dialog_->init();
   import_from_steam_dialog_->exec();
+  // If the user chose "Add all supported", the apps were created during the import dialog's
+  // signal; close this dialog now that the modal import sub-dialog has returned.
+  if(batch_import_done_)
+  {
+    batch_import_done_ = false;
+    accept();
+  }
+}
+
+void AddAppDialog::openSteamImport()
+{
+  on_import_button_clicked();
+}
+
+void AddAppDialog::addImportedAppDirect(const QString& name,
+                                        const QString& app_id,
+                                        const QString& install_dir,
+                                        const QString& prefix_path,
+                                        const QString& icon_path,
+                                        const QString& staging_dir)
+{
+  // Populate the same state the interactive import sets (members + deployers_/auto_tags_
+  // via initConfigForApp), then build the app info directly without the visible form.
+  onApplicationImported(name, app_id, install_dir, prefix_path, icon_path);
+  std::error_code ec;
+  sfs::create_directories(staging_dir.toStdString(), ec);
+  if(ec)
+  {
+    Log::error("Batch import: could not create staging dir '" + staging_dir.toStdString() +
+               "': " + ec.message() + " — skipping '" + name.toStdString() + "'.");
+    return;
+  }
+  EditApplicationInfo info;
+  info.name = name.toStdString();
+  info.staging_dir = staging_dir.toStdString();
+  info.command = ("xdg-open steam://rungameid/" + app_id).toStdString();
+  info.icon_path = icon_path.toStdString();
+  info.steam_app_id = steam_app_id_;
+  info.deployers = deployers_;
+  info.auto_tags = auto_tags_;
+  emit applicationAdded(info);
+}
+
+void AddAppDialog::onAddAllSupported(const QList<QStringList>& games)
+{
+  if(games.isEmpty())
+    return;
+  const QString root = QFileDialog::getExistingDirectory(
+    this,
+    "Select a parent folder for mod staging",
+    QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+    QFileDialog::ShowDirsOnly);
+  if(root.isEmpty())
+    return;
+  int added = 0;
+  for(const QStringList& g : games)
+  {
+    if(g.size() < 5)
+      continue;
+    QString folder = g[0];
+    folder.replace(QRegularExpression("[^A-Za-z0-9._ -]"), "_");
+    if(folder.trimmed().isEmpty())
+      folder = g[1];
+    const sfs::path staging = sfs::path(root.toStdString()) / folder.toStdString();
+    addImportedAppDirect(g[0], g[1], g[2], g[3], g[4], QString::fromStdString(staging.string()));
+    added++;
+  }
+  Log::info("Batch import: added " + std::to_string(added) + " supported game(s).");
+  batch_import_done_ = true;
 }
 
 void AddAppDialog::onApplicationImported(QString name,
@@ -657,7 +855,16 @@ void AddAppDialog::onApplicationImported(QString name,
 {
   ui->name_field->setText(name);
   ui->command_field->setText("xdg-open steam://rungameid/" + app_id);
-  steam_app_id_ = app_id.toLong();
+  bool app_id_ok = false;
+  const long parsed_app_id = app_id.toLong(&app_id_ok);
+  if(app_id_ok && parsed_app_id > 0)
+    steam_app_id_ = parsed_app_id;
+  else
+  {
+    steam_app_id_ = -1;
+    Log::debug("Imported Steam app id '" + app_id.toStdString() +
+               "' is not a valid positive integer; using default config.");
+  }
   steam_install_path_ = install_dir;
   steam_prefix_path_ = prefix_path;
   updateDetectedPath();
@@ -680,12 +887,13 @@ void AddAppDialog::on_icon_picker_button_clicked()
   QString path = ui->icon_field->text();
   if(!path.isEmpty() && std::filesystem::exists(path.toStdString()))
     starting_dir = std::filesystem::path(path.toStdString()).parent_path().string().c_str();
-  auto dialog = new QFileDialog;
+  auto dialog = new QFileDialog(this);
   dialog->setWindowTitle("Select Icon");
   dialog->setFilter(QDir::AllDirs | QDir::Hidden);
   dialog->setDirectory(starting_dir);
   connect(dialog, &QFileDialog::fileSelected, this, &AddAppDialog::onIconPathDialogComplete);
   dialog->exec();
+  dialog->deleteLater();
 }
 
 void AddAppDialog::onIconPathDialogComplete(const QString& path)
@@ -914,7 +1122,7 @@ void AddAppDialog::initConfigForGog(const QString& install_path,
     if(!deployer[JSON_DEPLOYERS_SEPARATE_DIRS].isNull())
       info.separate_profile_dirs = deployer[JSON_DEPLOYERS_SEPARATE_DIRS].asBool();
     if(!deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].isNull())
-      info.separate_profile_dirs = deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].asBool();
+      info.update_ignore_list = deployer[JSON_DEPLOYERS_UPDATE_IGNORE_LIST].asBool();
 
     deployers_.push_back(info);
   }
@@ -996,13 +1204,14 @@ void AddAppDialog::on_gog_prefix_picker_button_clicked()
   const QString current = ui->gog_prefix_field->text().trimmed();
   if(!current.isEmpty() && sfs::exists(current.toStdString()))
     starting_dir = current;
-  auto dialog = new QFileDialog;
+  auto dialog = new QFileDialog(this);
   dialog->setWindowTitle("Select Prefix Directory");
   dialog->setFilter(QDir::AllDirs | QDir::Hidden);
   dialog->setFileMode(QFileDialog::Directory);
   dialog->setDirectory(starting_dir);
   connect(dialog, &QFileDialog::fileSelected, this, &AddAppDialog::onGogPrefixDialogAccepted);
   dialog->exec();
+  dialog->deleteLater();
 }
 
 void AddAppDialog::onGogPrefixDialogAccepted(const QString& path)

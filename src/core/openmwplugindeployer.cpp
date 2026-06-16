@@ -11,6 +11,7 @@
 #include <system_error>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace sfs = std::filesystem;
 namespace str = std::ranges;
@@ -52,7 +53,7 @@ OpenMwPluginDeployer::OpenMwPluginDeployer(const sfs::path& source_path,
 void OpenMwPluginDeployer::unDeploy(std::optional<ProgressNode*> progress_node)
 {
   const std::string plugin_backup_path =
-    dest_path_ / ("." + plugin_file_name_ + UNDEPLOY_BACKUP_EXTENSION);
+    dest_path_ / (hideFile(plugin_file_name_) + UNDEPLOY_BACKUP_EXTENSION);
   if(!pu::exists(plugin_backup_path))
     sfs::copy(dest_path_ / plugin_file_name_, plugin_backup_path);
 
@@ -63,6 +64,22 @@ void OpenMwPluginDeployer::unDeploy(std::optional<ProgressNode*> progress_node)
   // staging directories. No-op (apart from a harmless rewrite) when the mode was never used.
   if(use_data_entries_)
     writeDataEntries(false);
+}
+
+void OpenMwPluginDeployer::restoreUndeployBackupIfExists()
+{
+  // OpenMW backs up only the single plugin file (see unDeploy), so the inherited
+  // LootDeployer two-file restore never matches. Use the single-file PluginDeployer
+  // semantics here so the backup is actually restored.
+  const std::string plugin_backup_path =
+    dest_path_ / (hideFile(plugin_file_name_) + UNDEPLOY_BACKUP_EXTENSION);
+  if(sfs::exists(plugin_backup_path))
+  {
+    log_(Log::LOG_DEBUG, std::format("Deployer '{}': Restoring undeploy backup.", name_));
+    sfs::remove(dest_path_ / plugin_file_name_);
+    sfs::rename(plugin_backup_path, dest_path_ / plugin_file_name_);
+    loadPlugins();
+  }
 }
 
 std::vector<std::vector<int>> OpenMwPluginDeployer::getConflictGroups() const
@@ -174,11 +191,19 @@ bool OpenMwPluginDeployer::sortPluginsWithLoot(std::optional<ProgressNode*> prog
   }
 
   if(enable_unsafe_sorting_)
+  {
     plugins_ = new_plugins;
-  log_(Log::LOG_INFO,
-       std::format("Deployer '{}': Sorted {} OpenMW content files using LOOT.",
-                   name_,
-                   new_plugins.size()));
+    log_(Log::LOG_INFO,
+         std::format("Deployer '{}': Sorted {} OpenMW content files using LOOT.",
+                     name_,
+                     new_plugins.size()));
+  }
+  else
+    log_(Log::LOG_INFO,
+         std::format("Deployer '{}': Computed a LOOT sort for {} OpenMW content files but "
+                     "kept the existing order (unsafe sorting disabled).",
+                     name_,
+                     new_plugins.size()));
   if(progress_node)
     (*progress_node)->child(3).advance();
   return true;
@@ -364,11 +389,17 @@ bool OpenMwPluginDeployer::initPluginFile()
   {
     std::smatch match;
     if(std::regex_match(line, match, plugin_regex))
-      plugins_.emplace_back(match[1], true);
+    {
+      // Only the bare file name is a valid plugin identifier; strip any path components
+      // that may have been written into the content= value.
+      const std::string plugin_name = sfs::path(match[1].str()).filename().string();
+      plugins_.emplace_back(plugin_name, true);
+    }
     else if(std::regex_match(line, match, groundcover_regex))
     {
-      plugins_.emplace_back(match[1], true);
-      groundcover_plugins_.insert(match[1]);
+      const std::string plugin_name = sfs::path(match[1].str()).filename().string();
+      plugins_.emplace_back(plugin_name, true);
+      groundcover_plugins_.insert(plugin_name);
       num_groundcover_plugins_++;
     }
   }
@@ -653,7 +684,13 @@ void OpenMwPluginDeployer::writeDataEntries(bool write_entries) const
       std::format("Error: Could not open '{}'.", config_path.string()));
 
   // Copy every line verbatim except the previously written Limo block, which is dropped.
+  // Lines seen after a BEGIN marker are buffered (not yet committed to the output) until a
+  // matching END marker is found; only then is the block known to be a properly terminated
+  // Limo block and safe to discard. If EOF is reached while still inside a block (a malformed
+  // or user-authored BEGIN without a matching END), the buffered lines are re-included so no
+  // existing cfg content is ever lost.
   std::vector<std::string> lines;
+  std::vector<std::string> block_buffer;
   std::string line;
   bool in_block = false;
   while(std::getline(in_file, line))
@@ -661,18 +698,38 @@ void OpenMwPluginDeployer::writeDataEntries(bool write_entries) const
     std::string trimmed = line;
     if(!trimmed.empty() && trimmed.back() == '\r')
       trimmed.pop_back();
-    if(trimmed == DATA_BLOCK_BEGIN_MARKER)
+    if(!in_block && trimmed == DATA_BLOCK_BEGIN_MARKER)
     {
       in_block = true;
+      block_buffer.clear();
+      block_buffer.push_back(line);
       continue;
     }
     if(in_block)
     {
       if(trimmed == DATA_BLOCK_END_MARKER)
+      {
+        // Properly terminated Limo block: drop the whole buffered block.
         in_block = false;
+        block_buffer.clear();
+      }
+      else
+        block_buffer.push_back(line);
       continue;
     }
     lines.push_back(line);
+  }
+  if(in_block)
+  {
+    // Unterminated block: not a valid Limo block, so preserve its content verbatim.
+    log_(Log::LOG_WARNING,
+         std::format("Deployer '{}': Found an unterminated '{}' block in '{}'; preserving its "
+                     "content instead of dropping it.",
+                     name_,
+                     std::string(DATA_BLOCK_BEGIN_MARKER),
+                     config_path.string()));
+    for(auto& buffered : block_buffer)
+      lines.push_back(std::move(buffered));
   }
   in_file.close();
 
@@ -695,7 +752,21 @@ void OpenMwPluginDeployer::writeDataEntries(bool write_entries) const
       {
         out_file << DATA_BLOCK_BEGIN_MARKER << "\n";
         for(const auto& path : data_paths)
+        {
+          // A double quote inside the path would terminate the quoted data= value early and
+          // corrupt openmw.cfg. There is no portable way to represent such a path here, so the
+          // entry is skipped with a warning rather than writing a broken line.
+          if(path.find('"') != std::string::npos)
+          {
+            log_(Log::LOG_WARNING,
+                 std::format("Deployer '{}': Skipping data= entry for path '{}' because it "
+                             "contains a double quote character.",
+                             name_,
+                             path));
+            continue;
+          }
           out_file << "data=\"" << path << "\"\n";
+        }
         out_file << DATA_BLOCK_END_MARKER << "\n";
       }
     }
@@ -789,8 +860,18 @@ std::vector<std::pair<std::string, std::string>> OpenMwPluginDeployer::parsePlox
     if(line.front() == '[')
     {
       const auto close = line.find(']');
-      std::string header =
-        close == std::string::npos ? line.substr(1) : line.substr(1, close - 1);
+      if(close == std::string::npos)
+      {
+        // Malformed header (missing closing bracket): make the rule-file error visible
+        // and skip the line rather than partially parsing it as a section header.
+        log_(Log::LOG_WARNING,
+             std::format("Deployer '{}': Ignoring malformed PLOX section header (missing "
+                         "closing ']'): '{}'.",
+                         name_,
+                         line));
+        continue;
+      }
+      std::string header = line.substr(1, close - 1);
       const std::string header_lc = to_lower(trim(header));
       if(header_lc == "order")
         active_block = 1;

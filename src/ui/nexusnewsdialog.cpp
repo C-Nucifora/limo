@@ -9,6 +9,7 @@
 #include <QUrl>
 #include <QXmlStreamReader>
 #include <cpr/cpr.h>
+#include <chrono>
 #include <format>
 #include <thread>
 
@@ -50,7 +51,9 @@ void NexusNewsDialog::refresh()
     {
       cpr::Response response =
         cpr::Get(cpr::Url(url),
-                 cpr::Header{ { "User-Agent", "Limo Mod Manager" }, { "Accept", "application/rss+xml, application/xml, text/xml" } });
+                 cpr::Header{ { "User-Agent", "Limo Mod Manager" }, { "Accept", "application/rss+xml, application/xml, text/xml" } },
+                 // Bound the request so the detached thread cannot hang indefinitely.
+                 cpr::Timeout{ std::chrono::seconds(30) });
       if(!guard)
         return;
       if(response.status_code == 200)

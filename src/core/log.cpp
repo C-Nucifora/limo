@@ -1,5 +1,6 @@
 #include "log.h"
 #include <chrono>
+#include <ctime>
 #include <deque>
 #include <fstream>
 #include <iomanip>
@@ -22,6 +23,13 @@ void recordLogEntry(const std::string& message, Log::LogLevel log_level)
   while(log_buffer.size() > Log::max_log_buffer_size)
     log_buffer.pop_front();
 }
+
+/*! \brief Guards access to the persistent log file stream. */
+std::mutex log_file_mutex;
+/*! \brief Persistent output stream kept open for the lifetime of the log file. */
+std::ofstream log_file_stream;
+/*! \brief Path the persistent stream is currently open for. */
+std::filesystem::path open_log_file_path;
 }
 
 inline constexpr std::string default_log_file_name = "limo_log";
@@ -31,8 +39,10 @@ std::string getTimestamp(Log::LogLevel log_level)
 {
   const auto now = std::chrono::system_clock::now();
   auto cur_time = std::chrono::system_clock::to_time_t(now);
+  std::tm tm_buf{};
+  localtime_r(&cur_time, &tm_buf);
   std::stringstream ss;
-  ss << std::put_time(std::localtime(&cur_time), "%F %T");
+  ss << std::put_time(&tm_buf, "%F %T");
   if(log_level == Log::LOG_DEBUG)
     ss << "."
        << std::chrono::time_point_cast<std::chrono::milliseconds>(now).time_since_epoch().count() %
@@ -46,7 +56,8 @@ void writeLog(const std::string& message, Log::LogLevel log_level, int target_pr
   // in-app log viewer, regardless of the active log level or printers.
   recordLogEntry(message, log_level);
 
-  if(Log::log_level >= log_level && Log::log_printers.size() > target_printer)
+  if(Log::log_level >= log_level && target_printer >= 0 &&
+     static_cast<std::size_t>(target_printer) < Log::log_printers.size())
     Log::log_printers[target_printer](message, log_level);
 
   if(Log::log_file_path.empty())
@@ -54,15 +65,24 @@ void writeLog(const std::string& message, Log::LogLevel log_level, int target_pr
 
   try
   {
-    std::ofstream fstream(Log::log_file_path, std::ios::app);
-    if(!fstream.is_open())
+    std::lock_guard<std::mutex> lock(log_file_mutex);
+    // Open (or reopen) the persistent stream only when the target path changes
+    // or the stream is not currently usable, avoiding a per-message open/close.
+    if(!log_file_stream.is_open() || open_log_file_path != Log::log_file_path)
+    {
+      log_file_stream.close();
+      log_file_stream.clear();
+      log_file_stream.open(Log::log_file_path, std::ios::app);
+      open_log_file_path = Log::log_file_path;
+    }
+    if(!log_file_stream.is_open())
       return;
-    fstream << message << "\n";
-    fstream.flush();
+    log_file_stream << message << "\n";
+    log_file_stream.flush();
   }
   catch(...)
   {
-    if(Log::log_printers.size() > target_printer)
+    if(target_printer >= 0 && static_cast<std::size_t>(target_printer) < Log::log_printers.size())
       Log::log_printers[target_printer]("Failed to write to log file!", Log::LOG_DEBUG);
   }
 }
@@ -147,6 +167,15 @@ void init(sfs::path log_dir_path)
     return;
 
   debug("Initializing config path to: " + log_dir_path.string());
+
+  // Close any previously held log file stream so rotation below operates on the
+  // file and the next write reopens the freshly rotated log file.
+  {
+    std::lock_guard<std::mutex> lock(log_file_mutex);
+    log_file_stream.close();
+    log_file_stream.clear();
+    open_log_file_path.clear();
+  }
 
   try
   {

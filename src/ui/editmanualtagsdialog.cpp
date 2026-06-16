@@ -147,6 +147,7 @@ void EditManualTagsDialog::onTableCellEdited(int row, int col)
       "Renaming Failed",
       std::format("A tag with the name '{}' already exists.", new_name.toStdString()).c_str());
     updateTable();
+    return;
   }
   actions_.emplace_back(
     tag_names_[row].toStdString(), EditManualTagAction::ActionType::rename, new_name.toStdString());
@@ -162,18 +163,6 @@ void EditManualTagsDialog::on_buttonBox_accepted()
 
   if(!actions_.empty())
     emit manualTagsEdited(app_id_, actions_);
-
-  for(auto action : actions_)
-  {
-    QString type_str;
-    auto type = action.getType();
-    if(type == EditManualTagAction::ActionType::add)
-      type_str = "Add";
-    else if(type == EditManualTagAction::ActionType::rename)
-      type_str = "Rename";
-    else
-      type_str = "Remove";
-  }
 }
 
 void EditManualTagsDialog::on_buttonBox_rejected()

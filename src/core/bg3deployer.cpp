@@ -53,7 +53,21 @@ std::vector<std::string> Bg3Deployer::getModNames() const
   std::vector<std::string> names{};
   names.reserve(plugins_.size());
   for(const auto& [uuid, enabled] : plugins_)
-    names.push_back(pak_files_.at(uuid_map_.at(uuid)).getPluginName(uuid));
+  {
+    auto uuid_iter = uuid_map_.find(uuid);
+    if(uuid_iter == uuid_map_.end())
+    {
+      names.push_back(uuid);
+      continue;
+    }
+    auto pak_iter = pak_files_.find(uuid_iter->second);
+    if(pak_iter == pak_files_.end())
+    {
+      names.push_back(uuid);
+      continue;
+    }
+    names.push_back(pak_iter->second.getPluginName(uuid));
+  }
   return names;
 }
 
@@ -71,14 +85,36 @@ std::unordered_set<int> Bg3Deployer::getModConflicts(int mod_id,
   std::unordered_set<int> conflicts{ mod_id };
   if(progress_node)
     (*progress_node)->setTotalSteps(plugins_.size());
+  if(mod_id < 0 || static_cast<size_t>(mod_id) >= plugins_.size())
+    return conflicts;
   const std::string plugin_uuid = plugins_[mod_id].first;
-  auto file = pak_files_[uuid_map_[plugin_uuid]];
+  auto plugin_uuid_iter = uuid_map_.find(plugin_uuid);
+  if(plugin_uuid_iter == uuid_map_.end())
+    return conflicts;
+  auto file_iter = pak_files_.find(plugin_uuid_iter->second);
+  if(file_iter == pak_files_.end())
+    return conflicts;
+  auto file = file_iter->second;
   for(const auto& [i, pair] : str::enumerate_view(plugins_))
   {
     if(i == mod_id)
       continue;
     const auto& [uuid, enabled] = pair;
-    if(file.conflictsWith(pak_files_[uuid_map_[uuid]]))
+    auto other_uuid_iter = uuid_map_.find(uuid);
+    if(other_uuid_iter == uuid_map_.end())
+    {
+      if(progress_node)
+        (*progress_node)->advance();
+      continue;
+    }
+    auto other_file_iter = pak_files_.find(other_uuid_iter->second);
+    if(other_file_iter == pak_files_.end())
+    {
+      if(progress_node)
+        (*progress_node)->advance();
+      continue;
+    }
+    if(file.conflictsWith(other_file_iter->second))
       conflicts.insert(i);
     if(progress_node)
       (*progress_node)->advance();
@@ -150,7 +186,17 @@ bool Bg3Deployer::initPluginFile()
 
   const sfs::path bg3_plugin_file_path = dest_path_ / BG3_PLUGINS_FILE_NAME;
   pugi::xml_document xml_doc;
-  xml_doc.load_file(bg3_plugin_file_path.c_str());
+  const pugi::xml_parse_result load_result = xml_doc.load_file(bg3_plugin_file_path.c_str());
+  if(!load_result && load_result.status != pugi::status_file_not_found)
+  {
+    log_(Log::LOG_ERROR,
+         std::format("Deployer '{}': Failed to parse '{}': {}\n"
+                     "Skipping derivation of the load order from it.",
+                     name_,
+                     bg3_plugin_file_path.string(),
+                     load_result.description()));
+    return true;
+  }
   plugins_.clear();
 
   pugi::xml_node order_node = xml_doc.child("save")

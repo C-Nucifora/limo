@@ -1,0 +1,12 @@
+{
+  "name": "Space Engineers",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Mods",
+      "target_dir": "$STEAM_PREFIX_PATH$/users/steamuser/AppData/Roaming/SpaceEngineers/Mods",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

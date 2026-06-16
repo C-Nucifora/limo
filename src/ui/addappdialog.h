@@ -112,6 +112,19 @@ private:
    * Populated by populateGogTemplateCombo(). (issue #74 / limo-app/limo#51)
    */
   QStringList gog_template_paths_;
+  /*! \brief Set by onAddAllSupported() so the dialog closes itself once the modal import
+   *  sub-dialog returns (closing it mid-stack would be unsafe). */
+  bool batch_import_done_ = false;
+  /*!
+   * \brief Creates one application from imported Steam data plus a staging directory, using
+   * the game's preset for deployers/auto-tags. Emits applicationAdded(). Used by batch import.
+   */
+  void addImportedAppDirect(const QString& name,
+                            const QString& app_id,
+                            const QString& install_dir,
+                            const QString& prefix_path,
+                            const QString& icon_path,
+                            const QString& staging_dir);
 
   /*!
    * \brief Set the enabled state of this dialogs OK button.
@@ -139,6 +152,16 @@ private:
    * \param Path to an icon. If this checked instead of ui->icon_field if this is not empty.
    */
   bool iconIsValid(const QString& path = "");
+  /*!
+   * \brief Security guard for deployer target directories coming from (community) game
+   * configs: a resolved target path may only be created on disk if it is lexically
+   * contained within one of the known Steam install/prefix roots and contains no ".."
+   * components. This prevents an untrusted config from causing directory creation at
+   * arbitrary filesystem locations.
+   * \param target_dir Resolved (placeholder-expanded) target directory.
+   * \return true if the path is safe to create, false otherwise.
+   */
+  bool targetDirIsSafe(const std::filesystem::path& target_dir) const;
   /*!
    * \brief Initializes default settings for deployers and auto tags from a file named "app_id_.json".
    * If no such file exists, creates generic deployers targeting installation directory and prefix.
@@ -198,6 +221,19 @@ private:
 
 public:
   /*!
+   * \brief Returns whether Limo ships (or the user has provided) a game-config preset
+   * "<app_id>.json" for the given Steam app id. Used by the Steam import flow to flag
+   * which installed games Limo can auto-configure.
+   * \param app_id Steam app id to look up.
+   * \return True if a "<app_id>.json" preset exists in any game-config search dir.
+   */
+  static bool hasGameConfig(const std::string& app_id);
+  /*!
+   * \brief Opens the "Import from Steam" sub-dialog directly (used by the main window's
+   * "Scan for games" entry point). The dialog must already be in add mode.
+   */
+  void openSteamImport();
+  /*!
    * \brief Initializes this dialog to allow editing of an existing
    * \ref ModdedApplication "application".
    * \param name Current name of the edited \ref ModdedApplication "application".
@@ -246,6 +282,13 @@ private slots:
                              QString install_dir,
                              QString prefix_path,
                              QString icon_path);
+  /*!
+   * \brief Batch-adds every supported game from the Steam import dialog. Prompts once for a
+   * parent staging directory, then creates one application per game (with deployers/auto-tags
+   * from its preset) under that parent.
+   * \param games List of [name, app_id, install_dir, prefix_path, icon_path] per game.
+   */
+  void onAddAllSupported(const QList<QStringList>& games);
   /*!
    * \brief Updates the staging directory path to given path.
    * \param path The new path.

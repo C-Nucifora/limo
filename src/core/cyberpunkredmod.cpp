@@ -8,21 +8,6 @@ namespace sfs = std::filesystem;
 namespace
 {
 /*!
- * \brief Wraps a path in double quotes for safe inclusion in a shell command.
- *
- * Mirrors the quoting strategy used by \ref Tool so the generated command behaves
- * consistently with the rest of Limo. Does not escape embedded quotes; game/Proton
- * paths are not expected to contain them.
- * TODO(cp-redmod): If paths containing double quotes ever occur, add escaping.
- * \param path Path to quote.
- * \return The quoted string.
- */
-std::string quote(const sfs::path& path)
-{
-  return '"' + path.string() + '"';
-}
-
-/*!
  * \brief POSIX-shell-escapes an arbitrary string by single-quoting it.
  *
  * Wraps \p s in single quotes and replaces every embedded single quote with the
@@ -45,6 +30,20 @@ std::string shellEscape(const std::string& s)
   }
   out += "'";
   return out;
+}
+
+/*!
+ * \brief Escapes a path for safe inclusion in a shell command.
+ *
+ * Uses the same POSIX single-quote escaping as \ref shellEscape so that $,
+ * backticks, backslashes, spaces and embedded quotes are all neutralised, even
+ * for paths that originate from untrusted input.
+ * \param path Path to quote.
+ * \return The single-quoted, escaped string.
+ */
+std::string quote(const sfs::path& path)
+{
+  return shellEscape(path.string());
 }
 
 /*!
@@ -98,12 +97,20 @@ std::optional<RedMod> parseRedMod(const sfs::path& mod_dir)
   if(!info.isMember("name") || !info["name"].isString() || info["name"].asString().empty())
     return std::nullopt;
 
+  // The name is used verbatim as a path component under game_root/mods/, so reject
+  // any value that could escape that directory (path separators, ".", "..",
+  // absolute paths or embedded ".." elements) to prevent path traversal.
+  const std::string raw_name = info["name"].asString();
+  if(raw_name == "." || raw_name == ".." ||
+     raw_name.find('/') != std::string::npos || raw_name.find('\\') != std::string::npos)
+    return std::nullopt;
+
   RedMod mod;
-  mod.name = info["name"].asString();
+  mod.name = raw_name;
   mod.source_path = mod_dir;
   // TODO(cp-redmod): Verify the version field is named "version" and is a string;
   // some tooling stores it as a number or under a different key.
-  if(info.isMember("version") && info["version"].isString())
+  if(info.isMember("version") && (info["version"].isString() || info["version"].isNumeric()))
     mod.version = info["version"].asString();
 
   // Derive content type flags from the declared info.json sections...
@@ -138,7 +145,10 @@ std::vector<RedMod> detectRedMods(const sfs::path& source_dir)
   if(!sfs::is_directory(source_dir, ec))
     return mods;
 
-  for(const auto& entry : sfs::directory_iterator(source_dir, ec))
+  sfs::directory_iterator it(source_dir, ec);
+  if(ec)
+    return mods;
+  for(const auto& entry : it)
   {
     if(!entry.is_directory(ec))
       continue;
@@ -200,9 +210,12 @@ void layoutRedMods(const std::vector<std::pair<int, sfs::path>>& mods_in_load_or
     sfs::remove_all(dest, ec);
     // TODO(cp-redmod): This copies the whole mod folder. Consider hard-linking for
     // large archive mods, mirroring Deployer::hard_link mode, once validated.
+    // Copy symlinks as links rather than following them, so a malicious mod cannot
+    // use a symlink to read or overwrite files outside the destination.
     sfs::copy(source_path,
               dest,
-              sfs::copy_options::recursive | sfs::copy_options::overwrite_existing);
+              sfs::copy_options::recursive | sfs::copy_options::overwrite_existing |
+                sfs::copy_options::copy_symlinks);
 
     ordered_names.push_back(mod->name);
   }

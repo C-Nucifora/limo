@@ -1,0 +1,28 @@
+{
+  "name": "Sid Meier's Civilization VI",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Mods",
+      "target_dir": "$STEAM_PREFIX_PATH$/users/steamuser/Documents/My Games/Sid Meier's Civilization VI/Mods",
+      "deploy_mode": "hard link"
+    }
+  ],
+  "auto_tags":
+  [
+    {
+      "name": "ModInfo",
+      "expression": "0",
+      "conditions":
+      [
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": ".*\\.modinfo$",
+          "use_regex": true
+        }
+      ]
+    }
+  ]
+}

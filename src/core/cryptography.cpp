@@ -2,6 +2,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <vector>
 #include <openssl/aes.h>
 #include <openssl/err.h>
@@ -21,7 +22,8 @@ void throwError(const std::string& step)
     error.append("\n");
     code = ERR_get_error();
   }
-  ERR_free_strings();
+  // Do not call ERR_free_strings() here: it deinitializes the process-wide OpenSSL error-string
+  // tables, affecting all threads. The loop above already drained this thread's error queue.
   throw CryptographyError(error);
 }
 
@@ -49,6 +51,36 @@ std::filesystem::path installationKeyDir()
     return std::filesystem::path(home) / ".config" / "Limo";
   throw CryptographyError("Could not determine config directory for installation key.");
 }
+
+// Reads an already existing installation key from disk without ever generating one.
+// Returns the raw key bytes if a well-formed key file exists, or std::nullopt if no key file is
+// present yet. A wrong-size (empty/corrupt) file is treated as an error so that stored API keys are
+// not silently rendered undecryptable by a transparent regeneration.
+std::optional<std::string> readInstallationKey(const std::filesystem::path& key_path)
+{
+  std::error_code ec;
+  if(!std::filesystem::exists(key_path, ec))
+    return std::nullopt;
+
+  std::ifstream in(key_path, std::ios::binary);
+  if(!in)
+    throw CryptographyError("Could not read installation key file.");
+  std::string stored((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  if(stored.size() == installation_key_size)
+    return stored;
+
+  // The file exists but is the wrong size: refuse to silently regenerate, since doing so would
+  // make any API keys encrypted under the (lost) original key permanently undecryptable. Back the
+  // corrupt file up so the user can attempt manual recovery and so a single corrupt file does not
+  // brick the application.
+  std::filesystem::path backup = key_path;
+  backup += ".corrupt";
+  std::error_code backup_ec;
+  std::filesystem::rename(key_path, backup, backup_ec);
+  throw CryptographyError(
+    "Installation key file is corrupt (unexpected size). It has been moved to '" + backup.string() +
+    "'; previously stored API keys can no longer be decrypted and must be re-entered.");
+}
 }
 
 std::string installationKey()
@@ -61,16 +93,8 @@ std::string installationKey()
   const std::filesystem::path key_path = dir / "nexus_api.key";
 
   std::error_code ec;
-  if(std::filesystem::exists(key_path, ec))
-  {
-    std::ifstream in(key_path, std::ios::binary);
-    if(!in)
-      throw CryptographyError("Could not read installation key file.");
-    std::string stored((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if(stored.size() == installation_key_size)
-      return stored;
-    // Fall through to regenerate if the file was empty/corrupt.
-  }
+  if(auto existing = readInstallationKey(key_path))
+    return *existing;
 
   unsigned char key_bytes[installation_key_size];
   if(RAND_bytes(key_bytes, installation_key_size) != 1)
@@ -245,14 +269,32 @@ std::string decrypt(const std::string& cipher_text,
   const bool no_master_password = key.empty() || key == default_key;
   if(no_master_password)
   {
+    // Decryption is a read-only operation, so do not generate a new installation key as a side
+    // effect: only consult the per-installation key if its file already exists. If it does not,
+    // there is nothing that could have been encrypted under it, so fall straight through to the
+    // legacy default_key used by versions predating fork issue #28.
+    std::optional<std::string> installation_key;
     try
     {
-      return decryptWithKey(cipher_text, installationKey(), nonce, tag);
+      installation_key = readInstallationKey(installationKeyDir() / "nexus_api.key");
     }
     catch(CryptographyError&)
     {
-      return decryptWithKey(cipher_text, default_key, nonce, tag);
+      // A corrupt/unreadable key file should not prevent the legacy fallback below from running.
+      installation_key = std::nullopt;
     }
+    if(installation_key)
+    {
+      try
+      {
+        return decryptWithKey(cipher_text, *installation_key, nonce, tag);
+      }
+      catch(CryptographyError&)
+      {
+        // Fall through to the legacy default_key.
+      }
+    }
+    return decryptWithKey(cipher_text, default_key, nonce, tag);
   }
   return decryptWithKey(cipher_text, key, nonce, tag);
 }

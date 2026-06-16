@@ -67,6 +67,18 @@ public:
   void setApiKey(const std::string& key) override;
 
   /*!
+   * \brief Supply a mod.io OAuth 2.0 bearer token for authenticated downloads.
+   *
+   * Required to resolve download URLs for subscriber-only modfiles that do not
+   * expose a public binary_url.  The token is obtained out-of-band via the
+   * mod.io OAuth email flow (POST /v1/oauth/emailrequest followed by
+   * POST /v1/oauth/emailexchange) or from the mod.io site's access-token widget.
+   *
+   * \param token mod.io OAuth 2.0 access token (without the "Bearer " prefix).
+   */
+  void setOAuthToken(const std::string& token);
+
+  /*!
    * \brief Search mod.io for mods matching a keyword in a game.
    *
    * Uses GET /v1/games/{game_id}/mods with the _q parameter.
@@ -132,11 +144,32 @@ private:
   /*! \brief mod.io API key. Set via setApiKey(). */
   std::string api_key_;
 
+  /*! \brief Optional mod.io OAuth 2.0 bearer token. Set via setOAuthToken(). */
+  std::string oauth_token_;
+
   /*!
    * \brief Assert that an API key has been set; throw if not.
    * \throws std::runtime_error if api_key_ is empty.
    */
   void requireKey() const;
+
+  /*!
+   * \brief Resolve the authenticated CDN download URL for a modfile.
+   *
+   * Uses GET /v1/games/{game_id}/mods/{mod_id}/files/{file_id}/download with an
+   * Authorization: Bearer header.  mod.io responds with a 302 redirect to the
+   * actual (time-limited) CDN URL, which is returned without following it.
+   *
+   * \param community mod.io game ID as string.
+   * \param mod_id    mod.io mod ID as string.
+   * \param file_id   mod.io modfile ID as string.
+   * \return Resolved CDN download URL.
+   * \throws std::runtime_error if no OAuth token is configured or the request
+   *         fails / does not yield a redirect location.
+   */
+  std::string getAuthenticatedDownloadUrl(const std::string& community,
+                                          const std::string& mod_id,
+                                          const std::string& file_id) const;
 
   /*!
    * \brief Convert a mod.io mod JSON object to a RemoteMod.

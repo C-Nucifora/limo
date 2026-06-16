@@ -1,0 +1,12 @@
+{
+  "name": "STAR WARS Jedi: Survivor",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Pak Mods",
+      "target_dir": "$STEAM_INSTALL_PATH$/SwGame/Content/Paks/~mods",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

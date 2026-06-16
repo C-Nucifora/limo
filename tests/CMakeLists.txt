@@ -40,6 +40,12 @@ if(LIMO_WITH_LOOT)
             test_lootdeployer.cpp
             test_openmwdeployer.cpp
     )
+else()
+    message(WARNING
+        "LIMO_WITH_LOOT is OFF: the LOOT and OpenMW deployer tests "
+        "(test_lootdeployer.cpp, test_openmwdeployer.cpp) are NOT compiled. "
+        "Bethesda/Morrowind load-order logic is left untested in this "
+        "configuration. Build with -DLIMO_WITH_LOOT=ON to exercise them.")
 endif()
 
 configure_file(test_utils.h.in test_utils.h)

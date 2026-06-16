@@ -46,7 +46,7 @@ RemoteMod ThunderstoreProvider::packageToMod(const Json::Value& pkg)
   const std::string ns   = pkg["namespace"].asString();
   const std::string pname = pkg["name"].asString();
   mod.id      = ns + "-" + pname;
-  mod.name    = pkg.isMember("full_name") ? pname : pname; // display name
+  mod.name    = pname; // display name
   mod.author  = ns;
   mod.page_url = pkg["package_url"].asString();
 

@@ -64,6 +64,7 @@
 #include <ranges>
 #include <regex>
 #include <unordered_map>
+#include <sys/wait.h>
 
 #include <iostream>
 
@@ -172,13 +173,26 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
 MainWindow::~MainWindow()
 {
+  // The worker writes to disk; never terminate() it mid-write as that can corrupt mod state.
+  // Ask its event loop to quit and wait (without a hard short timeout) for any in-flight
+  // filesystem operations to finish before tearing anything down.
   worker_thread_->quit();
-  worker_thread_->wait(5000);
-  if(worker_thread_->isRunning())
-    worker_thread_->terminate();
+  if(!worker_thread_->wait(30000))
+  {
+    // Last resort only: the thread is wedged and we are exiting anyway. Wait once more so an
+    // ongoing write has the best chance of completing, then leak app_manager_ rather than
+    // deleting an object that may still be executing on a live thread.
+    Log::warning("Worker thread did not finish in time during shutdown");
+    if(!worker_thread_->wait(30000))
+    {
+      delete ui;
+      return;
+    }
+  }
+  // The thread has fully finished, so app_manager_ is no longer executing and can be deleted.
+  delete app_manager_;
   delete worker_thread_;
   delete ui;
-  delete app_manager_;
 }
 
 void MainWindow::closeEvent(QCloseEvent* event)
@@ -243,10 +257,19 @@ void MainWindow::setupEmptyStateOverlay()
   connect(
     empty_state_button_, &QPushButton::clicked, this, &MainWindow::onAddAppButtonClicked);
 
+  // Autoscan entry point: opens Add-App straight into the Steam import flow, which lists
+  // installed games and flags the ones Limo has a preset for.
+  auto* scan_button = new QPushButton(tr("Scan for installed games"), empty_state_overlay_);
+  scan_button->setIcon(QIcon::fromTheme("system-search"));
+  scan_button->setCursor(Qt::PointingHandCursor);
+  scan_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+  connect(scan_button, &QPushButton::clicked, this, &MainWindow::onScanForGamesClicked);
+
   layout->addStretch();
   layout->addWidget(title, 0, Qt::AlignCenter);
   layout->addWidget(hint, 0, Qt::AlignCenter);
   layout->addWidget(empty_state_button_, 0, Qt::AlignCenter);
+  layout->addWidget(scan_button, 0, Qt::AlignCenter);
   layout->addStretch();
 
   empty_state_overlay_->hide();
@@ -1535,7 +1558,8 @@ int MainWindow::getColumnIndex(QTableWidget* table, QString col_name)
 {
   for(int i = 0; i < table->columnCount(); i++)
   {
-    if(table->horizontalHeaderItem(i)->text() == col_name)
+    QTableWidgetItem* item = table->horizontalHeaderItem(i);
+    if(item && item->text() == col_name)
       return i;
   }
   return -1;
@@ -1569,7 +1593,7 @@ void MainWindow::setupLog()
       log->moveCursor(QTextCursor::End);
       log->appendHtml(QString("<p style='color: " + color.name(QColor::HexRgb) + "'>") +
                       QString(message.c_str()).toHtmlEscaped().replace("\n", "<br/>") + "</p>");
-      if(*show_error && level <= Log::LOG_ERROR || *show_warning && level <= Log::LOG_WARNING)
+      if((*show_error && level <= Log::LOG_ERROR) || (*show_warning && level <= Log::LOG_WARNING))
         log_container->setVisible(true);
     });
   // tool log
@@ -1593,7 +1617,7 @@ void MainWindow::setupLog()
       log->moveCursor(QTextCursor::End);
       log->appendHtml(QString("<p style='color: " + color.name(QColor::HexRgb) + "'>") +
                       QString(message.c_str()).toHtmlEscaped().replace("\n", "<br/>") + "</p>");
-      if(*show_error && level <= Log::LOG_ERROR || *show_warning && level <= Log::LOG_WARNING)
+      if((*show_error && level <= Log::LOG_ERROR) || (*show_warning && level <= Log::LOG_WARNING))
         log_container->setVisible(true);
     });
 
@@ -1628,14 +1652,25 @@ QPair<QString, int> MainWindow::runCommand(QString command, bool ignore_flatpak)
     if(fgets(buffer.data(), buffer.size(), pipe) != nullptr)
       output += buffer.data();
   }
-  int ret_code = pclose(pipe) / 256;
+  int status = pclose(pipe);
+  int ret_code;
+  if(status == -1)
+    ret_code = -1;
+  else if(WIFEXITED(status))
+    ret_code = WEXITSTATUS(status);
+  else if(WIFSIGNALED(status))
+    ret_code = -WTERMSIG(status);
+  else
+    ret_code = -1;
   return { output, ret_code };
 }
 
 void MainWindow::runConcurrent(QString command, QString name, QString type, bool ignore_flatpak)
 {
-  Log::info(
-    ("Running " + type.toLower() + " '" + name + "' with command '" + command + "'").toStdString());
+  // Do not log the raw command: it may contain credentials, tokens or other secret-looking
+  // arguments passed to external tools. The full command remains visible to the user in the edit
+  // dialogs.
+  Log::info(("Running " + type.toLower() + " '" + name + "'").toStdString());
   auto watcher = new QFutureWatcher<QPair<QString, int>>;
   connect(
     watcher,
@@ -1649,8 +1684,14 @@ void MainWindow::runConcurrent(QString command, QString name, QString type, bool
                   .toStdString());
       delete watcher;
     });
-  auto future = QtConcurrent::run(
-    [this, command, ignore_flatpak]() { return runCommand(command, ignore_flatpak); });
+  // Capture is_a_flatpak_ by value so the work running on the thread pool does not read the member
+  // (which the GUI thread owns); the flatpak prefix is resolved here and runCommand is told to skip
+  // re-applying it.
+  const bool is_a_flatpak = is_a_flatpak_;
+  if(is_a_flatpak && !ignore_flatpak)
+    command = "flatpak-spawn --host " + command;
+  auto future =
+    QtConcurrent::run([this, command]() { return runCommand(command, /*ignore_flatpak=*/true); });
   watcher->setFuture(future);
 }
 
@@ -1941,8 +1982,8 @@ void MainWindow::initUiWithoutApps(bool has_apps)
 
 void MainWindow::checkForContainers()
 {
-  if(getenv("container"))
-    is_a_flatpak_ = getenv("container") == std::string("flatpak");
+  const char* container = getenv("container");
+  is_a_flatpak_ = container && std::string(container) == "flatpak";
   Installer::setIsAFlatpak(is_a_flatpak_);
   Log::debug(is_a_flatpak_ ? "Running as a flatpak" : "Running natively");
 }
@@ -2003,12 +2044,19 @@ bool MainWindow::versionIsLessOrEqual(QString current_version, QString target_ve
   if(std::regex_search(target_version.toStdString(), regex))
     return false;
 
-  for(const auto& [cur_sub, cur_target] :
-      stv::zip(current_version.split("."), target_version.split(".")))
+  const QStringList cur_parts = current_version.split(".");
+  const QStringList target_parts = target_version.split(".");
+  const int num_parts = std::max(cur_parts.size(), target_parts.size());
+  for(int i = 0; i < num_parts; i++)
   {
-    if(cur_sub.isEmpty() || cur_target.isEmpty())
-      continue;
-    if(cur_sub.toInt() > cur_target.toInt())
+    // Missing or empty components are treated as 0 so versions of differing length compare
+    // correctly (e.g. "1.2" vs "1.2.0").
+    const int cur_sub = i < cur_parts.size() && !cur_parts[i].isEmpty() ? cur_parts[i].toInt() : 0;
+    const int cur_target =
+      i < target_parts.size() && !target_parts[i].isEmpty() ? target_parts[i].toInt() : 0;
+    if(cur_sub < cur_target)
+      return true;
+    if(cur_sub > cur_target)
       return false;
   }
   return true;
@@ -2064,7 +2112,7 @@ void MainWindow::initRootLevelConditions()
 
   if(!json.isMember(JSON_ROOT_LEVEL_KEY))
     return;
-  for(int i = 0; i < json[JSON_ROOT_LEVEL_KEY].size(); i++)
+  for(Json::ArrayIndex i = 0; i < json[JSON_ROOT_LEVEL_KEY].size(); i++)
   {
     try
     {
@@ -2098,7 +2146,7 @@ void MainWindow::onModAdded(QList<QUrl> paths)
     ImportModInfo info;
     info.app_id = currentApp();
     info.action_type = ImportModInfo::extract;
-    info.local_source = url.path().toStdString();
+    info.local_source = url.toLocalFile().toStdString();
     info.target_path = ui->info_sdir_label->text().toStdString();
     info.target_path /= temp_dir_.toStdString();
     mod_import_queue_.push(info);
@@ -2897,8 +2945,13 @@ void MainWindow::onExtractionComplete(ImportModInfo info)
     add_mod_dialog_->show();
   }
   else
+  {
     onReceiveError("Error",
                    ("Failed to import mod from \"" + info.local_source.string() + "\"").c_str());
+    setBusyStatus(false);
+    if(!mod_import_queue_.empty())
+      importMod();
+  }
 }
 
 void MainWindow::onSettingsDialogComplete()
@@ -3081,6 +3134,16 @@ void MainWindow::onAddAppButtonClicked()
   add_app_dialog_->setAddMode();
   setBusyStatus(true, false);
   add_app_dialog_->show();
+}
+
+void MainWindow::onScanForGamesClicked()
+{
+  add_app_dialog_->setAddMode();
+  setBusyStatus(true, false);
+  add_app_dialog_->show();
+  // Jump straight into the Steam import scan, which lists installed games and flags the
+  // ones Limo has a preset for.
+  add_app_dialog_->openSteamImport();
 }
 
 
@@ -3361,10 +3424,22 @@ void MainWindow::onVerifyDeployerMenuClicked()
      deployer >= static_cast<int>(deployer_target_paths_.size()))
     return;
 
-  const QString name =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Name"))->text();
-  const QString deploy_mode_string =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Mode"))->text();
+  const int name_col = getColumnIndex(ui->info_deployer_list, "Name");
+  const int mode_col = getColumnIndex(ui->info_deployer_list, "Mode");
+  if(name_col < 0 || mode_col < 0)
+  {
+    Log::error("Could not determine deployer list columns");
+    return;
+  }
+  QTableWidgetItem* name_item = ui->info_deployer_list->item(deployer, name_col);
+  QTableWidgetItem* mode_item = ui->info_deployer_list->item(deployer, mode_col);
+  if(!name_item || !mode_item)
+  {
+    Log::error("Could not read deployer list cell");
+    return;
+  }
+  const QString name = name_item->text();
+  const QString deploy_mode_string = mode_item->text();
   Deployer::DeployMode deploy_mode = Deployer::hard_link;
   if(deploy_mode_string == deploy_mode_sym_link)
     deploy_mode = Deployer::sym_link;
@@ -3399,10 +3474,22 @@ void MainWindow::onDeployedFilesTreeMenuClicked()
      deployer >= static_cast<int>(deployer_target_paths_.size()))
     return;
 
-  const QString name =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Name"))->text();
-  const QString deploy_mode_string =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Mode"))->text();
+  const int name_col = getColumnIndex(ui->info_deployer_list, "Name");
+  const int mode_col = getColumnIndex(ui->info_deployer_list, "Mode");
+  if(name_col < 0 || mode_col < 0)
+  {
+    Log::error("Could not determine deployer list columns");
+    return;
+  }
+  QTableWidgetItem* name_item = ui->info_deployer_list->item(deployer, name_col);
+  QTableWidgetItem* mode_item = ui->info_deployer_list->item(deployer, mode_col);
+  if(!name_item || !mode_item)
+  {
+    Log::error("Could not read deployer list cell");
+    return;
+  }
+  const QString name = name_item->text();
+  const QString deploy_mode_string = mode_item->text();
   Deployer::DeployMode deploy_mode = Deployer::hard_link;
   if(deploy_mode_string == deploy_mode_sym_link)
     deploy_mode = Deployer::sym_link;
@@ -3451,10 +3538,22 @@ void MainWindow::onHealthCheckDeployerMenuClicked()
      deployer >= static_cast<int>(deployer_target_paths_.size()))
     return;
 
-  const QString name =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Name"))->text();
-  const QString deploy_mode_string =
-    ui->info_deployer_list->item(deployer, getColumnIndex(ui->info_deployer_list, "Mode"))->text();
+  const int name_col = getColumnIndex(ui->info_deployer_list, "Name");
+  const int mode_col = getColumnIndex(ui->info_deployer_list, "Mode");
+  if(name_col < 0 || mode_col < 0)
+  {
+    Log::error("Could not determine deployer list columns");
+    return;
+  }
+  QTableWidgetItem* name_item = ui->info_deployer_list->item(deployer, name_col);
+  QTableWidgetItem* mode_item = ui->info_deployer_list->item(deployer, mode_col);
+  if(!name_item || !mode_item)
+  {
+    Log::error("Could not read deployer list cell");
+    return;
+  }
+  const QString name = name_item->text();
+  const QString deploy_mode_string = mode_item->text();
   Deployer::DeployMode deploy_mode = Deployer::hard_link;
   if(deploy_mode_string == deploy_mode_sym_link)
     deploy_mode = Deployer::sym_link;
@@ -3898,9 +3997,16 @@ void MainWindow::updateProgress(float progress)
     const long msecs_elapsed =
       std::chrono::duration_cast<std::chrono::milliseconds>(now - last_progress_update_time_)
         .count();
-    const int remaining_sec =
-      (static_cast<double>(msecs_elapsed) * static_cast<double>((1.0 - progress) / progress)) /
-      1000.0;
+    const double clamped_progress = std::clamp(static_cast<double>(progress), 0.0, 1.0);
+    int remaining_sec = 0;
+    if(clamped_progress > 0.0)
+    {
+      const double eta_sec =
+        (static_cast<double>(msecs_elapsed) * ((1.0 - clamped_progress) / clamped_progress)) /
+        1000.0;
+      // Clamp to a sane range to avoid nonsensical ETAs on non-monotonic progress.
+      remaining_sec = static_cast<int>(std::clamp(eta_sec, 0.0, 359999.0));
+    }
     const int hours = remaining_sec / 3600;
     const int minutes = (remaining_sec / 60) % 60;
     const int seconds = remaining_sec % 60;
@@ -4996,6 +5102,12 @@ void MainWindow::onReceiveIpcMessage(QString message)
   if(nexus::Api::nxmUrlIsValid(message_str))
   {
     Log::debug("Received download request for \"" + message.toStdString() + "\".");
+    if(currentApp() < 0)
+    {
+      setStatusMessage("Cannot start download: no application selected", 5000);
+      Log::error("Ignoring IPC download request: no valid application selected");
+      return;
+    }
     ImportModInfo info;
     info.app_id = currentApp();
     info.action_type = ImportModInfo::download;
@@ -5203,26 +5315,12 @@ void MainWindow::onExternalChangesHandled(int app_id, int deployer, int num_depl
   setBusyStatus(false);
   if(deployer == num_deployers - 1 || !deploy_for_all_)
   {
-    // fork feature #49: deploy dry-run / preview.
-    // Optional confirm step shown immediately before the real deploy is dispatched to the
-    // ApplicationManager worker thread. The DeploymentPlan primitive lives on Deployer
-    // (Deployer::computeDeploymentPlan); the deployer instances are owned by the
-    // ApplicationManager and run on a separate thread, so the fully populated per-deployer
-    // plans must be delivered to this point via an ApplicationManager signal. Wiring that
-    // signal touches applicationmanager, which is out of scope for this change, so the seam is
-    // staged here: when deploy_preview_plans_ is populated (by that future signal) and the
-    // feature is enabled, the preview dialog is shown and deployment only proceeds on OK.
-    if(deploy && show_deploy_preview_ && !deploy_preview_plans_.empty())
-    {
-      DeployPreviewDialog preview(deploy_preview_plans_, this);
-      deploy_preview_plans_.clear();
-      if(preview.exec() != QDialog::Accepted)
-      {
-        setStatusMessage("Deployment cancelled");
-        setBusyStatus(false);
-        return;
-      }
-    }
+    // fork feature #49: deploy dry-run / preview is available on demand via the Tools menu
+    // ("Preview Deployment Changes" -> onShowDeploymentPreview -> onDeploymentPlans), which asks
+    // the worker to compute the plans and shows the read-only DeployPreviewDialog. An automatic
+    // confirm step in this deploy path would require ApplicationManager to deliver the populated
+    // per-deployer plans here via a signal; that wiring lives in another class, so it is not done
+    // inline (the previous staged branch was permanently dead and has been removed).
     // fork #54: snapshot the load order before each deploy so it can be rolled back.
     if(deploy)
       emit createRestorePoint(
@@ -5560,6 +5658,14 @@ void MainWindow::on_actionExport_Mod_List_triggered()
     auto csv_field = [](const QString& s) -> QString
     {
       QString escaped = s;
+      // Neutralise CSV formula injection (OWASP): prefix risky leading characters.
+      if(!escaped.isEmpty())
+      {
+        const QChar first = escaped.at(0);
+        if(first == '=' || first == '+' || first == '-' || first == '@' ||
+           first == QChar('\t') || first == QChar('\r'))
+          escaped.prepend('\'');
+      }
       escaped.replace("\"", "\"\"");
       return "\"" + escaped + "\"";
     };

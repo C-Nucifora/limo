@@ -91,7 +91,7 @@ void OpenMwArchiveDeployer::writePlugins() const
     for(const auto& [plugin, enabled] : plugins_)
     {
       if(enabled)
-        out_file << "content=" + plugin + "\n";
+        out_file << "fallback-archive=" + plugin + "\n";
     }
   }
   for(const auto& [i, line] : str::enumerate_view(lines))

@@ -15,7 +15,7 @@
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="0" column="0">
-    <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,1,0,0">
+    <layout class="QHBoxLayout" name="horizontalLayout" stretch="0,1,0,0,0">
      <item>
       <widget class="QLabel" name="label">
        <property name="toolTip">
@@ -53,9 +53,54 @@
        </property>
       </widget>
      </item>
+     <item>
+      <widget class="QCheckBox" name="supported_only_checkbox">
+       <property name="toolTip">
+        <string>Only show games Limo has a preset for</string>
+       </property>
+       <property name="text">
+        <string>Supported only</string>
+       </property>
+      </widget>
+     </item>
     </layout>
    </item>
    <item row="1" column="0">
+    <layout class="QHBoxLayout" name="prefix_layout" stretch="0,1,0">
+     <item>
+      <widget class="QLabel" name="prefix_label">
+       <property name="toolTip">
+        <string>Proton/WINE prefix drive_c used to resolve $STEAM_PREFIX_PATH$ in presets. Auto-detected per game; override here for non-standard prefixes.</string>
+       </property>
+       <property name="text">
+        <string>Prefix (drive_c):</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLineEdit" name="prefix_field">
+       <property name="placeholderText">
+        <string>no Proton prefix detected — browse to a drive_c for non-standard installs</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="pick_prefix_button">
+       <property name="toolTip">
+        <string>Browse for a prefix drive_c directory</string>
+       </property>
+       <property name="text">
+        <string/>
+       </property>
+       <property name="icon">
+        <iconset theme="folder-open">
+         <normaloff>.</normaloff>.</iconset>
+       </property>
+      </widget>
+     </item>
+    </layout>
+   </item>
+   <item row="2" column="0">
     <widget class="QTableWidget" name="app_table">
      <property name="editTriggers">
       <set>QAbstractItemView::NoEditTriggers</set>
@@ -95,9 +140,14 @@
        <string>Path</string>
       </property>
      </column>
+     <column>
+      <property name="text">
+       <string>Limo preset</string>
+      </property>
+     </column>
     </widget>
    </item>
-   <item row="2" column="0">
+   <item row="3" column="0">
     <widget class="QDialogButtonBox" name="buttonBox">
      <property name="orientation">
       <enum>Qt::Horizontal</enum>

@@ -238,7 +238,7 @@ public:
    * \param url URL to the mod on NexusMods.
    * \return If the given URL is valid: The domain and mod id. Else an empty std::optional.
    */
-  static std::optional<std::pair<std::string, int>> extractDomainAndModId(
+  static std::optional<std::pair<std::string, long>> extractDomainAndModId(
     const std::string& mod_url);
   /*!
    * \brief Initializes remote members of the given ImportModInfo.

@@ -1,0 +1,12 @@
+{
+  "name": "HELLDIVERS 2",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Data Patches",
+      "target_dir": "$STEAM_INSTALL_PATH$/data",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

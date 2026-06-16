@@ -1,0 +1,12 @@
+{
+  "name": "Colony Survival",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Mods",
+      "target_dir": "$STEAM_INSTALL_PATH$/gamedata/mods",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

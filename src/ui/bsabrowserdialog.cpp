@@ -155,8 +155,51 @@ void BsaBrowserDialog::onExtractSelected()
     const QString internal = item->data(Qt::UserRole).toString();
     const std::string internal_std = internal.toStdString();
 
+    // Sanitize the internal path to prevent path traversal: treat it as
+    // relative, strip any leading separators, and reject entries that would
+    // escape the destination directory via '..' components.
+    sfs::path rel(internal_std);
+    if(rel.is_absolute())
+      rel = rel.relative_path();
+    rel = rel.lexically_normal();
+    bool unsafe = rel.empty();
+    for(const auto& part : rel)
+    {
+      if(part == "..")
+      {
+        unsafe = true;
+        break;
+      }
+    }
+
     // Preserve the internal relative path under the destination directory.
-    const sfs::path dest = sfs::path(dest_dir.toStdString()) / sfs::path(internal_std);
+    const sfs::path dest_root = sfs::path(dest_dir.toStdString());
+    const sfs::path dest = dest_root / rel;
+
+    if(!unsafe)
+    {
+      // Ensure the resolved destination stays within the destination directory.
+      std::error_code ec;
+      const sfs::path canon_root = sfs::weakly_canonical(dest_root, ec);
+      const sfs::path canon_dest = sfs::weakly_canonical(dest, ec);
+      if(ec)
+        unsafe = true;
+      else
+      {
+        const auto rel_check = canon_dest.lexically_relative(canon_root);
+        if(rel_check.empty() || *rel_check.begin() == "..")
+          unsafe = true;
+      }
+    }
+
+    if(unsafe)
+    {
+      ++skipped;
+      errors << QString("%1: refusing to extract entry outside destination directory")
+                  .arg(internal);
+      continue;
+    }
+
     try
     {
       if(archive_->extractTo(internal_std, dest))

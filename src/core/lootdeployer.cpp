@@ -149,6 +149,8 @@ std::unordered_set<int> LootDeployer::getModConflicts(int mod_id,
                                                       std::optional<ProgressNode*> progress_node)
 {
   std::unordered_set<int> conflicts{ mod_id };
+  if(mod_id < 0 || mod_id >= static_cast<int>(plugins_.size()))
+    return conflicts;
   auto loot_handle = loot::CreateGameHandle(app_type_, source_path_, dest_path_);
   std::vector<sfs::path> plugin_paths;
   plugin_paths.reserve(plugins_.size());
@@ -232,6 +234,16 @@ void LootDeployer::sortModsByConflicts(std::optional<ProgressNode*> progress_nod
     if(iter != plugins_.end())
       enabled = iter->second;
     const auto cur_plugin = loot_handle->GetPlugin(plugin);
+    // GetPlugin returns null when the plugin file was not actually loaded
+    // (e.g. the file does not exist on disk). Treat it as a Standard plugin to
+    // avoid a null-dereference crash (limo-app/limo#185, limo-app/limo#31).
+    if(!cur_plugin)
+    {
+      num_standard_plugins++;
+      tags_.push_back({ STANDARD_PLUGIN });
+      new_plugins.emplace_back(plugin, enabled);
+      continue;
+    }
     if(cur_plugin->IsLightPlugin())
     {
       num_light_plugins++;
@@ -759,8 +771,20 @@ void LootDeployer::writePlugins() const
         sfs::last_write_time(plugin_path, time_point);
         if(sfs::is_symlink(plugin_path))
         {
-          const sfs::path actual_path = sfs::read_symlink(plugin_path);
-          sfs::last_write_time(actual_path, time_point);
+          // read_symlink may return a relative target, which would otherwise be
+          // resolved against the current working directory; resolve it relative
+          // to the link's own directory instead. Guard against broken links so a
+          // single bad symlink does not abort the whole write.
+          try
+          {
+            sfs::path actual_path = sfs::read_symlink(plugin_path);
+            if(actual_path.is_relative())
+              actual_path = plugin_path.parent_path() / actual_path;
+            sfs::last_write_time(actual_path, time_point);
+          }
+          catch(const sfs::filesystem_error&)
+          {
+          }
         }
       }
     }
@@ -899,12 +923,23 @@ void LootDeployer::readPluginTags()
   if(!file.is_open())
     throw std::runtime_error("Error: Could not read from \"" + tag_file_path.string() + "\".");
   Json::Value json;
-  file >> json;
+  try
+  {
+    file >> json;
+  }
+  catch(const std::exception&)
+  {
+    // A malformed .loot_tags file should not abort loading: rebuild the tags
+    // from the plugins instead, mirroring the size-mismatch fallback below.
+    file.close();
+    updatePluginTagsPrivate();
+    return;
+  }
   file.close();
-  for(int i = 0; i < json.size(); i++)
+  for(Json::ArrayIndex i = 0; i < json.size(); i++)
   {
     tags_.push_back({});
-    for(int j = 0; j < json[i].size(); j++)
+    for(Json::ArrayIndex j = 0; j < json[i].size(); j++)
     {
       const std::string tag = json[i][j].asString();
       tags_[i].push_back(tag);
@@ -920,6 +955,56 @@ void LootDeployer::readPluginTags()
     updatePluginTagsPrivate();
 }
 
+namespace
+{
+/*!
+ * \brief Percent-encodes characters in a URL that are unsafe to transmit while
+ * preserving characters that carry URL structure (scheme, host, path and query
+ * delimiters). Generalizes the previous space-only substitution so that spaces,
+ * control characters, non-ASCII bytes and other unsafe characters are encoded.
+ * \param url The URL to encode.
+ * \return The encoded URL.
+ */
+std::string encodeUrl(const std::string& url)
+{
+  // Unreserved characters (RFC 3986) plus the reserved characters that may
+  // legitimately appear unencoded in a full URL are left untouched; everything
+  // else is percent-encoded.
+  static const std::string safe_chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    "-._~"          // unreserved
+    ":/?#[]@"       // gen-delims
+    "!$&'()*+,;=";  // sub-delims
+  const auto is_hex = [](char ch)
+  { return std::isxdigit(static_cast<unsigned char>(ch)) != 0; };
+  std::string encoded;
+  encoded.reserve(url.size());
+  for(std::size_t i = 0; i < url.size(); i++)
+  {
+    const unsigned char c = static_cast<unsigned char>(url[i]);
+    // Preserve already valid percent-encoded triplets so that pre-encoded URLs
+    // are not double-encoded.
+    if(c == '%' && i + 2 < url.size() && is_hex(url[i + 1]) && is_hex(url[i + 2]))
+    {
+      encoded.push_back('%');
+      encoded.push_back(url[i + 1]);
+      encoded.push_back(url[i + 2]);
+      i += 2;
+    }
+    else if(c == '%' || safe_chars.find(static_cast<char>(c)) == std::string::npos)
+    {
+      static const char hex_digits[] = "0123456789ABCDEF";
+      encoded.push_back('%');
+      encoded.push_back(hex_digits[(c >> 4) & 0x0F]);
+      encoded.push_back(hex_digits[c & 0x0F]);
+    }
+    else
+      encoded.push_back(static_cast<char>(c));
+  }
+  return encoded;
+}
+}
+
 void LootDeployer::downloadList(std::string url, const std::string& file_name)
 {
   const std::string tmp_file_name = file_name + ".tmp";
@@ -928,18 +1013,13 @@ void LootDeployer::downloadList(std::string url, const std::string& file_name)
     throw std::runtime_error("Failed to update " + file_name + ": Could not write to: \"" +
                              dest_path_.string() + "\".");
 
-  auto pos = url.find(" ");
-  while(pos != std::string::npos)
-  {
-    url.replace(pos, 1, "%20");
-    pos = url.find(" ");
-  }
+  url = encodeUrl(url);
   cpr::Response response = cpr::Download(fstream, cpr::Url{ url });
   if(response.status_code != 200)
   {
     sfs::remove(dest_path_ / tmp_file_name);
     throw std::runtime_error("Could not download " + file_name + " from '" +
-                             LIST_URLS.at(app_type_) + "'.\nTry to update the URL in the " +
+                             url + "'.\nTry to update the URL in the " +
                              "settings. Alternatively, you can manually download the " +
                              "file and place it in '" + dest_path_.string() +
                              "'. You can disable auto updates in '" +
@@ -985,7 +1065,18 @@ void LootDeployer::loadSettingsPrivate()
     resetSettingsPrivate();
     return;
   }
-  file >> settings;
+  try
+  {
+    file >> settings;
+  }
+  catch(const std::exception&)
+  {
+    // A malformed config file should not abort loading: fall back to defaults,
+    // consistent with the other error branches above.
+    file.close();
+    resetSettingsPrivate();
+    return;
+  }
   file.close();
   if(!settings.isMember("num_profiles") || !settings.isMember("current_profile") ||
      !settings.isMember("list_download_time") || !settings.isMember("auto_update_master_list"))

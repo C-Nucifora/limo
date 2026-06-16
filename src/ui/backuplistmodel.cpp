@@ -55,7 +55,12 @@ QVariant BackupListModel::data(const QModelIndex& index, int role) const
     if(col == target_col)
       return QString::fromStdString(targets_[row].target_name);
     if(col == backup_col)
-      return QString::fromStdString(targets_[row].backup_names[targets_[row].cur_active_member]);
+    {
+      const int active = targets_[row].cur_active_member;
+      if(active < 0 || active >= static_cast<int>(targets_[row].backup_names.size()))
+        return QString();
+      return QString::fromStdString(targets_[row].backup_names[active]);
+    }
     if(col == path_col)
       return QString::fromStdString(targets_[row].path);
   }
@@ -83,7 +88,12 @@ QVariant BackupListModel::data(const QModelIndex& index, int role) const
   if(role == target_name_role && row < targets_.size())
     return QString::fromStdString(targets_[row].target_name);
   if(role == backup_name_role && row < targets_.size())
-    return QString::fromStdString(targets_[row].backup_names[targets_[row].cur_active_member]);
+  {
+    const int active = targets_[row].cur_active_member;
+    if(active < 0 || active >= static_cast<int>(targets_[row].backup_names.size()))
+      return QString();
+    return QString::fromStdString(targets_[row].backup_names[active]);
+  }
   if(role == target_path_role)
     return targets_[row].path.c_str();
   return QVariant();

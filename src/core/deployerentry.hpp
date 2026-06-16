@@ -26,7 +26,7 @@ public:
         manual_tags(std::vector<std::string>()),
         auto_tags(std::vector<std::string>()) {}
   std::string sourceName;
-  int enabled;
+  bool enabled;
   std::vector<std::string> manual_tags;
   std::vector<std::string> auto_tags;
   Json::Value toJson();

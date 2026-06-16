@@ -12,6 +12,16 @@ FomodCheckBox::FomodCheckBox(const QString& text,
   setText(text);
 }
 
+const QPixmap& FomodCheckBox::sourcePixmap()
+{
+  if(!pixmap_loaded_)
+  {
+    cached_pixmap_ = QPixmap(image_path_);
+    pixmap_loaded_ = true;
+  }
+  return cached_pixmap_;
+}
+
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 void FomodCheckBox::enterEvent(QEnterEvent* event)
 #else
@@ -19,7 +29,7 @@ void FomodCheckBox::enterEvent(QEvent* event)
 #endif
 {
   description_label_->setText(description_);
-  QPixmap pixmap(image_path_);
+  const QPixmap& pixmap = sourcePixmap();
   if(!pixmap.isNull())
   {
     // Fix limo-app/limo#97: scale to the label's actual size rather than a fixed

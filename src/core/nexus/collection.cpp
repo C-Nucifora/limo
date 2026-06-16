@@ -55,6 +55,20 @@ void Collection::init(const Json::Value& json_body)
   // Some manifests record the game domain at the top level instead.
   if(game_domain.empty() && json_body.isMember("gameId"))
     game_domain = json_body["gameId"].asString();
+  // The game domain is later turned into a nexusmods.com URL; restrict it to an
+  // allowlist of alphanumeric characters so a hostile manifest can not inject path
+  // segments or other URL components. Reject anything that does not match [a-zA-Z0-9]+.
+  bool valid_domain = !game_domain.empty();
+  for(const char c : game_domain)
+  {
+    if(!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')))
+    {
+      valid_domain = false;
+      break;
+    }
+  }
+  if(!valid_domain)
+    game_domain.clear();
 
   // Parse the mod list, preserving manifest order as the install order.
   const Json::Value& mods = json_body["mods"];

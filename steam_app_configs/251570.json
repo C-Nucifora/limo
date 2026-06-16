@@ -1,0 +1,11 @@
+{
+  "name": "7 Days to Die",
+  "deployers":
+  [
+    { "type": "Case Matching Deployer", "name": "Mods", "target_dir": "$STEAM_INSTALL_PATH$/Mods", "deploy_mode": "hard link" }
+  ],
+  "auto_tags":
+  [
+    { "name": "Mod", "expression": "0", "conditions": [ { "condition_type": "file_name", "invert": false, "search_string": "ModInfo.xml", "use_regex": false } ] }
+  ]
+}

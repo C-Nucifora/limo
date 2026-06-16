@@ -1,4 +1,5 @@
 #include "tool.h"
+#include <cctype>
 #include <cstdlib>
 #include <format>
 #include <fstream>
@@ -251,6 +252,11 @@ std::string Tool::getCommand(bool is_flatpak) const
       command += "protontricks-launch ";
     command += "--appid " + std::to_string(steam_app_id_);
     if(!protontricks_arguments_.empty())
+      // SECURITY: protontricks_arguments_ is appended verbatim and is interpreted by the
+      // shell. It is deliberately not passed through shellEscape() because it may contain
+      // multiple, individually-tokenized flags/arguments. It must therefore only ever hold
+      // trusted, user-authored content and must never be populated from mod- or
+      // network-derived data, or from tool configs imported from untrusted sources.
       command += " " + protontricks_arguments_;
   }
 
@@ -259,6 +265,11 @@ std::string Tool::getCommand(bool is_flatpak) const
   command += shellEscape(executable_path_.string());
 
   if(!arguments_.empty())
+    // SECURITY: arguments_ is appended verbatim and is interpreted by the shell. It is
+    // deliberately not passed through shellEscape() because it may contain multiple,
+    // individually-tokenized flags/arguments. It must therefore only ever hold trusted,
+    // user-authored content and must never be populated from mod- or network-derived data,
+    // or from tool configs imported from untrusted sources.
     command += " " + arguments_;
 
   return command;
@@ -407,6 +418,23 @@ void Tool::appendEnvironmentVariables(
 {
   for(const auto& [variable, value] : environment_variables)
   {
+    // Only allow variable names matching ^[A-Za-z_][A-Za-z0-9_]*$ so the name,
+    // which is interpolated into the shell command unescaped, cannot inject
+    // additional shell syntax. Skip non-conforming names.
+    if(variable.empty() ||
+       (!std::isalpha(static_cast<unsigned char>(variable[0])) && variable[0] != '_'))
+      continue;
+    bool valid_name = true;
+    for(char c : variable)
+    {
+      if(!std::isalnum(static_cast<unsigned char>(c)) && c != '_')
+      {
+        valid_name = false;
+        break;
+      }
+    }
+    if(!valid_name)
+      continue;
     if(!command.empty())
       command += " ";
     if(is_flatpak)

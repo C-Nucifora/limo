@@ -2,6 +2,7 @@
 #include "../log.h"
 #include "../pathutils.h"
 #include <algorithm>
+#include <charconv>
 #include <format>
 #include <ranges>
 #include <regex>
@@ -159,7 +160,12 @@ std::pair<std::string, std::string> FomodInstaller::getMetaData(const sfs::path&
 {
   pugi::xml_document doc;
   auto [dir_name, file_name] = getFomodPath(path, "info.xml");
-  doc.load_file((path / dir_name / file_name).c_str());
+  const sfs::path info_path = path / dir_name / file_name;
+  const pugi::xml_parse_result load_result = doc.load_file(info_path.c_str());
+  if(!load_result && sfs::exists(info_path))
+    Log::warning(std::format("Failed to parse FOMOD info file '{}': {}",
+                             info_path.string(),
+                             load_result.description()));
   return { doc.child("fomod").child_value("Name"), doc.child("fomod").child_value("Version") };
 }
 
@@ -275,7 +281,20 @@ void FomodInstaller::parseFileList(const pugi::xml_node& file_list,
       new_file.install_if_usable = install_if_usable.as_bool();
     auto priority = file.attribute("priority");
     if(priority)
-      new_file.priority = priority.as_int();
+    {
+      const std::string priority_str = priority.value();
+      int parsed_priority = 0;
+      const auto [ptr, ec] =
+        std::from_chars(priority_str.data(), priority_str.data() + priority_str.size(),
+                        parsed_priority);
+      if(ec == std::errc() && ptr == priority_str.data() + priority_str.size())
+        new_file.priority = parsed_priority;
+      else
+        Log::warning(std::format(
+          "Fomod file '{}' has a malformed priority value '{}', ignoring it.",
+          new_file.source.string(),
+          priority_str));
+    }
     target_vector.push_back(new_file);
   }
 }
@@ -286,8 +305,8 @@ void FomodInstaller::parseInstallSteps(const pugi::xml_node& steps)
   {
     InstallStep cur_step;
     cur_step.name = step.attribute("name").value();
-    if(step.child("visible"))
-      cur_step.dependencies = *(step.child("visible").children().begin());
+    if(step.child("visible").first_child())
+      cur_step.dependencies = step.child("visible").first_child();
     for(const auto& group : step.child("optionalFileGroups").children())
     {
       PluginGroup cur_group;

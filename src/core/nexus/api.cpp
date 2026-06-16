@@ -4,6 +4,7 @@
 #include "../parseerror.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
 #include <ctime>
 #include <iostream>
 #include <json/json.h>
@@ -15,6 +16,10 @@ namespace str = std::ranges;
 
 namespace
 {
+/*! \brief Request timeout (in milliseconds) applied to every NexusMods/Git HTTP call so a hung
+ * connection cannot block the calling thread indefinitely. */
+constexpr std::int32_t REQUEST_TIMEOUT_MS = 30000;
+
 /*!
  * \brief Builds the standard header set for Nexus API requests. A real User-Agent (and the
  * Nexus-recommended Application-Name/Version) is required so requests are not rejected by
@@ -55,7 +60,8 @@ Mod Api::getMod(const std::string& domain_name, long mod_id)
   cpr::Response response =
     cpr::Get(cpr::Url(std::format(
                "https://api.nexusmods.com/v1/games/{}/mods/{}.json", domain_name, mod_id)),
-             authHeader(api_key_));
+             authHeader(api_key_),
+             cpr::Timeout{ REQUEST_TIMEOUT_MS });
   if(response.status_code != 200)
     throw std::runtime_error(
       std::format("Failed to get data for mod with id {} from NexusMods. Response code was {}",
@@ -73,7 +79,13 @@ void Api::trackMod(const std::string& mod_url)
     cpr::Post(cpr::Url("https://api.nexusmods.com/v1/user/tracked_mods.json"),
               authHeader(api_key_),
               cpr::Parameters{ { "domain_name", domain_and_mod->first },
-                               { "mod_id", std::to_string(domain_and_mod->second) } });
+                               { "mod_id", std::to_string(domain_and_mod->second) } },
+              cpr::Timeout{ REQUEST_TIMEOUT_MS });
+  if(response.status_code < 200 || response.status_code >= 300)
+    throw std::runtime_error(
+      std::format("Failed to track mod \"{}\" on NexusMods. Response code was {}",
+                  mod_url,
+                  response.status_code));
 }
 
 void Api::untrackMod(const std::string& mod_url)
@@ -85,13 +97,20 @@ void Api::untrackMod(const std::string& mod_url)
     cpr::Delete(cpr::Url("https://api.nexusmods.com/v1/user/tracked_mods.json"),
                 authHeader(api_key_),
                 cpr::Parameters{ { "domain_name", domain_and_mod->first },
-                                 { "mod_id", std::to_string(domain_and_mod->second) } });
+                                 { "mod_id", std::to_string(domain_and_mod->second) } },
+                cpr::Timeout{ REQUEST_TIMEOUT_MS });
+  if(response.status_code < 200 || response.status_code >= 300)
+    throw std::runtime_error(
+      std::format("Failed to untrack mod \"{}\" on NexusMods. Response code was {}",
+                  mod_url,
+                  response.status_code));
 }
 
 std::vector<Mod> Api::getTrackedMods()
 {
   cpr::Response response = cpr::Get(cpr::Url("https://api.nexusmods.com/v1/user/tracked_mods.json"),
-                                    authHeader(api_key_));
+                                    authHeader(api_key_),
+                                    cpr::Timeout{ REQUEST_TIMEOUT_MS });
   if(response.status_code != 200)
     throw std::runtime_error(std::format(
       "Failed to get tracked mods from NexusMods. Response code was: {}", response.status_code));
@@ -103,7 +122,7 @@ std::vector<Mod> Api::getTrackedMods()
     throw ParseError("Failed to parse response from NexusMods.");
 
   std::vector<Mod> mods;
-  for(int i = 0; i < json_body.size(); i++)
+  for(Json::ArrayIndex i = 0; i < json_body.size(); i++)
     mods.push_back(
       getMod(json_body[i]["domain_name"].asString(), json_body[i]["mod_id"].asInt64()));
   return mods;
@@ -134,7 +153,8 @@ bool Api::endorseMod(const std::string& domain,
   const cpr::Response response = cpr::Post(url,
                                            cpr::Header{ { "apikey", api_key_ },
                                                         { "Content-Type", "application/json" } },
-                                           cpr::Body{ body_str });
+                                           cpr::Body{ body_str },
+                                           cpr::Timeout{ REQUEST_TIMEOUT_MS });
 
   if(response.status_code == 429)
   {
@@ -173,8 +193,9 @@ bool Api::trackMod(const std::string& domain, long mod_id, bool track)
   const cpr::Parameters params{ { "domain_name", domain } };
   const cpr::Payload payload{ { "mod_id", std::to_string(mod_id) } };
 
-  cpr::Response response = track ? cpr::Post(url, header, params, payload)
-                                 : cpr::Delete(url, header, params, payload);
+  cpr::Response response =
+    track ? cpr::Post(url, header, params, payload, cpr::Timeout{ REQUEST_TIMEOUT_MS })
+          : cpr::Delete(url, header, params, payload, cpr::Timeout{ REQUEST_TIMEOUT_MS });
 
   const std::string action = track ? "track" : "untrack";
   if(response.status_code == 429)
@@ -210,7 +231,7 @@ std::vector<std::pair<std::string, long>> Api::getTrackedModIds()
   }
 
   cpr::Response response = cpr::Get(cpr::Url("https://api.nexusmods.com/v1/user/tracked_mods.json"),
-                                    cpr::Header{ { "apikey", api_key_ } });
+                                    authHeader(api_key_));
   if(response.status_code == 429)
   {
     std::cerr << "NexusMods: rate limited while fetching tracked mods." << std::endl;
@@ -233,7 +254,7 @@ std::vector<std::pair<std::string, long>> Api::getTrackedModIds()
   }
 
   std::vector<std::pair<std::string, long>> mods;
-  for(int i = 0; i < json_body.size(); i++)
+  for(Json::ArrayIndex i = 0; i < json_body.size(); i++)
     mods.emplace_back(json_body[i]["domain_name"].asString(), json_body[i]["mod_id"].asInt64());
   return mods;
 }
@@ -391,7 +412,7 @@ std::vector<std::pair<std::string, std::vector<std::string>>> Api::getChangelogs
   {
     std::vector<std::string> changes;
     auto log = json_body[key];
-    for(int i = 0; i < log.size(); i++)
+    for(Json::ArrayIndex i = 0; i < log.size(); i++)
       changes.push_back(log[i].asString());
     changelogs.emplace_back(key, changes);
   }
@@ -410,7 +431,14 @@ std::vector<std::pair<std::string, std::vector<std::string>>> Api::getChangelogs
               while(std::regex_search(target, match, regex))
               {
                 found = true;
-                a_parts.push_back(std::stoi(match[1]));
+                try
+                {
+                  a_parts.push_back(std::stoi(match[1]));
+                }
+                catch(const std::exception&)
+                {
+                  a_parts.push_back(0);
+                }
                 target = match[2];
               }
               if(!found)
@@ -421,7 +449,14 @@ std::vector<std::pair<std::string, std::vector<std::string>>> Api::getChangelogs
               while(std::regex_search(target, match, regex))
               {
                 found = true;
-                b_parts.push_back(std::stoi(match[1]));
+                try
+                {
+                  b_parts.push_back(std::stoi(match[1]));
+                }
+                catch(const std::exception&)
+                {
+                  b_parts.push_back(0);
+                }
                 target = match[2];
               }
               if(!found)
@@ -444,7 +479,7 @@ std::vector<std::pair<std::string, std::vector<std::string>>> Api::getModChangel
   cpr::Response response = cpr::Get(
     cpr::Url(std::format(
       "https://api.nexusmods.com/v1/games/{}/mods/{}/changelogs.json", domain_name, mod_id)),
-    cpr::Header{ { "apikey", api_key_ } });
+    authHeader(api_key_));
   if(response.status_code != 200)
   {
     Log::error(std::format(
@@ -467,7 +502,7 @@ std::vector<std::pair<std::string, std::vector<std::string>>> Api::getModChangel
   {
     std::vector<std::string> changes;
     auto log = json_body[key];
-    for(int i = 0; i < log.size(); i++)
+    for(Json::ArrayIndex i = 0; i < log.size(); i++)
       changes.push_back(log[i].asString());
     changelogs.emplace_back(key, changes);
   }
@@ -486,7 +521,14 @@ std::vector<std::pair<std::string, std::vector<std::string>>> Api::getModChangel
               while(std::regex_search(target, match, regex))
               {
                 found = true;
-                a_parts.push_back(std::stoi(match[1]));
+                try
+                {
+                  a_parts.push_back(std::stoi(match[1]));
+                }
+                catch(const std::exception&)
+                {
+                  a_parts.push_back(0);
+                }
                 target = match[2];
               }
               if(!found)
@@ -497,7 +539,14 @@ std::vector<std::pair<std::string, std::vector<std::string>>> Api::getModChangel
               while(std::regex_search(target, match, regex))
               {
                 found = true;
-                b_parts.push_back(std::stoi(match[1]));
+                try
+                {
+                  b_parts.push_back(std::stoi(match[1]));
+                }
+                catch(const std::exception&)
+                {
+                  b_parts.push_back(0);
+                }
                 target = match[2];
               }
               if(!found)
@@ -537,7 +586,7 @@ std::optional<std::pair<std::string, bool>> Api::validateKey(const std::string& 
   Json::Reader reader;
   bool success = reader.parse(response.text.c_str(), json_body);
   if(!success)
-    throw ParseError("Failed to parse response from NexusMods.");
+    return {};
 
   return { { json_body["name"].asString(), json_body["is_premium"].asBool() } };
 }
@@ -548,6 +597,10 @@ std::string Api::getNexusPageUrl(const std::string& nxm_url)
   std::smatch match;
   if(!std::regex_match(nxm_url, match, nxm_regex))
     throw std::runtime_error("Invalid nxm url: \"" + nxm_url + "\".");
+  // Security: the domain is interpolated into the page URL; reject anything but a plain
+  // game-domain token (consistent with the rest of the API).
+  if(!std::regex_match(match[1].str(), std::regex("[a-zA-Z0-9]+")))
+    throw std::runtime_error("Invalid game domain in nxm url: \"" + nxm_url + "\".");
   return std::format("https://www.nexusmods.com/{}/mods/{}", match[1].str(), match[2].str());
 }
 
@@ -556,12 +609,28 @@ std::string Api::getApiKey()
   return api_key_;
 }
 
-std::optional<std::pair<std::string, int>> Api::extractDomainAndModId(const std::string& mod_url)
+std::optional<std::pair<std::string, long>> Api::extractDomainAndModId(const std::string& mod_url)
 {
   const std::regex regex(R"((?:https:\/\/)?www\.nexusmods\.com\/(.+)\/mods\/(\d+).*)");
   std::smatch match;
   if(std::regex_match(mod_url, match, regex))
-    return { { match[1], std::stoi(match[2]) } };
+  {
+    const std::string domain = match[1];
+    // Security: domain is interpolated into the API URL path; reject anything but a plain
+    // game-domain token so a crafted URL cannot redirect the call to another endpoint.
+    if(!std::regex_match(domain, std::regex("[a-zA-Z0-9]+")))
+      return {};
+    // Parse the mod id as a long so large Nexus ids are not truncated, and guard against
+    // std::stoll throwing on overflow/invalid input.
+    try
+    {
+      return { { domain, std::stoll(match[2]) } };
+    }
+    catch(const std::exception&)
+    {
+      return {};
+    }
+  }
   return {};
 }
 
@@ -630,9 +699,7 @@ std::vector<SearchResult> Api::fetchModListing(const std::string& domain_name,
   cpr::Response response = cpr::Get(
     cpr::Url(std::format(
       "https://api.nexusmods.com/v1/games/{}/mods/{}.json", domain_name, endpoint)),
-    cpr::Header{ { "apikey", api_key_ },
-                 { "User-Agent", "Limo" },
-                 { "Accept", "application/json" } });
+    authHeader(api_key_));
 
   if(response.status_code == 429)
   {
@@ -662,7 +729,7 @@ std::vector<SearchResult> Api::fetchModListing(const std::string& domain_name,
   }
 
   // The listing endpoints return a plain JSON array of mods.
-  for(int i = 0; i < json_body.size(); i++)
+  for(Json::ArrayIndex i = 0; i < json_body.size(); i++)
   {
     try
     {

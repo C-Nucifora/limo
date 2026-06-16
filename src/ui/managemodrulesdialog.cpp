@@ -48,8 +48,12 @@ void ManageModRulesDialog::refreshTable()
   {
     int row = ui->rules_table->rowCount();
     ui->rules_table->insertRow(row);
-    ui->rules_table->setItem(row, 0,
-      new QTableWidgetItem(QString::fromStdString(ModRule::typeLabel(rule.type))));
+    auto* type_item =
+      new QTableWidgetItem(QString::fromStdString(ModRule::typeLabel(rule.type)));
+    // Store the index into rules_ so removal resolves correctly even if the
+    // table view is ever sorted (view row != vector index in that case).
+    type_item->setData(Qt::UserRole, static_cast<int>(&rule - &rules_[0]));
+    ui->rules_table->setItem(row, 0, type_item);
     auto it = id_to_name_.find(rule.target_mod_id);
     const QString target_name = (it != id_to_name_.end())
                                   ? it->second
@@ -94,10 +98,18 @@ void ManageModRulesDialog::on_add_rule_button_clicked()
 void ManageModRulesDialog::on_remove_rule_button_clicked()
 {
   const int row = ui->rules_table->currentRow();
-  if(row < 0 || row >= static_cast<int>(rules_.size()))
+  if(row < 0)
     return;
 
-  rules_.erase(rules_.begin() + row);
+  QTableWidgetItem* type_item = ui->rules_table->item(row, 0);
+  if(type_item == nullptr)
+    return;
+
+  const int rule_index = type_item->data(Qt::UserRole).toInt();
+  if(rule_index < 0 || rule_index >= static_cast<int>(rules_.size()))
+    return;
+
+  rules_.erase(rules_.begin() + rule_index);
   refreshTable();
   emitChanged();
 }

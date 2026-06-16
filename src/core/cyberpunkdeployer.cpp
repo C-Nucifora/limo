@@ -84,15 +84,23 @@ bool CyberpunkDeployer::isOrderedArchive(const sfs::path& relative_path) const
 }
 
 sfs::path CyberpunkDeployer::destinationPath(const sfs::path& relative_path,
-                                             int loadorder_index) const
+                                             int loadorder_index,
+                                             std::size_t loadorder_size) const
 {
   if(!isOrderedArchive(relative_path))
     return relative_path;
   // Prepend a zero padded load order prefix to the file name only; keep the directory intact.
-  // TODO(cp2077): load orders with more than 9999 mods would break the fixed 4 digit width; this
-  // is far beyond any realistic Cyberpunk setup, so a wider field is not currently warranted.
+  // The prefix width is derived from the load order size (number of digits in the largest possible
+  // index, loadorder_size - 1) so that lexicographic ordering of the prefixes always matches the
+  // numeric load order, even for setups with more than 9999 mods. A minimum width of 4 is kept so
+  // the naming is unchanged for typical Cyberpunk setups.
+  int digits = 1;
+  for(std::size_t max_index = loadorder_size > 0 ? loadorder_size - 1 : 0; max_index >= 10;
+      max_index /= 10)
+    digits++;
+  const int width = std::max(4, digits);
   const std::string prefixed_name =
-    std::format("{:04d}_{}", loadorder_index, relative_path.filename().string());
+    std::format("{:0{}d}_{}", loadorder_index, width, relative_path.filename().string());
   return relative_path.parent_path() / prefixed_name;
 }
 
@@ -125,7 +133,7 @@ CyberpunkDeployer::getDeploymentMaps(const std::vector<int>& loadorder) const
       if(!is_regular_file && !dir_entry.is_directory())
         continue;
       const sfs::path relative_path = pu::getRelativePath(dir_entry.path(), mod_base_path);
-      const sfs::path dest_relative_path = destinationPath(relative_path, i);
+      const sfs::path dest_relative_path = destinationPath(relative_path, i, loadorder.size());
       if(source_files.insert({ dest_relative_path, loadorder[i] }).second)
         source_paths[dest_relative_path] = relative_path;
     }
@@ -181,12 +189,32 @@ void CyberpunkDeployer::deployFilesWithRemap(
     sfs::create_directories(parent_path);
     removeManagedDirFile(parent_path);
     sfs::remove(dest_path);
-    if(deploy_mode_ == copy)
-      sfs::copy_file(source_path, dest_path);
-    else if(deploy_mode_ == sym_link)
-      sfs::create_symlink(source_path, dest_path);
-    else
-      sfs::create_hard_link(source_path, dest_path);
+    try
+    {
+      if(deploy_mode_ == copy)
+        sfs::copy_file(source_path, dest_path);
+      else if(deploy_mode_ == sym_link)
+        sfs::create_symlink(source_path, dest_path);
+      else
+        sfs::create_hard_link(source_path, dest_path);
+    }
+    catch(const sfs::filesystem_error& e)
+    {
+      // Hard links can't span filesystems; under Flatpak the sandbox can also place the staging and
+      // target dirs on different mounts. Give actionable guidance instead of the raw errno
+      // (limo-app/limo#13, #143). Mirrors Deployer::deployFiles.
+      if(deploy_mode_ == hard_link && e.code() == std::errc::cross_device_link)
+        throw std::runtime_error(std::format(
+          "Deployer '{}': cannot hard link onto the target because the staging directory and the "
+          "game directory are on different filesystems (or separated by the Flatpak sandbox). Use "
+          "the 'Sym Link' or 'Copy' deploy mode, move the staging directory onto the same filesystem "
+          "as the game, or grant Limo access to both locations (e.g. via Flatseal). Affected file: "
+          "'{}' -> '{}'.",
+          name_,
+          source_path.string(),
+          dest_path.string()));
+      throw;
+    }
 
     if(progress_node)
       (*progress_node)->advance();

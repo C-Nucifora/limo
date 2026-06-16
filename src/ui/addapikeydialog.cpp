@@ -41,6 +41,10 @@ void AddApiKeyDialog::on_buttonBox_accepted()
 {
   if(dialog_completed_)
     return;
+
+  if(ui->key_field->text().trimmed().isEmpty())
+    return;
+
   dialog_completed_ = true;
 
   accept();

@@ -56,7 +56,9 @@ public:
     mods_.clear();
     for(int mod : mods)
     {
-      if(evaluator_.evaluate(files.at(mod)))
+      const auto files_iter = files.find(mod);
+      const std::vector<std::pair<std::string, std::string>> empty_files;
+      if(evaluator_.evaluate(files_iter != files.end() ? files_iter->second : empty_files))
         mods_.push_back(mod);
       if(progress_node)
         (*progress_node)->advance();
@@ -93,7 +95,9 @@ public:
       auto iter = std::ranges::find(mods_, mod);
       if(iter != mods_.end())
         mods_.erase(iter);
-      if(evaluator_.evaluate(files.at(mod)))
+      const auto files_iter = files.find(mod);
+      const std::vector<std::pair<std::string, std::string>> empty_files;
+      if(evaluator_.evaluate(files_iter != files.end() ? files_iter->second : empty_files))
         mods_.push_back(mod);
       if(progress_node)
         (*progress_node)->advance();
@@ -168,7 +172,7 @@ public:
       for(const auto& dir_entry : std::filesystem::recursive_directory_iterator(mod_path))
       {
         std::string path = path_utils::getRelativePath(dir_entry.path(), mod_path);
-        if(path.front() == '/')
+        if(!path.empty() && path.front() == '/')
           path.erase(0, 1);
         files[mod].emplace_back(path, dir_entry.path().filename().string());
       }

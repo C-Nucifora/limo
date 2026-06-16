@@ -553,6 +553,8 @@ else()
             DESTINATION ${LIMO_INSTALL_PREFIX}/share/icons/hicolor/512x512/apps)
   install(FILES install_files/limo.desktop
             DESTINATION ${LIMO_INSTALL_PREFIX}/share/applications)
+  install(FILES flatpak/io.github.limo_app.limo.metainfo.xml
+            DESTINATION ${LIMO_INSTALL_PREFIX}/share/metainfo)
   install(FILES install_files/changelogs.json
             DESTINATION ${LIMO_INSTALL_PREFIX}/share/limo)
 endif()

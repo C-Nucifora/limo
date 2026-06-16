@@ -1,9 +1,11 @@
 #include "importfromsteamdialog.h"
 #include "../core/log.h"
+#include "addappdialog.h"
 #include "ui_importfromsteamdialog.h"
 #include <QDebug>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QSettings>
 #include <QStandardPaths>
 #include <fstream>
@@ -22,6 +24,14 @@ ImportFromSteamDialog::ImportFromSteamDialog(QWidget* parent) :
 {
   ui->setupUi(this);
   setWindowTitle("Import App");
+  // Batch action: add every game Limo has a preset for in one go.
+  QPushButton* add_all_button =
+    ui->buttonBox->addButton("Add all supported", QDialogButtonBox::ActionRole);
+  add_all_button->setToolTip("Add every detected game that Limo has a preset for");
+  connect(add_all_button,
+          &QPushButton::clicked,
+          this,
+          &ImportFromSteamDialog::onAddAllSupportedClicked);
   QString path = QSettings(QCoreApplication::applicationName()).value("import/path", "").toString();
   if(!path.isEmpty() && pathIsValid(path.toStdString()))
     ui->path_field->setText(path);
@@ -137,9 +147,43 @@ void ImportFromSteamDialog::updateTable(sfs::path steam_dir)
   ui->app_table->resizeColumnToContents(0);
   ui->app_table->resizeColumnToContents(1);
   ui->app_table->resizeColumnToContents(2);
+  ui->app_table->resizeColumnToContents(4);
   ui->app_table->sortByColumn(0, Qt::AscendingOrder);
   ui->app_table->setSortingEnabled(true);
+  applyFilters();
   ui->search_field->setFocus();
+}
+
+void ImportFromSteamDialog::applyFilters()
+{
+  const QString search = ui->search_field->text();
+  const bool supported_only = ui->supported_only_checkbox->isChecked();
+  for(int i = 0; i < ui->app_table->rowCount(); i++)
+  {
+    const QTableWidgetItem* name_item = ui->app_table->item(i, 0);
+    const QTableWidgetItem* preset_item = ui->app_table->item(i, 4);
+    bool hide = false;
+    if(!search.isEmpty() && name_item && !name_item->text().contains(search, Qt::CaseInsensitive))
+      hide = true;
+    if(supported_only && !(preset_item && preset_item->data(Qt::UserRole).toBool()))
+      hide = true;
+    ui->app_table->setRowHidden(i, hide);
+  }
+}
+
+QString ImportFromSteamDialog::autoPrefixForRow(int row) const
+{
+  if(row < 0 || row >= ui->app_table->rowCount())
+    return "";
+  const QTableWidgetItem* app_id_item = ui->app_table->item(row, 1);
+  const QTableWidgetItem* prefix_item = ui->app_table->item(row, 2);
+  const QTableWidgetItem* path_item = ui->app_table->item(row, 3);
+  if(!app_id_item || !prefix_item || !path_item || prefix_item->text() != "True")
+    return "";
+  sfs::path path(path_item->text().toStdString());
+  return (path.parent_path().parent_path() / "compatdata" / app_id_item->text().toStdString() /
+          "pfx" / "drive_c")
+    .c_str();
 }
 
 std::optional<std::string> ImportFromSteamDialog::parseVdfValue(const std::string& line,
@@ -257,6 +301,12 @@ bool ImportFromSteamDialog::addTableRow(std::string app_id,
   ui->app_table->setItem(row, 1, new QTableWidgetItem(app_id.c_str()));
   ui->app_table->setItem(row, 2, new QTableWidgetItem(has_prefix));
   ui->app_table->setItem(row, 3, new QTableWidgetItem(full_path.c_str()));
+  // Column 4: flag whether Limo ships a preset for this app so the user can see at a
+  // glance which installed games can be auto-configured (and filter to just those).
+  const bool supported = AddAppDialog::hasGameConfig(app_id);
+  auto* preset_item = new QTableWidgetItem(supported ? QString("✓ Yes") : QString());
+  preset_item->setData(Qt::UserRole, supported);
+  ui->app_table->setItem(row, 4, preset_item);
   return true;
 }
 
@@ -276,17 +326,22 @@ void ImportFromSteamDialog::on_buttonBox_accepted()
   int row = ui->app_table->currentRow();
   if(row < 0 || row >= ui->app_table->rowCount())
     return;
-  QString name = ui->app_table->item(row, 0)->text();
-  QString icon_path = ui->app_table->item(row, 0)->data(Qt::UserRole).toString();
+  QTableWidgetItem* name_item = ui->app_table->item(row, 0);
+  QTableWidgetItem* app_id_item = ui->app_table->item(row, 1);
+  QTableWidgetItem* prefix_item = ui->app_table->item(row, 2);
+  QTableWidgetItem* path_item = ui->app_table->item(row, 3);
+  if(!name_item || !app_id_item || !prefix_item || !path_item)
+    return;
+  QString name = name_item->text();
+  QString icon_path = name_item->data(Qt::UserRole).toString();
   if(!sfs::exists(icon_path.toStdString()))
     icon_path = "";
-  QString app_id = ui->app_table->item(row, 1)->text();
-  sfs::path path(ui->app_table->item(row, 3)->text().toStdString());
-  QString prefix_path = "";
-  if(ui->app_table->item(row, 2)->text() == "True")
-    prefix_path =
-      (path.parent_path().parent_path() / "compatdata" / app_id.toStdString() / "pfx" / "drive_c")
-        .c_str();
+  QString app_id = app_id_item->text();
+  sfs::path path(path_item->text().toStdString());
+  // Use whatever is in the prefix field: it is auto-populated from the detected Proton
+  // prefix on selection, but the user may have overridden it for a non-standard prefix.
+  QString prefix_path = ui->prefix_field->text().trimmed();
+  (void)prefix_item;
   emit applicationImported(name, app_id, path.string().c_str(), prefix_path, icon_path);
 }
 
@@ -295,17 +350,67 @@ void ImportFromSteamDialog::on_path_field_editingFinished()
   updateTable(ui->path_field->text().toStdString());
 }
 
-void ImportFromSteamDialog::on_search_field_textEdited(const QString& new_text)
+void ImportFromSteamDialog::on_search_field_textEdited(const QString& /*new_text*/)
 {
-  if(new_text.isEmpty())
+  applyFilters();
+}
+
+void ImportFromSteamDialog::on_supported_only_checkbox_toggled(bool /*checked*/)
+{
+  applyFilters();
+}
+
+void ImportFromSteamDialog::on_app_table_itemSelectionChanged()
+{
+  // Show the auto-detected prefix for the selected game so the user can review or
+  // override it (e.g. for a non-standard STEAM_COMPAT_DATA_PATH or a manual WINEPREFIX).
+  ui->prefix_field->setText(autoPrefixForRow(ui->app_table->currentRow()));
+}
+
+void ImportFromSteamDialog::on_pick_prefix_button_clicked()
+{
+  QString starting_dir = ui->prefix_field->text();
+  if(starting_dir.isEmpty() || !sfs::exists(starting_dir.toStdString()))
+    starting_dir = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+  const QString path = QFileDialog::getExistingDirectory(
+    this, "Select prefix drive_c Directory", starting_dir, QFileDialog::ShowDirsOnly);
+  if(!path.isEmpty())
+    ui->prefix_field->setText(path);
+}
+
+void ImportFromSteamDialog::onAddAllSupportedClicked()
+{
+  QList<QStringList> games;
+  for(int i = 0; i < ui->app_table->rowCount(); i++)
   {
-    for(int i = 0; i < ui->app_table->rowCount(); i++)
-      ui->app_table->setRowHidden(i, false);
+    const QTableWidgetItem* preset_item = ui->app_table->item(i, 4);
+    if(!preset_item || !preset_item->data(Qt::UserRole).toBool())
+      continue;
+    const QTableWidgetItem* name_item = ui->app_table->item(i, 0);
+    const QTableWidgetItem* app_id_item = ui->app_table->item(i, 1);
+    const QTableWidgetItem* path_item = ui->app_table->item(i, 3);
+    if(!name_item || !app_id_item || !path_item)
+      continue;
+    QString icon_path = name_item->data(Qt::UserRole).toString();
+    if(!sfs::exists(icon_path.toStdString()))
+      icon_path = "";
+    games.append(QStringList{
+      name_item->text(), app_id_item->text(), path_item->text(), autoPrefixForRow(i), icon_path });
   }
-  else
+  if(games.isEmpty())
   {
-    for(int i = 0; i < ui->app_table->rowCount(); i++)
-      ui->app_table->setRowHidden(
-        i, !ui->app_table->item(i, 0)->text().contains(new_text, Qt::CaseInsensitive));
+    QMessageBox::information(
+      this, "No supported games", "None of the detected games have a Limo preset to import.");
+    return;
   }
+  if(QMessageBox::question(
+       this,
+       "Add all supported games",
+       QString("Add %1 supported game(s)? You will be asked for a parent folder to hold each "
+               "game's mod staging directory.")
+         .arg(games.size())) != QMessageBox::Yes)
+    return;
+  dialog_completed_ = true;
+  emit addAllSupportedRequested(games);
+  accept();
 }

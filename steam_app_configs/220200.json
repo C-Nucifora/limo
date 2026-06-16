@@ -1,0 +1,12 @@
+{
+  "name": "Kerbal Space Program",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "GameData",
+      "target_dir": "$STEAM_INSTALL_PATH$/GameData",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

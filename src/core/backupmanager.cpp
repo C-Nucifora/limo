@@ -129,12 +129,26 @@ void BackupManager::setActiveBackup(int target_id, int backup_id)
   auto& target = targets_[target_id];
   if(backup_id < 0 || backup_id >= target.backup_names.size())
     throw std::runtime_error(
-      std::format("Invalid backup id: {} for target: \"{}\"", target.target_name, backup_id));
+      std::format("Invalid backup id: {} for target: \"{}\"", backup_id, target.target_name));
   int active_id = target.active_members[cur_profile_];
   if(backup_id == active_id)
     return;
-  sfs::rename(target.path, getBackupPath(target.path, active_id));
-  sfs::rename(getBackupPath(target.path, backup_id), target.path);
+  const sfs::path saved_active_path = getBackupPath(target.path, active_id);
+  const sfs::path new_active_path = getBackupPath(target.path, backup_id);
+  if(!sfs::exists(new_active_path))
+    throw std::runtime_error(std::format(
+      "Backup \"{}\" for target \"{}\" does not exist.", backup_id, target.target_name));
+  sfs::rename(target.path, saved_active_path);
+  try
+  {
+    sfs::rename(new_active_path, target.path);
+  }
+  catch(...)
+  {
+    // Roll back the first rename so the live target is never left missing.
+    sfs::rename(saved_active_path, target.path);
+    throw;
+  }
   target.active_members[cur_profile_] = backup_id;
   target.cur_active_member = backup_id;
   updateSettings();
@@ -288,7 +302,17 @@ void BackupManager::updateDirectories(int target_id)
       extension.replace(0, 1, "");
     if(extension.find_first_not_of("0123456789") != extension.npos)
       continue;
-    int id = std::stoi(extension);
+    int id;
+    try
+    {
+      id = std::stoi(extension);
+    }
+    catch(const std::exception&)
+    {
+      // Un-parseable or overflowing ids are treated as unknown backups and moved aside.
+      extra_dirs.push_back(dir_entry.path());
+      continue;
+    }
     if(id >= targets_[target_id].backup_names.size() ||
        id == targets_[target_id].active_members[cur_profile_])
       extra_dirs.push_back(dir_entry.path());

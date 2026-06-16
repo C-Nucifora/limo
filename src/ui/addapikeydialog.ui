@@ -22,7 +22,11 @@
     </widget>
    </item>
    <item>
-    <widget class="QLineEdit" name="key_field"/>
+    <widget class="QLineEdit" name="key_field">
+     <property name="echoMode">
+      <enum>QLineEdit::Password</enum>
+     </property>
+    </widget>
    </item>
    <item>
     <widget class="QLabel" name="label_2">

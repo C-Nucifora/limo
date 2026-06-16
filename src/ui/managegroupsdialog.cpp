@@ -163,6 +163,11 @@ void ManageGroupsDialog::on_rename_button_clicked()
   if(current_group_ < 0 || current_group_ >= (int)group_names_.size())
     return;
   const QString new_name = ui->name_edit->text().trimmed();
+  if(new_name.isEmpty())
+  {
+    QMessageBox::warning(this, "Rename Group", "Group name cannot be empty.");
+    return;
+  }
   pending_names_[current_group_] = new_name.toStdString();
 
   // Update the list widget label to reflect the staged rename (marked with *)

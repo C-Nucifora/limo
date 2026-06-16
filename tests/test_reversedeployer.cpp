@@ -89,17 +89,13 @@ TEST_CASE("Managed files are updated", "[revdepl]")
 TEST_CASE("Deployed files are ignored", "[revdepl]")
 {
   resetDirs();
-  std::cout << "Resetting directories..." << std::endl;
   Deployer depl(DATA_DIR / "source" / "revdepl" / "data",
                 DATA_DIR / "target" / "revdepl" / "target",
                 "depl");
-  std::cout << "Adding profile..." << std::endl;
   depl.addProfile();
-  std::cout << "Adding mod..." << std::endl;
   depl.addMod(0);
   depl.deploy();
-  std::cout << "Files deployed." << std::endl;
-  
+
   std::vector<std::string> managed_target;
   for(const auto& dir_entry : 
       sfs::recursive_directory_iterator(DATA_DIR / "target" / "revdepl" / "extra_files"))

@@ -40,6 +40,11 @@ void ModioProvider::setApiKey(const std::string& key)
   api_key_ = key;
 }
 
+void ModioProvider::setOAuthToken(const std::string& token)
+{
+  oauth_token_ = token;
+}
+
 void ModioProvider::requireKey() const
 {
   if(api_key_.empty())
@@ -55,30 +60,34 @@ void ModioProvider::requireKey() const
 RemoteMod ModioProvider::modObjectToRemoteMod(const Json::Value& obj)
 {
   RemoteMod mod;
-  mod.id      = std::to_string(obj["id"].asInt64());
-  mod.name    = obj["name"].asString();
-  mod.summary = obj["summary"].asString();
-  if(obj.isMember("submitted_by") && obj["submitted_by"].isMember("username"))
+  mod.id      = obj["id"].isIntegral() ? std::to_string(obj["id"].asInt64()) : "";
+  mod.name    = obj["name"].isString() ? obj["name"].asString() : "";
+  mod.summary = obj["summary"].isString() ? obj["summary"].asString() : "";
+  if(obj.isMember("submitted_by") && obj["submitted_by"].isMember("username")
+     && obj["submitted_by"]["username"].isString())
     mod.author = obj["submitted_by"]["username"].asString();
 
   // Logo URL — use "original" if available, else first size
   if(obj.isMember("logo"))
   {
     const Json::Value& logo = obj["logo"];
-    mod.icon_url = logo.isMember("original") ? logo["original"].asString()
-                   : logo.isMember("thumb_320x180") ? logo["thumb_320x180"].asString()
+    mod.icon_url = logo["original"].isString() ? logo["original"].asString()
+                   : logo["thumb_320x180"].isString() ? logo["thumb_320x180"].asString()
                    : "";
   }
 
   // mod.io exposes stats.downloads_total
-  if(obj.isMember("stats") && obj["stats"].isMember("downloads_total"))
+  if(obj.isMember("stats") && obj["stats"].isMember("downloads_total")
+     && obj["stats"]["downloads_total"].isIntegral())
     mod.total_downloads = obj["stats"]["downloads_total"].asInt64();
 
   // Latest release version from modfile subobject (if present)
-  if(obj.isMember("modfile") && !obj["modfile"].isNull())
+  if(obj.isMember("modfile") && obj["modfile"].isObject()
+     && obj["modfile"]["version"].isString())
     mod.version = obj["modfile"]["version"].asString();
 
-  mod.page_url = obj.isMember("profile_url") ? obj["profile_url"].asString() : "";
+  mod.page_url =
+    obj["profile_url"].isString() ? obj["profile_url"].asString() : "";
 
   Json::FastWriter writer;
   mod.extra_json = writer.write(obj);
@@ -88,19 +97,20 @@ RemoteMod ModioProvider::modObjectToRemoteMod(const Json::Value& obj)
 RemoteFile ModioProvider::modfileToRemoteFile(const Json::Value& obj)
 {
   RemoteFile file;
-  file.id      = std::to_string(obj["id"].asInt64());
-  file.version = obj.isMember("version") ? obj["version"].asString() : "";
+  file.id      = obj["id"].isIntegral() ? std::to_string(obj["id"].asInt64()) : "";
+  file.version = obj["version"].isString() ? obj["version"].asString() : "";
   // "filename" is the original archive name
-  file.name    = obj.isMember("filename") ? obj["filename"].asString() : file.id;
+  file.name    = obj["filename"].isString() ? obj["filename"].asString() : file.id;
   // mod.io exposes file size in bytes under "filesize"
-  file.size_bytes  = obj.isMember("filesize") ? obj["filesize"].asInt64() : 0;
-  file.description = obj.isMember("changelog") ? obj["changelog"].asString() : "";
+  file.size_bytes  = obj["filesize"].isIntegral() ? obj["filesize"].asInt64() : 0;
+  file.description = obj["changelog"].isString() ? obj["changelog"].asString() : "";
   // date_added is a Unix timestamp
-  file.uploaded_at = obj.isMember("date_added")
+  file.uploaded_at = obj["date_added"].isIntegral()
                        ? std::to_string(obj["date_added"].asInt64())
                        : "";
   // binary_url is the direct CDN link; present for public mods without auth
-  if(obj.isMember("download") && !obj["download"].isNull())
+  if(obj.isMember("download") && obj["download"].isObject()
+     && obj["download"]["binary_url"].isString())
     file.download_url = obj["download"]["binary_url"].asString();
   return file;
 }
@@ -200,28 +210,78 @@ std::vector<RemoteFile> ModioProvider::getFiles(const std::string& community,
   return files;
 }
 
+std::string ModioProvider::getAuthenticatedDownloadUrl(const std::string& community,
+                                                        const std::string& mod_id,
+                                                        const std::string& file_id) const
+{
+  if(oauth_token_.empty())
+    throw std::runtime_error(
+      "mod.io: this file requires authentication, but no OAuth token is "
+      "configured. Obtain a mod.io OAuth access token (mod.io account → "
+      "API access) and call setOAuthToken() before downloading.");
+
+  // GET /v1/games/{game_id}/mods/{mod_id}/files/{file_id}/download with a
+  // Bearer token. mod.io answers with a 302 redirect to a time-limited CDN
+  // URL; capture the Location rather than following it so the caller can
+  // hand the bare URL to the download manager.
+  const std::string url = std::format(
+    "{}/games/{}/mods/{}/files/{}/download", BASE_URL, community, mod_id, file_id);
+  cpr::Response response =
+    cpr::Get(cpr::Url(url),
+             cpr::Header{ { "User-Agent", USER_AGENT },
+                          { "Accept", "application/json" },
+                          { "Authorization", std::format("Bearer {}", oauth_token_) } },
+             cpr::Redirect(false));
+
+  if(response.status_code == 401 || response.status_code == 403)
+    throw std::runtime_error(
+      std::format("mod.io: authentication failed for file \"{}\" of mod \"{}\" "
+                  "(HTTP {}). The OAuth token may be invalid, expired, or lack "
+                  "access to this mod.",
+                  file_id,
+                  mod_id,
+                  response.status_code));
+
+  // 302/303 carry the resolved CDN URL in the Location header.
+  if(response.status_code >= 300 && response.status_code < 400)
+  {
+    const auto it = response.header.find("location");
+    if(it != response.header.end() && !it->second.empty())
+      return it->second;
+    if(!response.url.str().empty() && response.url.str() != url)
+      return response.url.str();
+    throw std::runtime_error(
+      std::format("mod.io: authenticated download for file \"{}\" of mod \"{}\" "
+                  "did not return a redirect location.",
+                  file_id,
+                  mod_id));
+  }
+
+  throw std::runtime_error(
+    std::format("mod.io: authenticated download failed for file \"{}\" of mod "
+                "\"{}\". HTTP {}.",
+                file_id,
+                mod_id,
+                response.status_code));
+}
+
 std::string ModioProvider::getDownloadUrl(const std::string& community,
                                            const std::string& mod_id,
                                            const std::string& file_id)
 {
   // For public mods the binary_url is embedded in the modfile object; use
   // getFiles to find the matching entry rather than an extra request.
-  // TODO(limo-app/limo#60): for subscriber-only mods, implement the OAuth
-  //   token flow: POST /v1/oauth/emailrequest then POST /v1/oauth/emailexchange
-  //   to obtain a bearer token, then GET with Authorization: Bearer {token}.
   const std::vector<RemoteFile> files = getFiles(community, mod_id);
   for(const auto& f : files)
   {
     if(f.id == file_id)
     {
-      if(f.download_url.empty())
-        throw std::runtime_error(
-          std::format("mod.io: no public download URL for file \"{}\" of mod \"{}\". "
-                      "The mod may require authentication (OAuth token flow — "
-                      "see limo-app/limo#60).",
-                      file_id,
-                      mod_id));
-      return f.download_url;
+      if(!f.download_url.empty())
+        return f.download_url;
+      // No public CDN URL: the mod requires authentication. Resolve via the
+      // authenticated download endpoint (OAuth bearer token); this surfaces a
+      // clear message if no token has been configured.
+      return getAuthenticatedDownloadUrl(community, mod_id, file_id);
     }
   }
   throw std::runtime_error(

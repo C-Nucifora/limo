@@ -92,6 +92,8 @@ void moveFilesToDirectory(const sfs::path& source, const sfs::path& destination,
 
 std::string normalizePath(const std::string& path)
 {
+  // Only swaps separators; does not lexically normalize ('..', '.', duplicate separators are
+  // left as-is). This is not a security boundary, see the header documentation.
   return std::regex_replace(path, std::regex(R"(\\)"), "/");
 }
 
@@ -101,6 +103,11 @@ std::string getRelativePath(sfs::path target, sfs::path source)
     return "";
   std::string relative_path = target.string();
   const std::string source_string = source.string();
+  // The prefix shortcut below only produces a correct result when source is an actual
+  // prefix of target. If that precondition does not hold, fall back to the standard
+  // std::filesystem::relative() rather than erasing an arbitrary number of characters.
+  if(!relative_path.starts_with(source_string))
+    return sfs::relative(target, source).string();
   const bool ends_with_separator =
     source_string.ends_with(sfs::path::preferred_separator) || source_string.ends_with('/');
   relative_path.erase(0, source_string.size() + (ends_with_separator ? 0 : 1));

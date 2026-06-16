@@ -6,9 +6,32 @@
 #include <QHeaderView>
 #include <QStandardPaths>
 #include <filesystem>
+#include <limits>
 #include <ranges>
 
 namespace sfs = std::filesystem;
+
+namespace
+{
+/*!
+ * \brief Parses a Steam app ID from text, clamping to the valid int range.
+ *
+ * Using toLongLong with an ok flag (instead of toInt) avoids silently yielding 0 on
+ * overflow. Empty or invalid input yields 0; values outside the int range are clamped.
+ */
+int parseSteamAppId(const QString& text)
+{
+  bool ok = false;
+  const qlonglong value = text.toLongLong(&ok);
+  if(!ok)
+    return 0;
+  if(value < 0)
+    return 0;
+  if(value > std::numeric_limits<int>::max())
+    return std::numeric_limits<int>::max();
+  return static_cast<int>(value);
+}
+}
 
 
 EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
@@ -33,6 +56,8 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
   connect(icon_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
   icon_picker_ = new QPushButton(this);
   icon_picker_->setIcon(QIcon::fromTheme("folder-open"));
+  icon_picker_->setAccessibleName("Browse for icon");
+  icon_picker_->setToolTip("Browse for icon");
   connect(icon_picker_, &QPushButton::clicked, this, &EditToolWidget::iconPickerClicked);
 
   executable_label_ = new QLabel("Tool executable:", this);
@@ -41,6 +66,8 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
   connect(executable_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
   executable_picker_ = new QPushButton(this);
   executable_picker_->setIcon(QIcon::fromTheme("folder-open"));
+  executable_picker_->setAccessibleName("Browse for executable");
+  executable_picker_->setToolTip("Browse for executable");
   connect(
     executable_picker_, &QPushButton::clicked, this, &EditToolWidget::executablePickerClicked);
 
@@ -69,12 +96,14 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
   connect(prefix_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
   prefix_picker_ = new QPushButton(this);
   prefix_picker_->setIcon(QIcon::fromTheme("folder-open"));
+  prefix_picker_->setAccessibleName("Browse for Wine prefix");
+  prefix_picker_->setToolTip("Browse for Wine prefix");
   connect(prefix_picker_, &QPushButton::clicked, this, &EditToolWidget::prefixPickerClicked);
 
   app_id_label_ = new QLabel("Steam App ID:", this);
   app_id_label_->setToolTip("Steam app ID for the Proton prefix");
-  app_id_field_ = new ValidatingLineEdit(this);
-  app_id_field_->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]*"), this));
+  app_id_field_ = new ValidatingLineEdit(this, ValidatingLineEdit::VALID_NOT_EMPTY);
+  app_id_field_->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]+"), this));
   connect(app_id_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
   app_id_import_button_ = new QPushButton("Import", this);
   connect(app_id_import_button_, &QPushButton::clicked, this, &EditToolWidget::importButtonClicked);
@@ -93,6 +122,8 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
     working_directory_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
   working_directory_picker_ = new QPushButton(this);
   working_directory_picker_->setIcon(QIcon::fromTheme("folder-open"));
+  working_directory_picker_->setAccessibleName("Browse for working directory");
+  working_directory_picker_->setToolTip("Browse for working directory");
   connect(working_directory_picker_,
           &QPushButton::clicked,
           this,
@@ -124,6 +155,8 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
   command_label_ = new QLabel("Command:", this);
   command_label_->setToolTip("Command to run");
   command_field_ = new ValidatingLineEdit(this);
+  command_field_->setToolTip("Command to run");
+  command_field_->setPlaceholderText("Command to run");
   connect(command_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
 
 
@@ -193,7 +226,7 @@ Tool EditToolWidget::getTool()
   if(runtime == RUNTIME_STEAM_INDEX)
     return { name_field_->text().toStdString(),
              icon_field_->text().toStdString(),
-             app_id_field_->text().toInt(),
+             parseSteamAppId(app_id_field_->text()),
              runtime_version_box_->currentIndex() == VERSION_FLATPAK_INDEX };
 
   std::map<std::string, std::string> variable_map;
@@ -223,7 +256,7 @@ Tool EditToolWidget::getTool()
            icon_field_->text().toStdString(),
            executable_field_->text().toStdString(),
            runtime_version_box_->currentIndex() == VERSION_FLATPAK_INDEX,
-           app_id_field_->text().toInt(),
+           parseSteamAppId(app_id_field_->text()),
            working_directory_field_->text().toStdString(),
            variable_map,
            arguments_field_->text().toStdString(),

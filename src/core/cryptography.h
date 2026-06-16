@@ -74,7 +74,7 @@ constexpr char default_key[] = "rWnYJVdtxz8Iu62GSJy0OPlOat7imMb8";
 /*!
  * \brief Returns the per-installation encryption key used when no master password is set.
  *
- * The key is 32 random bytes, generated on first use and persisted base64-encoded in a file
+ * The key is 32 random bytes, generated on first use and persisted as raw bytes in a file
  * with owner-only (0600) permissions in the application config directory. It replaces the old
  * hardcoded \ref default_key for newly stored API keys.
  * \return The per-installation key.

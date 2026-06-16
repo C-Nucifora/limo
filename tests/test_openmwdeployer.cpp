@@ -77,8 +77,8 @@ TEST_CASE("State is read", "[openmw]")
   {
     auto loadorder = p_depl.getModNames();
     auto iter = str::find(loadorder, name);
-    if(iter != loadorder.end())
-      p_depl.swapChild(iter - loadorder.begin(), i);
+    REQUIRE(iter != loadorder.end());
+    p_depl.swapChild(iter - loadorder.begin(), i);
   }
   REQUIRE_THAT(p_depl.getModNames(),
                Catch::Matchers::Equals(mod_names));
