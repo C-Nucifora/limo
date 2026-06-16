@@ -809,6 +809,12 @@ signals:
    */
   void sendPluginFlags(std::vector<PluginDeployer::PluginFlagInfo> plugins, int app_id);
   /*!
+   * \brief fork #212: Emitted in response to requestPluginCleanInfo.
+   * \param plugins Per-plugin LOOT dirty/clean info.
+   * \param app_id Target app.
+   */
+  void sendPluginCleanInfo(std::vector<PluginCleanInfoView> plugins, int app_id);
+  /*!
    * \brief fork #49: Emitted in response to requestDeploymentPreview.
    * \param plans Per-deployer dry-run deployment plans.
    * \param app_id Target app.
@@ -1534,6 +1540,11 @@ public slots:
    */
   void requestPluginFlags(int app_id);
   /*!
+   * \brief fork #212: Gathers LOOT dirty/clean info and emits it via sendPluginCleanInfo.
+   * \param app_id Target app.
+   */
+  void requestPluginCleanInfo(int app_id);
+  /*!
    * \brief fork #49: Computes a dry-run deployment preview and emits it via sendDeploymentPlans.
    * \param app_id Target app.
    */
@@ -1562,3 +1573,4 @@ public slots:
 Q_DECLARE_METATYPE(std::vector<RestorePoint>); // fork #54
 Q_DECLARE_METATYPE(std::vector<PluginDeployer::PluginFlagInfo>); // fork #202
 Q_DECLARE_METATYPE(std::vector<Deployer::DeploymentPlan>); // fork #49
+Q_DECLARE_METATYPE(std::vector<PluginCleanInfoView>); // fork #212

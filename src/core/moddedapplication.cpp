@@ -8,6 +8,9 @@
 #include "parseerror.h"
 #include "pathutils.h"
 #include "reversedeployer.h"
+#ifdef LIMO_WITH_LOOT
+#include "lootdeployer.h" // fork #212
+#endif
 #include "tw3mergeutil.h"
 #include "tw3scriptmerge.h"
 #include <archive.h>
@@ -645,6 +648,34 @@ std::vector<Deployer::DeploymentPlan> ModdedApplication::computeDeploymentPlans(
     plans.push_back(deployer->computeDeploymentPlan());
   }
   return plans;
+}
+
+// fork #212: LOOT-masterlist dirty/clean info from the app's first LOOT deployer (empty when
+// built without LOOT or when there is no LOOT deployer).
+std::vector<PluginCleanInfoView> ModdedApplication::getPluginCleanInfo() const
+{
+  std::vector<PluginCleanInfoView> result;
+#ifdef LIMO_WITH_LOOT
+  for(const auto& deployer : deployers_)
+  {
+    auto* loot_deployer = dynamic_cast<LootDeployer*>(deployer.get());
+    if(loot_deployer == nullptr)
+      continue;
+    for(const auto& info : loot_deployer->getPluginCleanInfo())
+    {
+      PluginCleanInfoView view;
+      view.plugin = info.plugin;
+      view.is_dirty = info.is_dirty;
+      view.itm_count = info.itm_count;
+      view.deleted_reference_count = info.deleted_reference_count;
+      view.deleted_navmesh_count = info.deleted_navmesh_count;
+      view.cleaning_utility = info.cleaning_utility;
+      result.push_back(view);
+    }
+    break;
+  }
+#endif
+  return result;
 }
 
 // fork #202: ESM/ESL flag info from the app's first plugin deployer (empty if none).

@@ -46,6 +46,9 @@
 #include <QPushButton>
 #include <QColorDialog> // fork #199
 #include <QDateTime> // fork #54
+#include <QDialog> // fork #212
+#include <QDialogButtonBox> // fork #212
+#include <QTableWidget> // fork #212
 #include <QDragEnterEvent> // fork #16
 #include <QDropEvent> // fork #16
 #include <QMimeData> // fork #16
@@ -380,6 +383,7 @@ void MainWindow::setupConnections()
   qRegisterMetaType<std::vector<RestorePoint>>(); // fork #54
   qRegisterMetaType<std::vector<PluginDeployer::PluginFlagInfo>>(); // fork #202
   qRegisterMetaType<std::vector<Deployer::DeploymentPlan>>(); // fork #49
+  qRegisterMetaType<std::vector<PluginCleanInfoView>>(); // fork #212
   qRegisterMetaType<std::vector<std::filesystem::path>>(); // fork #145/#208
   qRegisterMetaType<std::vector<ModRule>>();
   qRegisterMetaType<std::vector<std::string>>();
@@ -513,6 +517,10 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::requestDeploymentPreview);
   connect(app_manager_, &ApplicationManager::sendDeploymentPlans, // fork #49
           this, &MainWindow::onDeploymentPlans);
+  connect(this, &MainWindow::requestPluginCleanInfo, // fork #212
+          app_manager_, &ApplicationManager::requestPluginCleanInfo);
+  connect(app_manager_, &ApplicationManager::sendPluginCleanInfo, // fork #212
+          this, &MainWindow::onPluginCleanInfo);
   connect(this, &MainWindow::setModPinned,
           app_manager_, &ApplicationManager::setModPinned);
   connect(this, &MainWindow::getModRulesFor,
@@ -967,6 +975,9 @@ void MainWindow::setupMenus()
   // fork #49: dry-run deployment preview.
   QAction* deploy_preview_action = tools_menu->addAction(tr("Preview Deployment Changes"));
   connect(deploy_preview_action, &QAction::triggered, this, &MainWindow::onShowDeploymentPreview);
+  // fork #212: LOOT dirty/clean plugin info.
+  QAction* plugin_clean_action = tools_menu->addAction(tr("Plugin Cleaning Info (LOOT)"));
+  connect(plugin_clean_action, &QAction::triggered, this, &MainWindow::onShowPluginCleanInfo);
   // fork #54: deploy restore points.
   QAction* restore_points_action = tools_menu->addAction(tr("Restore Points"));
   connect(restore_points_action, &QAction::triggered, this, &MainWindow::onShowRestorePoints);
@@ -4581,6 +4592,60 @@ void MainWindow::onDeploymentPlans(std::vector<Deployer::DeploymentPlan> plans, 
   if(app_id != currentApp())
     return;
   DeployPreviewDialog dialog(plans, this);
+  dialog.exec();
+}
+
+void MainWindow::onShowPluginCleanInfo()
+{
+  // fork #212: ask the worker for LOOT dirty/clean info; answered by onPluginCleanInfo.
+  if(currentApp() < 0)
+    return;
+  setStatusMessage("Reading LOOT dirty-plugin data");
+  setBusyStatus(true);
+  emit requestPluginCleanInfo(currentApp());
+}
+
+void MainWindow::onPluginCleanInfo(std::vector<PluginCleanInfoView> plugins, int app_id)
+{
+  // fork #212: present the per-plugin dirty/clean state in a simple read-only table.
+  setBusyStatus(false);
+  setStatusMessage("");
+  if(app_id != currentApp())
+    return;
+  if(plugins.empty())
+  {
+    QMessageBox::information(
+      this,
+      "Plugin Cleaning Info",
+      "No LOOT dirty-plugin data is available (this app has no LOOT deployer, or LOOT support "
+      "is not built in).");
+    return;
+  }
+  QDialog dialog(this);
+  dialog.setWindowTitle("Plugin Cleaning Info (LOOT masterlist)");
+  dialog.resize(640, 480);
+  auto* layout = new QVBoxLayout(&dialog);
+  auto* table = new QTableWidget(&dialog);
+  table->setColumnCount(5);
+  table->setHorizontalHeaderLabels(
+    { "Plugin", "Status", "ITM", "Deleted refs", "Cleaning utility" });
+  table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+  table->setRowCount(static_cast<int>(plugins.size()));
+  for(int row = 0; row < static_cast<int>(plugins.size()); row++)
+  {
+    const auto& p = plugins[row];
+    table->setItem(row, 0, new QTableWidgetItem(QString::fromStdString(p.plugin)));
+    table->setItem(row, 1, new QTableWidgetItem(p.is_dirty ? "Dirty" : "Clean"));
+    table->setItem(row, 2, new QTableWidgetItem(QString::number(p.itm_count)));
+    table->setItem(row, 3, new QTableWidgetItem(QString::number(p.deleted_reference_count)));
+    table->setItem(
+      row, 4, new QTableWidgetItem(QString::fromStdString(p.cleaning_utility)));
+  }
+  table->resizeColumnsToContents();
+  layout->addWidget(table);
+  auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+  connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+  layout->addWidget(buttons);
   dialog.exec();
 }
 

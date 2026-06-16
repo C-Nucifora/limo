@@ -158,6 +158,40 @@ public:
    */
   std::vector<PluginMessage> getPluginMessages() const;
 
+  // fork #212: LOOT-masterlist dirty/clean plugin tracking.
+  /*!
+   * \brief Per-plugin "dirty plugin" information as flagged by LOOT's
+   * masterlist/userlist (known ITM records, deleted references and deleted
+   * navmeshes that need cleaning).
+   */
+  struct PluginCleanInfo
+  {
+    /*! \brief File name of the plugin this info belongs to. */
+    std::string plugin;
+    /*! \brief True iff LOOT flags this plugin as dirty (has dirty info). */
+    bool is_dirty = false;
+    /*! \brief Number of Identical To Master records LOOT knows about. */
+    unsigned itm_count = 0;
+    /*! \brief Number of deleted references (UDR) LOOT knows about. */
+    unsigned deleted_reference_count = 0;
+    /*! \brief Number of deleted navmeshes LOOT knows about. */
+    unsigned deleted_navmesh_count = 0;
+    /*! \brief Name of the cleaning utility LOOT recommends, if any. */
+    std::string cleaning_utility;
+  };
+
+  /*!
+   * \brief Collects LOOT's masterlist/userlist dirty-plugin info for every
+   * currently managed plugin.
+   * \details Loads the master-, user- and prelude lists from the target
+   * directory (if present), then queries libloot's evaluated plugin metadata
+   * for its dirty info. Plugins without any dirty info are reported with
+   * is_dirty=false and zeroed counts. Returns an empty vector and logs a
+   * warning if anything goes wrong, so callers never have to handle exceptions.
+   * \return One \ref PluginCleanInfo per currently managed plugin, in load order.
+   */
+  std::vector<PluginCleanInfo> getPluginCleanInfo() const;
+
   // fork #31: LOOT user-metadata (userlist.yaml) editing support.
   /*!
    * \brief Simple, UI friendly representation of a single plugin's user metadata
