@@ -14,6 +14,7 @@
 #include <archive_entry.h>
 #include <algorithm>
 #include <array>
+#include <chrono> // fork #54
 #include <cstdlib>
 #include <format>
 #include <fstream>
@@ -630,6 +631,18 @@ std::vector<std::string> ModdedApplication::getDeployerNames() const
   for(const auto& deployer : deployers_)
     names.push_back(deployer->getName());
   return names;
+}
+
+// fork #202: ESM/ESL flag info from the app's first plugin deployer (empty if none).
+std::vector<PluginDeployer::PluginFlagInfo> ModdedApplication::getPluginFlagInfo() const
+{
+  for(const auto& deployer : deployers_)
+  {
+    auto* plugin_deployer = dynamic_cast<PluginDeployer*>(deployer.get());
+    if(plugin_deployer != nullptr)
+      return plugin_deployer->getPluginFlagInfo();
+  }
+  return {};
 }
 
 std::vector<ModInfo> ModdedApplication::getModInfo() const
@@ -2472,6 +2485,155 @@ void ModdedApplication::importProfile(const sfs::path& bundle)
   updateSettings(true);
 }
 
+// fork #54: deploy restore points (load-order snapshots).
+void ModdedApplication::createRestorePoint(const std::string& name)
+{
+  Json::Value point;
+  point["name"] = name;
+  point["timestamp"] = static_cast<Json::Int64>(
+    std::chrono::duration_cast<std::chrono::seconds>(
+      std::chrono::system_clock::now().time_since_epoch())
+      .count());
+  point["deployers"] = Json::Value(Json::arrayValue);
+
+  // Snapshot the current load order of every deployer whose load order is persisted in the
+  // config (the non-autonomous deployers; mirrors the per-deployer loadorder persistence in
+  // updateSettings). The tree JSON already encodes enabled/disabled and group state.
+  for(int depl = 0; depl < (int)deployers_.size(); depl++)
+  {
+    if(deployers_[depl]->isAutonomous())
+      continue;
+    Json::Value depl_json;
+    depl_json["name"] = deployers_[depl]->getName();
+    depl_json["loadorder"] = deployers_[depl]->getLoadorder()->toJson();
+    point["deployers"].append(depl_json);
+  }
+
+  restore_points_.append(point);
+
+  // Trim to the most recent MAX_RESTORE_POINTS, dropping the oldest (front) entries.
+  while((int)restore_points_.size() > MAX_RESTORE_POINTS)
+  {
+    Json::Value trimmed(Json::arrayValue);
+    for(int i = 1; i < (int)restore_points_.size(); i++)
+      trimmed.append(restore_points_[i]);
+    restore_points_ = trimmed;
+  }
+
+  updateSettings(true);
+}
+
+std::vector<RestorePoint> ModdedApplication::getRestorePoints() const
+{
+  std::vector<RestorePoint> points;
+  points.reserve(restore_points_.size());
+  for(const Json::Value& point : restore_points_)
+  {
+    RestorePoint rp;
+    rp.name = point.get("name", "").asString();
+    rp.timestamp = point.get("timestamp", 0).asInt64();
+    points.push_back(std::move(rp));
+  }
+  return points;
+}
+
+void ModdedApplication::restoreRestorePoint(int index)
+{
+  if(index < 0 || index >= (int)restore_points_.size())
+    return;
+
+  const Json::Value& point = restore_points_[index];
+
+  // Index the saved per-deployer load orders by deployer name so we can match them against this
+  // instance's deployers regardless of ordering / count differences.
+  std::map<std::string, const Json::Value*> saved_by_name;
+  for(const Json::Value& depl_json : point["deployers"])
+    saved_by_name[depl_json["name"].asString()] = &depl_json;
+
+  for(int depl = 0; depl < (int)deployers_.size(); depl++)
+  {
+    if(deployers_[depl]->isAutonomous())
+      continue;
+    auto iter = saved_by_name.find(deployers_[depl]->getName());
+    if(iter == saved_by_name.end())
+      continue;
+    const Json::Value& depl_json = *iter->second;
+
+    // Drop any saved entries referencing mods no longer installed, so setLoadorder never
+    // produces dangling ids. Separators (entries without an "id") are kept. This mirrors the
+    // filtering done in importProfile before reusing the same Deployer::setLoadorder path.
+    Json::Value loadorder = depl_json["loadorder"];
+    Json::Value filtered;
+    filtered["children"] = Json::Value(Json::arrayValue);
+    std::function<Json::Value(const Json::Value&)> filter_node = [&](const Json::Value& node)
+    {
+      Json::Value out = node;
+      out.removeMember("children");
+      if(node.isMember("children"))
+      {
+        out["children"] = Json::Value(Json::arrayValue);
+        for(const Json::Value& child : node["children"])
+        {
+          if(child.isMember("status"))
+          {
+            const int mod_id = child["id"].asInt();
+            if(std::find_if(installed_mods_.begin(),
+                            installed_mods_.end(),
+                            [mod_id](const Mod& m) { return m.id == mod_id; }) ==
+               installed_mods_.end())
+            {
+              log_(Log::LOG_WARNING,
+                   std::format("Skipping unknown mod id {} while restoring load order.", mod_id));
+              continue;
+            }
+          }
+          out["children"].append(filter_node(child));
+        }
+      }
+      return out;
+    };
+    for(const Json::Value& child : loadorder["children"])
+    {
+      if(child.isMember("status"))
+      {
+        const int mod_id = child["id"].asInt();
+        if(std::find_if(installed_mods_.begin(),
+                        installed_mods_.end(),
+                        [mod_id](const Mod& m) { return m.id == mod_id; }) ==
+           installed_mods_.end())
+        {
+          log_(Log::LOG_WARNING,
+               std::format("Skipping unknown mod id {} while restoring load order.", mod_id));
+          continue;
+        }
+      }
+      filtered["children"].append(filter_node(child));
+    }
+
+    // Reuse the same apply path the config load uses for the tree load-order format.
+    deployers_[depl]->setLoadorder(filtered);
+  }
+
+  updateSettings(true);
+}
+
+void ModdedApplication::deleteRestorePoint(int index)
+{
+  if(index < 0 || index >= (int)restore_points_.size())
+    return;
+
+  Json::Value remaining(Json::arrayValue);
+  for(int i = 0; i < (int)restore_points_.size(); i++)
+  {
+    if(i == index)
+      continue;
+    remaining.append(restore_points_[i]);
+  }
+  restore_points_ = remaining;
+
+  updateSettings(true);
+}
+
 void ModdedApplication::updateIgnoredFiles(int deployer)
 {
   if(deployers_[deployer]->getType() != DeployerFactory::REVERSEDEPLOYER)
@@ -2816,6 +2978,9 @@ void ModdedApplication::updateSettings(bool write)
   json_settings_["hooks"]["pre_undeploy"] = pre_undeploy_hook_;
   json_settings_["hooks"]["post_undeploy"] = post_undeploy_hook_;
 
+  // fork #54: persist deploy restore points (load-order snapshots).
+  json_settings_["restore_points"] = restore_points_;
+
   if(write)
     writeSettings();
 }
@@ -2909,6 +3074,7 @@ void ModdedApplication::updateState(bool read)
   mod_category_map_.clear(); // fork #198
   mod_rules_.clear();
   update_ignore_list_.clear();
+  restore_points_ = Json::Value(Json::arrayValue); // fork #54
 
   if(read)
   {
@@ -3166,6 +3332,11 @@ void ModdedApplication::updateState(bool read)
     if(hooks.isMember("post_undeploy"))
       post_undeploy_hook_ = hooks["post_undeploy"].asString();
   }
+
+  // fork #54: load persisted restore points (backward compatible: missing key = empty).
+  restore_points_ = Json::Value(Json::arrayValue);
+  if(json_settings_.isMember("restore_points") && json_settings_["restore_points"].isArray())
+    restore_points_ = json_settings_["restore_points"];
 
   updateSteamIconPath();
 }

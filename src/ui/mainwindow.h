@@ -46,6 +46,9 @@
 #include "ui/pruneversionsdialog.h" // fork #145
 #include "ui/bsabrowserdialog.h" // fork #201
 #include "ui/assetpreviewdialog.h" // fork #209
+#include "ui/restorepointsdialog.h" // fork #54
+#include "ui/pluginflagsdialog.h" // fork #202
+#include "core/plugindeployer.h" // fork #202
 #include "ui/editautotagsdialog.h"
 #include "ui/editmanualtagsdialog.h"
 #include "ui/exportappconfigdialog.h"
@@ -1352,6 +1355,14 @@ private slots:
   void onPreviewModFiles();
   /*! \brief fork #66: Picks an archive and replaces the selected mod's files from it. */
   void onUpdateModFromLocal();
+  /*! \brief fork #54: Requests and then shows the restore-points dialog. */
+  void onShowRestorePoints();
+  /*! \brief fork #54: Receives restore points and opens the dialog. */
+  void onRestorePoints(std::vector<RestorePoint> restore_points, int app_id);
+  /*! \brief fork #202: Requests and then shows the plugin ESM/ESL flags dialog. */
+  void onShowPluginFlags();
+  /*! \brief fork #202: Receives plugin flag info and opens the dialog. */
+  void onPluginFlags(std::vector<PluginDeployer::PluginFlagInfo> plugins, int app_id);
   /*! \brief fork #81: Re-scans reverse deployers and refreshes the view. */
   void on_refresh_button_clicked();
   /*! \brief fork #208: Confirms then purges and redeploys all deployers from scratch. */
@@ -1986,6 +1997,16 @@ signals:
   void mergeMods(int app_id, std::vector<int> source_mod_ids, int target_mod_id);
   /*! \brief fork #66: Replaces a mod's files from a local archive, keeping its config. */
   void updateModFromLocal(int app_id, int mod_id, std::filesystem::path source_archive);
+  /*! \brief fork #54: Creates a named load-order restore point. */
+  void createRestorePoint(int app_id, QString name);
+  /*! \brief fork #54: Requests the restore-point list (answered by onRestorePoints). */
+  void requestRestorePoints(int app_id);
+  /*! \brief fork #54: Restores the load order from the given restore point. */
+  void restoreRestorePoint(int app_id, int index);
+  /*! \brief fork #54: Deletes the given restore point. */
+  void deleteRestorePoint(int app_id, int index);
+  /*! \brief fork #202: Requests plugin ESM/ESL flag info (answered by onPluginFlags). */
+  void requestPluginFlags(int app_id);
   /*! \brief fork #81: Re-scans reverse deployers so externally produced files appear. */
   void refreshReverseDeployers(int app_id);
   /*!

@@ -796,6 +796,18 @@ signals:
    * \param command The shell command to run.
    */
   void sendRunCommand(QString name, QString command);
+  /*!
+   * \brief Sends the deploy restore points for one app to the UI. // fork #54
+   * \param restore_points Metadata for every stored restore point (index = position).
+   * \param app_id Target app.
+   */
+  void sendRestorePoints(std::vector<RestorePoint> restore_points, int app_id);
+  /*!
+   * \brief fork #202: Emitted in response to requestPluginFlags.
+   * \param plugins Per-plugin ESM/ESL flag info.
+   * \param app_id Target app.
+   */
+  void sendPluginFlags(std::vector<PluginDeployer::PluginFlagInfo> plugins, int app_id);
 
 public slots:
   /*!
@@ -1499,4 +1511,42 @@ public slots:
    * \param deployer Target deployer.
    */
   void deployRedMods(int app_id, int deployer);
+  /*!
+   * \brief Creates a deploy restore point (load-order snapshot) for the given app. // fork #54
+   * \param app_id Target app.
+   * \param name Name for the snapshot. May be empty.
+   */
+  void createRestorePoint(int app_id, QString name);
+  /*!
+   * \brief Emits sendRestorePoints with the metadata for every stored restore point. // fork #54
+   * \param app_id Target app.
+   */
+  void requestRestorePoints(int app_id);
+  /*!
+   * \brief fork #202: Computes plugin ESM/ESL flag info and emits it via sendPluginFlags.
+   * \param app_id Target app.
+   */
+  void requestPluginFlags(int app_id);
+  /*!
+   * \brief Re-applies the load orders of the restore point at index to every deployer. // fork #54
+   * \param app_id Target app.
+   * \param index Restore point index.
+   */
+  void restoreRestorePoint(int app_id, int index);
+  /*!
+   * \brief Deletes the restore point at the given index. // fork #54
+   * \param app_id Target app.
+   * \param index Restore point index.
+   */
+  void deleteRestorePoint(int app_id, int index);
+
+  /*!
+   * \brief Returns the restore point metadata directly (read; main-thread callers). // fork #54
+   * \param app_id Target app.
+   * \return The restore point metadata, or an empty vector if app_id is invalid.
+   */
+  std::vector<RestorePoint> getRestorePoints(int app_id);
 };
+
+Q_DECLARE_METATYPE(std::vector<RestorePoint>); // fork #54
+Q_DECLARE_METATYPE(std::vector<PluginDeployer::PluginFlagInfo>); // fork #202

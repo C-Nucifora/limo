@@ -9,6 +9,7 @@
 #include "autotag.h"
 #include "backupmanager.h"
 #include "deployer.h"
+#include "plugindeployer.h" // fork #202
 #include "deployerinfo.h"
 #include "editautotagaction.h"
 #include "editdeployerinfo.h"
@@ -38,6 +39,22 @@ struct PrunableArchive
   std::filesystem::path path;
   /*! \brief Size of the archive in bytes. */
   unsigned long size = 0;
+};
+
+// fork #54: metadata describing one deploy restore point (load-order snapshot).
+/*!
+ * \brief Lightweight metadata for a single restore point, returned to the UI.
+ *
+ * The index of a RestorePoint within the vector returned by
+ * \ref ModdedApplication::getRestorePoints matches its position in the internal
+ * restore point list and is used to address it for restore / delete.
+ */
+struct RestorePoint
+{
+  /*! \brief User supplied (or auto-generated) name of the snapshot. */
+  std::string name;
+  /*! \brief Creation time as a Unix epoch timestamp in seconds. */
+  long long timestamp = 0;
 };
 
 /*!
@@ -203,6 +220,11 @@ public:
    * \return The vector.
    */
   std::vector<ModInfo> getModInfo() const;
+  /*!
+   * \brief fork #202: Returns ESM/ESL flag info for the plugins of this app's first plugin
+   * deployer (empty if the app has no plugin deployer).
+   */
+  std::vector<PluginDeployer::PluginFlagInfo> getPluginFlagInfo() const;
   /*!
    * \brief Getter for the current mod load order of one Deployer.
    * \param deployer The target Deployer.
@@ -1040,6 +1062,38 @@ public:
    */
   void importProfile(const std::filesystem::path& bundle);
 
+  // fork #54: deploy restore points (load-order snapshots).
+  /*!
+   * \brief Creates a restore point capturing the current load order of every
+   * non-autonomous deployer (including enabled/disabled and group state, as
+   * encoded in each deployer's load-order JSON).
+   *
+   * The newest 20 restore points are kept; older ones are dropped. The new
+   * config state is persisted via the normal settings write.
+   * \param name Name for the snapshot. May be empty.
+   */
+  void createRestorePoint(const std::string& name);
+  /*!
+   * \brief Returns metadata for all stored restore points, newest last.
+   *
+   * The index of each entry matches its position in the internal list and is
+   * the value to pass to \ref restoreRestorePoint / \ref deleteRestorePoint.
+   * \return The restore point metadata.
+   */
+  std::vector<RestorePoint> getRestorePoints() const;
+  /*!
+   * \brief Re-applies the load orders stored in the given restore point to every
+   * matching non-autonomous deployer, reusing the same setLoadorder path used
+   * when loading load orders from the config. Persists afterwards.
+   * \param index Index into the restore point list. Out-of-range: no-op.
+   */
+  void restoreRestorePoint(int index);
+  /*!
+   * \brief Deletes the restore point at the given index and persists.
+   * \param index Index into the restore point list. Out-of-range: no-op.
+   */
+  void deleteRestorePoint(int index);
+
 private:
   /*! \brief The subdirectory used to store downloads. */
   static inline constexpr std::string DOWNLOAD_DIR = "_download";
@@ -1134,6 +1188,17 @@ private:
   std::string pre_undeploy_hook_ = "";
   /*! \brief Shell command run after undeployment. Empty: disabled. */
   std::string post_undeploy_hook_ = "";
+
+  // fork #54: persisted deploy restore points.
+  /*!
+   * \brief Stored restore points, as a JSON array. Each element is
+   * { "name": str, "timestamp": epoch-seconds,
+   *   "deployers": [ { "name": str, "loadorder": <tree json> }, ... ] }.
+   * Kept in memory so it survives the json_settings_ rebuild in updateSettings.
+   */
+  Json::Value restore_points_ = Json::Value(Json::arrayValue);
+  /*! \brief Maximum number of restore points retained. */
+  static inline constexpr int MAX_RESTORE_POINTS = 20;
 
   /*!
    * \brief Runs a user-authored hook command via the existing safe runner.

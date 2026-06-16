@@ -250,6 +250,50 @@ public:
    */
   std::vector<MissingMasterInfo> findMissingMasters() const;
 
+  // fork #202: plugin ESM/ESL flag awareness.
+  /*!
+   * \brief Describes the ESM/ESL flag state of a single managed plugin.
+   *
+   * Bethesda plugins (.esp/.esm/.esl) store record-header flags in the 4 byte flags field of
+   * their leading TES4 record (file offset 8, little-endian uint32): the ESM/master bit is
+   * 0x1 and the ESL/light bit is 0x200. The plugin's file extension also carries meaning: a
+   * .esl file is always treated as light and a .esm file as master, regardless of the header
+   * flag. \ref readPluginFlagInfo combines both signals.
+   */
+  struct PluginFlagInfo
+  {
+    /*! \brief File name of the plugin. */
+    std::string name;
+    /*! \brief True if the plugin file exists and could be read as a valid TES4 plugin. */
+    bool exists = false;
+    /*! \brief True if the plugin is a master (ESM): .esm extension or header flag 0x1 set. */
+    bool is_master = false;
+    /*! \brief True if the plugin is light (ESL): .esl extension or header flag 0x200 set. */
+    bool is_light = false;
+  };
+
+  /*!
+   * \brief Reads ESM/ESL flag information for every currently managed plugin.
+   *
+   * For each plugin the leading TES4 record header is read (cheaply: only the 4 byte signature
+   * and the 4 byte flags field at offset 8 are inspected) and combined with the file extension.
+   * Files that are missing, too short or not TES4 plugins have their flags marked unknown via
+   * \ref PluginFlagInfo::exists, while still honoring any .esm/.esl extension hint. This never
+   * throws.
+   * \return One \ref PluginFlagInfo per managed plugin, in load order.
+   */
+  std::vector<PluginFlagInfo> getPluginFlagInfo() const;
+
+  /*!
+   * \brief Reads ESM/ESL flag information together with full/light counts.
+   *
+   * Convenience wrapper around \ref getPluginFlagInfo that also tallies how many plugins are
+   * FULL (not light) versus LIGHT, for comparison against the engine caps (254 full, 4096
+   * light).
+   * \return A pair of the per-plugin info vector and a {full_count, light_count} pair.
+   */
+  std::pair<std::vector<PluginFlagInfo>, std::pair<int, int>> getPluginFlagInfoWithCounts() const;
+
 protected:
   /*! \brief Appended to profile file names. */
   static constexpr std::string EXTENSION = ".lmmprof";
@@ -355,4 +399,20 @@ protected:
    * file could not be read or declares no masters.
    */
   std::vector<std::string> readPluginMasters(const std::filesystem::path& plugin_path) const;
+
+  // fork #202: plugin ESM/ESL flag awareness.
+  /*!
+   * \brief Reads the ESM/ESL flag state of a single plugin file.
+   *
+   * Combines the file extension (.esm implies master, .esl implies light) with the TES4 record
+   * header flags read from disk. The header read is minimal and defensive: only the 4 byte
+   * signature and the flags uint32 at offset 8 are inspected. Files that cannot be opened, are
+   * too short or do not start with "TES4" leave \ref PluginFlagInfo::exists false but still
+   * honor the extension hint. Never throws.
+   * \param plugin_name File name of the plugin (used for the extension hint and result name).
+   * \param plugin_path Absolute path to the plugin file to inspect.
+   * \return The combined flag info for the plugin.
+   */
+  PluginFlagInfo readPluginFlagInfo(const std::string& plugin_name,
+                                    const std::filesystem::path& plugin_path) const;
 };
