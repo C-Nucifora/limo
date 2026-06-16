@@ -1133,6 +1133,16 @@ void ApplicationManager::requestDeploymentPreview(int app_id)
     emit sendDeploymentPlans(*plans, app_id);
 }
 
+// fork #212: gather LOOT dirty/clean info for the app's plugins and deliver it.
+void ApplicationManager::requestPluginCleanInfo(int app_id)
+{
+  if(!appIndexIsValid(app_id))
+    return;
+  auto info = handleExceptions(&ModdedApplication::getPluginCleanInfo, apps_[app_id]);
+  if(info)
+    emit sendPluginCleanInfo(*info, app_id);
+}
+
 // fork #202: gather plugin ESM/ESL flag info from the app's plugin deployer and deliver it.
 void ApplicationManager::requestPluginFlags(int app_id)
 {

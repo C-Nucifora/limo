@@ -29,6 +29,27 @@
 #include <vector>
 
 
+// fork #212: always-compiled view of a plugin's LOOT-masterlist dirty/clean state, so the
+// UI signal/dialog need no LOOT headers (the LOOT-gated reader fills these in).
+/*!
+ * \brief Per-plugin dirty/clean info derived from LOOT's masterlist.
+ */
+struct PluginCleanInfoView
+{
+  /*! \brief Plugin file name. */
+  std::string plugin;
+  /*! \brief True if LOOT flags the plugin as dirty (needs cleaning). */
+  bool is_dirty = false;
+  /*! \brief Number of identical-to-master (ITM) records. */
+  unsigned itm_count = 0;
+  /*! \brief Number of deleted references (UDR). */
+  unsigned deleted_reference_count = 0;
+  /*! \brief Number of deleted navmeshes. */
+  unsigned deleted_navmesh_count = 0;
+  /*! \brief Suggested cleaning utility, if any. */
+  std::string cleaning_utility;
+};
+
 // fork #145: describes one stale archive file that may be pruned.
 /*!
  * \brief Describes a single downloaded archive that is eligible for pruning.
@@ -230,6 +251,11 @@ public:
    * deployer (empty if the app has no plugin deployer).
    */
   std::vector<PluginDeployer::PluginFlagInfo> getPluginFlagInfo() const;
+  /*!
+   * \brief fork #212: Returns LOOT-masterlist dirty/clean info for the plugins of this app's
+   * first LOOT deployer. Empty when built without LOOT or when the app has no LOOT deployer.
+   */
+  std::vector<PluginCleanInfoView> getPluginCleanInfo() const;
   /*!
    * \brief Getter for the current mod load order of one Deployer.
    * \param deployer The target Deployer.

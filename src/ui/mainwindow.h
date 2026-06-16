@@ -1362,6 +1362,10 @@ private slots:
   void onRestorePoints(std::vector<RestorePoint> restore_points, int app_id);
   /*! \brief fork #211: Opens the Nexus news/announcements dialog. */
   void onShowNexusNews();
+  /*! \brief fork #212: Requests LOOT dirty/clean plugin info. */
+  void onShowPluginCleanInfo();
+  /*! \brief fork #212: Receives LOOT dirty/clean info and shows it in a table dialog. */
+  void onPluginCleanInfo(std::vector<PluginCleanInfoView> plugins, int app_id);
   /*! \brief fork #49: Requests a dry-run deployment preview. */
   void onShowDeploymentPreview();
   /*! \brief fork #49: Receives deployment plans and opens the preview dialog. */
@@ -2016,6 +2020,8 @@ signals:
   void requestPluginFlags(int app_id);
   /*! \brief fork #49: Requests a dry-run deployment preview (answered by onDeploymentPlans). */
   void requestDeploymentPreview(int app_id);
+  /*! \brief fork #212: Requests LOOT dirty/clean plugin info (answered by onPluginCleanInfo). */
+  void requestPluginCleanInfo(int app_id);
   /*! \brief fork #81: Re-scans reverse deployers so externally produced files appear. */
   void refreshReverseDeployers(int app_id);
   /*!
