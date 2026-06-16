@@ -858,6 +858,14 @@ public slots:
    * is used.
    */
   void uninstallMods(int app_id, std::vector<int> mod_ids, std::string installer_type);
+  /*!
+   * \brief Merges the staged files of multiple source mods into one target mod, then removes the
+   * source mods. (fork #148)
+   * \param app_id The target \ref ModdedApplication "application".
+   * \param source_mod_ids Ids of the mods to merge. Must include target_mod_id.
+   * \param target_mod_id Id of the mod that receives all merged files and is kept.
+   */
+  void mergeMods(int app_id, std::vector<int> source_mod_ids, int target_mod_id);
   void commitChanges(int app_id, int deployer);
   /*!
    * \brief Updates which \ref Deployer "deployer" should manage given mods.
@@ -1330,6 +1338,11 @@ public slots:
    * \param deployer Target deployer.
    */
   void updateIgnoredFiles(int app_id, int deployer);
+  /*!
+   * \brief fork #81: Re-scans reverse deployers so externally produced files appear.
+   * \param app_id Target app.
+   */
+  void refreshReverseDeployers(int app_id);
   /*!
    * \brief Adds the given mod to the ignore list of the given ReverseDeployer.
    * \param app_id Target app.

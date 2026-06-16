@@ -45,6 +45,7 @@
 #include "ui/instancedashboarddialog.h" // fork #203
 #include "ui/pruneversionsdialog.h" // fork #145
 #include "ui/bsabrowserdialog.h" // fork #201
+#include "ui/assetpreviewdialog.h" // fork #209
 #include "ui/editautotagsdialog.h"
 #include "ui/editmanualtagsdialog.h"
 #include "ui/exportappconfigdialog.h"
@@ -242,6 +243,10 @@ private:
   QAction* show_tools_pane_action_ = nullptr;
   /*! \brief fork #198: Mod context action: set the category of the selected mod(s). */
   QAction* set_category_action_ = nullptr;
+  /*! \brief fork #148: Mod context action: merge the selected mods into one entry. */
+  QAction* merge_mods_action_ = nullptr;
+  /*! \brief fork #209: Mod context action: preview a mod's asset files. */
+  QAction* preview_files_action_ = nullptr;
   /*! \brief Deployer context action: show per-file win/loss conflict detail for the selected mod. */
   QAction* conflict_detail_action_;
   /*! \brief Deployer context action (Witcher 3): merge conflicting WitcherScript files. */
@@ -1335,6 +1340,12 @@ private slots:
   void onSetModCategory();
   /*! \brief fork #201: Opens the BSA/BA2 archive browser dialog. */
   void onOpenBsaBrowser();
+  /*! \brief fork #148: Merges the selected mods into a chosen target mod. */
+  void onMergeMods();
+  /*! \brief fork #209: Opens the asset preview dialog for the selected mod. */
+  void onPreviewModFiles();
+  /*! \brief fork #81: Re-scans reverse deployers and refreshes the view. */
+  void on_refresh_button_clicked();
   /*! \brief fork #208: Confirms then purges and redeploys all deployers from scratch. */
   void onForceRedeploy();
   /*! \brief fork #145: Requests the prunable outdated archive list for the current app. */
@@ -1959,6 +1970,10 @@ signals:
   void setModColor(int app_id, int mod_id, QString color);
   /*! \brief fork #198: Sets (or clears, when empty) the category of a mod. */
   void setModCategory(int app_id, int mod_id, QString category);
+  /*! \brief fork #148: Merges the source mods into the target mod, removing the sources. */
+  void mergeMods(int app_id, std::vector<int> source_mod_ids, int target_mod_id);
+  /*! \brief fork #81: Re-scans reverse deployers so externally produced files appear. */
+  void refreshReverseDeployers(int app_id);
   /*!
    * \brief Pins or unpins the version of a mod.
    * \param app_id Target app.

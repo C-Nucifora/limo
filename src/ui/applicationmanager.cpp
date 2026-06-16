@@ -629,6 +629,16 @@ void ApplicationManager::uninstallMods(int app_id,
   emit completedOperations(std::format("Mod{} removed", mod_ids.size() == 1 ? "" : "s").c_str());
 }
 
+// fork #148
+void ApplicationManager::mergeMods(int app_id,
+                                   std::vector<int> source_mod_ids,
+                                   int target_mod_id)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::mergeMods>(app_id, source_mod_ids, target_mod_id);
+  emit completedOperations("Mods merged");
+}
+
 void ApplicationManager::commitChanges(int app_id, int deployer)
 {
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
@@ -1706,6 +1716,14 @@ void ApplicationManager::updateIgnoredFiles(int app_id, int deployer)
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
     handleExceptions<&ModdedApplication::updateIgnoredFiles>(app_id, deployer);
   emit completedOperations("Ignore list updated");
+}
+
+// fork #81: re-scan reverse deployers so externally produced files become visible.
+void ApplicationManager::refreshReverseDeployers(int app_id)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::refreshReverseDeployers>(app_id);
+  emit completedOperations("Files refreshed");
 }
 
 void ApplicationManager::addModToIgnoreList(int app_id, int deployer, int mod_id)
