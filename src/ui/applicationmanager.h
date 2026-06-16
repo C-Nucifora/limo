@@ -939,6 +939,14 @@ public slots:
    */
   void changeModName(int app_id, int mod_id, QString new_name);
   /*!
+   * \brief Replaces a mod's staged files from a local archive without performing a full reinstall,
+   * keeping all of the mod's Limo configuration intact. (fork #66)
+   * \param app_id The target \ref ModdedApplication "application".
+   * \param mod_id Target mod whose files should be replaced.
+   * \param source_archive Path to the archive (or directory) containing the new files.
+   */
+  void updateModFromLocal(int app_id, int mod_id, std::filesystem::path source_archive);
+  /*!
    * \brief Checks for file conflicts of given mod with all other mods in the load order for
    * one Deployer of one \ref ModdedApplication "application". Emits \ref sendFileConflicts
    * \param app_id The target \ref ModdedApplication "application".
