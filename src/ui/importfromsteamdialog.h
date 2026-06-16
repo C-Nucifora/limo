@@ -94,6 +94,17 @@ private:
    * \param message Error message to be displayed.
    */
   void showError(QString title, QString message);
+  /*!
+   * \brief Hides/shows table rows according to the current search text and the
+   * "Supported only" checkbox.
+   */
+  void applyFilters();
+  /*!
+   * \brief Computes the auto-detected Proton prefix drive_c for a table row, or an
+   * empty string if the game has no prefix.
+   * \param row Row index in ui->app_table.
+   */
+  QString autoPrefixForRow(int row) const;
 
 private slots:
   /*! \brief Opens a file dialog to chose the steam path. */
@@ -107,6 +118,12 @@ private slots:
    * \param new_text The newly entered text.
    */
   void on_search_field_textEdited(const QString& new_text);
+  /*! \brief Re-applies the row filter when the "Supported only" checkbox is toggled. */
+  void on_supported_only_checkbox_toggled(bool checked);
+  /*! \brief Populates the prefix override field from the selected row's auto-detected prefix. */
+  void on_app_table_itemSelectionChanged();
+  /*! \brief Opens a file dialog to choose a custom Proton/WINE prefix drive_c directory. */
+  void on_pick_prefix_button_clicked();
 
 signals:
   /*!

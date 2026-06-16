@@ -208,6 +208,19 @@ private:
 
 public:
   /*!
+   * \brief Returns whether Limo ships (or the user has provided) a game-config preset
+   * "<app_id>.json" for the given Steam app id. Used by the Steam import flow to flag
+   * which installed games Limo can auto-configure.
+   * \param app_id Steam app id to look up.
+   * \return True if a "<app_id>.json" preset exists in any game-config search dir.
+   */
+  static bool hasGameConfig(const std::string& app_id);
+  /*!
+   * \brief Opens the "Import from Steam" sub-dialog directly (used by the main window's
+   * "Scan for games" entry point). The dialog must already be in add mode.
+   */
+  void openSteamImport();
+  /*!
    * \brief Initializes this dialog to allow editing of an existing
    * \ref ModdedApplication "application".
    * \param name Current name of the edited \ref ModdedApplication "application".

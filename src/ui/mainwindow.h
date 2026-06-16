@@ -893,6 +893,8 @@ private slots:
   void onSortAppsAlphaToggled(bool checked);
   /*! \brief Shows a dialog to add a new ModdedApplication. */
   void onAddAppButtonClicked();
+  /*! \brief Opens the Add-App dialog directly into the Steam "scan for games" import flow. */
+  void onScanForGamesClicked();
   /*! \brief Updates the currently active ModdedApplication. */
   void on_app_selection_box_currentIndexChanged(int index);
   /*! \brief Shows a dialog to add a new Deployer. */

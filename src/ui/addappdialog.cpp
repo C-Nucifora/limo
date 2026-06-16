@@ -2,6 +2,7 @@
 #include "core/autotag.h"
 #include "core/consts.h"
 #include "core/deployerfactory.h"
+#include "core/installer.h"
 #include "core/parseerror.h"
 #include "core/moddedapplication.h"
 #include "importfromsteamdialog.h"
@@ -229,6 +230,34 @@ std::vector<sfs::path> AddAppDialog::gameConfigSearchDirs()
   dirs.push_back(bundled_dir);
 
   return dirs;
+}
+
+bool AddAppDialog::hasGameConfig(const std::string& app_id)
+{
+  if(app_id.empty())
+    return false;
+  // Mirror gameConfigSearchDirs() without needing an instance: the user-writable
+  // config dir first, then the bundled steam_app_configs dir. Uses the global flatpak
+  // flag (set during MainWindow init) so the bundled path resolves correctly.
+  const bool is_flatpak = Installer::isAFlatpak();
+  std::vector<sfs::path> dirs;
+  const QString user_loc = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+  if(!user_loc.isEmpty())
+    dirs.push_back(sfs::path(user_loc.toStdString()) / "game_configs");
+  sfs::path bundled_dir =
+    sfs::path(is_flatpak ? "/app" : APP_INSTALL_PREFIX) / "share/limo/steam_app_configs";
+  if(!is_flatpak && sfs::exists("steam_app_configs"))
+    bundled_dir = "steam_app_configs";
+  dirs.push_back(bundled_dir);
+
+  const std::string config_file_name = app_id + ".json";
+  std::error_code ec;
+  for(const auto& dir : dirs)
+  {
+    if(sfs::is_regular_file(dir / config_file_name, ec))
+      return true;
+  }
+  return false;
 }
 
 void AddAppDialog::initConfigForApp()
@@ -741,6 +770,11 @@ void AddAppDialog::on_import_button_clicked()
 {
   import_from_steam_dialog_->init();
   import_from_steam_dialog_->exec();
+}
+
+void AddAppDialog::openSteamImport()
+{
+  on_import_button_clicked();
 }
 
 void AddAppDialog::onApplicationImported(QString name,

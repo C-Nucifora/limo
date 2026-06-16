@@ -257,10 +257,19 @@ void MainWindow::setupEmptyStateOverlay()
   connect(
     empty_state_button_, &QPushButton::clicked, this, &MainWindow::onAddAppButtonClicked);
 
+  // Autoscan entry point: opens Add-App straight into the Steam import flow, which lists
+  // installed games and flags the ones Limo has a preset for.
+  auto* scan_button = new QPushButton(tr("Scan for installed games"), empty_state_overlay_);
+  scan_button->setIcon(QIcon::fromTheme("system-search"));
+  scan_button->setCursor(Qt::PointingHandCursor);
+  scan_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
+  connect(scan_button, &QPushButton::clicked, this, &MainWindow::onScanForGamesClicked);
+
   layout->addStretch();
   layout->addWidget(title, 0, Qt::AlignCenter);
   layout->addWidget(hint, 0, Qt::AlignCenter);
   layout->addWidget(empty_state_button_, 0, Qt::AlignCenter);
+  layout->addWidget(scan_button, 0, Qt::AlignCenter);
   layout->addStretch();
 
   empty_state_overlay_->hide();
@@ -3125,6 +3134,16 @@ void MainWindow::onAddAppButtonClicked()
   add_app_dialog_->setAddMode();
   setBusyStatus(true, false);
   add_app_dialog_->show();
+}
+
+void MainWindow::onScanForGamesClicked()
+{
+  add_app_dialog_->setAddMode();
+  setBusyStatus(true, false);
+  add_app_dialog_->show();
+  // Jump straight into the Steam import scan, which lists installed games and flags the
+  // ones Limo has a preset for.
+  add_app_dialog_->openSteamImport();
 }
 
 
