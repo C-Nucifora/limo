@@ -312,7 +312,7 @@ void AssetPreviewDialog::previewText(const QString& path)
   }
 
   ui->header_label->setText(
-    QString("%1  [%2]").arg(ui->header_label->text(), QString::fromLatin1(encoding_name)));
+    QString("%1  [%2]").arg(ui->header_label->text(), encoding_name));
   setText(text);
 }
 
