@@ -14,6 +14,7 @@
  *   3  – runtime error reported by ApplicationManager
  */
 
+#include "core/consts.h" // fork #22
 #include "ui/applicationmanager.h"
 #include "ui/ipcclient.h"
 #include "ui/mainwindow.h"
@@ -24,10 +25,13 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLibraryInfo> // fork #22
+#include <QLocale>      // fork #22
 #include <QPalette>
 #include <QSettings>
 #include <QStyle>
 #include <QStyleFactory>
+#include <QTranslator> // fork #22
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
@@ -121,6 +125,64 @@ static void applyTheme(QApplication& app, int theme)
     palette.setColor(QPalette::Disabled, QPalette::ButtonText, QColor(0x80, 0x80, 0x80));
   }
   app.setPalette(palette);
+}
+
+
+/*!
+ * \brief Installs the UI translation for the configured language (fork #22).
+ *
+ * Reads the "language" key from QSettings(QCoreApplication::applicationName()).
+ * An empty value or "system" uses QLocale::system(); otherwise the value is
+ * treated as a locale string (e.g. "en", "de").  The compiled "limo_<locale>.qm"
+ * is searched for in the install location (share/limo/translations under the
+ * install prefix) and in a local-build location (./translations), mirroring how
+ * the app resolves steam_app_configs.  Qt's own base translation
+ * (qtbase_<locale>.qm) is loaded as well when available.  Missing translations
+ * are ignored silently so a failure here never prevents startup; the source
+ * (English) strings are then used.
+ *
+ * The QTranslator objects are heap-allocated and parented to \p app so they live
+ * for the lifetime of the application.
+ * \param app The running application instance.
+ */
+static void installTranslations(QApplication& app)
+{
+  QString locale_name;
+  {
+    QSettings settings(QCoreApplication::applicationName());
+    locale_name = settings.value("language", QString()).toString().trimmed();
+  }
+
+  QLocale locale = (locale_name.isEmpty() || locale_name == "system")
+                     ? QLocale::system()
+                     : QLocale(locale_name);
+
+  // Candidate directories for the bundled .qm files: install location first,
+  // then a local-build fallback (mirrors steam_app_configs resolution).
+  const bool is_flatpak = std::filesystem::exists("/.flatpak-info") ||
+                          getenv("container") == std::string("flatpak");
+  std::vector<QString> dirs;
+  dirs.push_back(QString::fromStdString(
+    (std::filesystem::path(is_flatpak ? "/app" : APP_INSTALL_PREFIX) / "share/limo/translations")
+      .string()));
+  dirs.emplace_back("translations");
+
+  // Limo's own translation.
+  auto* translator = new QTranslator(&app);
+  for(const QString& dir : dirs)
+  {
+    if(translator->load(locale, "limo", "_", dir))
+    {
+      app.installTranslator(translator);
+      break;
+    }
+  }
+
+  // Qt's base translation (buttons, dialogs, ...) when shipped with this Qt.
+  auto* qt_translator = new QTranslator(&app);
+  if(qt_translator->load(
+       locale, "qtbase", "_", QLibraryInfo::path(QLibraryInfo::TranslationsPath)))
+    app.installTranslator(qt_translator);
 }
 
 
@@ -744,6 +806,11 @@ int main(int argc, char* argv[])
                                         ? "io.github.limo_app.limo"
                                         : "limo");
   QApplication app(argc, argv);
+
+  // fork #22: Install the UI translation for the configured language as early as
+  // possible so tr() lookups are localized.  Guarded so a missing .qm never
+  // prevents startup (falls back to the English source strings).
+  installTranslations(app);
 
   // limo-app/limo#230: Under Flatpak/KDE, QT_STYLE_OVERRIDE may name a style
   // (e.g. "kvantum") that isn't present in the runtime, causing Qt to silently

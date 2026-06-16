@@ -1057,6 +1057,23 @@ void ApplicationManager::mergeTw3Scripts(int app_id, int deployer)
   emit completedOperations();
 }
 
+// fork #59: pass-throughs for the configured vanilla Witcher 3 scripts root.
+void ApplicationManager::setTw3VanillaScriptsRoot(int app_id, QString path)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::setTw3VanillaScriptsRoot>(app_id, path.toStdString());
+}
+
+QString ApplicationManager::getTw3VanillaScriptsRoot(int app_id)
+{
+  if(!appIndexIsValid(app_id))
+    return {};
+  auto path = handleExceptions(&ModdedApplication::getTw3VanillaScriptsRoot, apps_[app_id]);
+  if(path)
+    return QString::fromStdString(*path);
+  return {};
+}
+
 void ApplicationManager::mergeTw3Config(int app_id, int deployer)
 {
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))

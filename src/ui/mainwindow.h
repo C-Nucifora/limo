@@ -1364,6 +1364,8 @@ private slots:
   void onShowNexusNews();
   /*! \brief fork #212: Requests LOOT dirty/clean plugin info. */
   void onShowPluginCleanInfo();
+  /*! \brief fork #59: Picks the Witcher 3 vanilla scripts folder for 3-way merges. */
+  void onSetTw3VanillaScriptsRoot();
   /*! \brief fork #212: Receives LOOT dirty/clean info and shows it in a table dialog. */
   void onPluginCleanInfo(std::vector<PluginCleanInfoView> plugins, int app_id);
   /*! \brief fork #49: Requests a dry-run deployment preview. */
@@ -2022,6 +2024,8 @@ signals:
   void requestDeploymentPreview(int app_id);
   /*! \brief fork #212: Requests LOOT dirty/clean plugin info (answered by onPluginCleanInfo). */
   void requestPluginCleanInfo(int app_id);
+  /*! \brief fork #59: Sets the Witcher 3 vanilla scripts root used for 3-way script merges. */
+  void setTw3VanillaScriptsRoot(int app_id, QString path);
   /*! \brief fork #81: Re-scans reverse deployers so externally produced files appear. */
   void refreshReverseDeployers(int app_id);
   /*!

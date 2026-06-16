@@ -3004,6 +3004,9 @@ void ModdedApplication::updateSettings(bool write)
 
   json_settings_["steam_app_id"] = steam_app_id_;
 
+  // fork #59: persist the configured vanilla Witcher 3 scripts root.
+  json_settings_["tw3_vanilla_scripts_root"] = tw3_vanilla_scripts_root_;
+
   for(int i = 0; i < mod_rules_.size(); i++)
     json_settings_["mod_rules"][i] = mod_rules_[i].toJson();
 
@@ -3347,6 +3350,11 @@ void ModdedApplication::updateState(bool read)
     steam_app_id_ = json_settings_["steam_app_id"].asInt64();
   else
     updateSteamAppId();
+
+  // fork #59: restore the configured vanilla Witcher 3 scripts root (missing => empty).
+  tw3_vanilla_scripts_root_ = "";
+  if(json_settings_.isMember("tw3_vanilla_scripts_root"))
+    tw3_vanilla_scripts_root_ = json_settings_["tw3_vanilla_scripts_root"].asString();
 
   if(json_settings_.isMember("mod_rules"))
   {
@@ -3958,7 +3966,12 @@ std::string ModdedApplication::mergeTw3Scripts(int deployer)
   if(mods.empty())
     return "No enabled mods to merge scripts for.";
   const sfs::path output_dir = staging_dir_ / "tw3_merged_scripts";
-  const auto result = tw3_script_merge::mergeScripts(mods, output_dir);
+  // fork #59: use the configured vanilla scripts root as the 3-way merge base when it is set and
+  // present on disk; otherwise fall back to the current 2-way merge.
+  std::optional<sfs::path> vanilla_root;
+  if(!tw3_vanilla_scripts_root_.empty() && sfs::exists(sfs::path(tw3_vanilla_scripts_root_)))
+    vanilla_root = sfs::path(tw3_vanilla_scripts_root_);
+  const auto result = tw3_script_merge::mergeScripts(mods, output_dir, vanilla_root);
   if(result.scripts_merged == 0)
     return "No scripts are shared between two or more enabled mods; nothing to merge.";
   std::string msg =
@@ -3977,6 +3990,18 @@ std::string ModdedApplication::mergeTw3Scripts(int deployer)
   msg += "\nNote: experimental. The merged-scripts folder must be added as a high-priority mod "
          "for the game to use it, and no vanilla script base was supplied.";
   return msg;
+}
+
+// fork #59: configured vanilla Witcher 3 scripts root accessors.
+void ModdedApplication::setTw3VanillaScriptsRoot(const std::string& path)
+{
+  tw3_vanilla_scripts_root_ = path;
+  updateSettings(true);
+}
+
+std::string ModdedApplication::getTw3VanillaScriptsRoot() const
+{
+  return tw3_vanilla_scripts_root_;
 }
 
 std::string ModdedApplication::mergeTw3Config(int deployer)

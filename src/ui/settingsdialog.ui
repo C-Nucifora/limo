@@ -308,6 +308,34 @@
         </layout>
        </item>
        <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_language">
+         <item>
+          <widget class="QLabel" name="language_label">
+           <property name="text">
+            <string>Language:</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QComboBox" name="language_box">
+           <property name="toolTip">
+            <string>Changing the language takes effect after restarting Limo.</string>
+           </property>
+           <item>
+            <property name="text">
+             <string>System default</string>
+            </property>
+           </item>
+           <item>
+            <property name="text">
+             <string>English</string>
+            </property>
+           </item>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
         <layout class="QHBoxLayout" name="horizontalLayout_theme">
          <item>
           <widget class="QLabel" name="theme_label">
