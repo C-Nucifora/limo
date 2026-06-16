@@ -1,0 +1,79 @@
+{
+  "name": "Assetto Corsa",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Content",
+      "target_dir": "$STEAM_INSTALL_PATH$",
+      "deploy_mode": "hard link"
+    }
+  ],
+  "auto_tags":
+  [
+    {
+      "name": "Car",
+      "expression": "0",
+      "conditions":
+      [
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "ui_car.json",
+          "use_regex": false
+        }
+      ]
+    },
+    {
+      "name": "Track",
+      "expression": "0",
+      "conditions":
+      [
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "ui_track.json",
+          "use_regex": false
+        }
+      ]
+    },
+    {
+      "name": "App",
+      "expression": "0or1",
+      "conditions":
+      [
+        {
+          "condition_type": "path",
+          "invert": false,
+          "search_string": "apps/python/",
+          "use_regex": false
+        },
+        {
+          "condition_type": "path",
+          "invert": false,
+          "search_string": "apps/lua/",
+          "use_regex": false
+        }
+      ]
+    },
+    {
+      "name": "CSP/Extension",
+      "expression": "0or1",
+      "conditions":
+      [
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "dwrite.dll",
+          "use_regex": false
+        },
+        {
+          "condition_type": "path",
+          "invert": false,
+          "search_string": "extension/",
+          "use_regex": false
+        }
+      ]
+    }
+  ]
+}
