@@ -664,6 +664,68 @@ std::vector<LootDeployer::PluginMessage> LootDeployer::getPluginMessages() const
   return messages;
 }
 
+// fork #212: surface LOOT-masterlist dirty/clean plugin info per managed plugin.
+std::vector<LootDeployer::PluginCleanInfo> LootDeployer::getPluginCleanInfo() const
+{
+  std::vector<PluginCleanInfo> clean_info;
+  try
+  {
+    auto loot_handle = loot::CreateGameHandle(app_type_, source_path_, dest_path_);
+    auto& database = loot_handle->GetDatabase();
+
+    const sfs::path master_list_path = dest_path_ / "masterlist.yaml";
+    sfs::path user_list_path(dest_path_ / "userlist.yaml");
+    if(!sfs::exists(user_list_path))
+      user_list_path = "";
+    sfs::path prelude_path(dest_path_ / "prelude.yaml");
+    if(!sfs::exists(prelude_path))
+      prelude_path = "";
+    loadLists(database, sfs::exists(master_list_path) ? master_list_path : sfs::path(),
+              user_list_path, prelude_path);
+
+    // Load the plugins so condition evaluation has the data it needs.
+    std::vector<sfs::path> plugin_paths;
+    plugin_paths.reserve(plugins_.size());
+    for(const auto& [path, s] : plugins_)
+      plugin_paths.emplace_back(source_path_ / path);
+    loot_handle->LoadPlugins(plugin_paths, false);
+
+    clean_info.reserve(plugins_.size());
+    for(const auto& [plugin, enabled] : plugins_)
+    {
+      PluginCleanInfo info;
+      info.plugin = plugin;
+
+      // Evaluate conditions so only dirty info relevant to the current setup is returned.
+      const auto meta_data = database.GetPluginMetadata(plugin, true, true);
+      if(meta_data)
+      {
+        // A plugin may have several dirty-info entries (one per known CRC).
+        // Aggregate them so the consumer sees the worst case; the first entry's
+        // cleaning utility is used as the recommended one.
+        for(const auto& dirty : meta_data->GetDirtyInfo())
+        {
+          info.is_dirty = true;
+          info.itm_count += dirty.GetITMCount();
+          info.deleted_reference_count += dirty.GetDeletedReferenceCount();
+          info.deleted_navmesh_count += dirty.GetDeletedNavmeshCount();
+          if(info.cleaning_utility.empty())
+            info.cleaning_utility = dirty.GetCleaningUtility();
+        }
+      }
+
+      clean_info.push_back(std::move(info));
+    }
+  }
+  catch(const std::exception& e)
+  {
+    log_(Log::LOG_WARNING,
+         std::format("LOOT: Could not collect plugin clean info: {}", e.what()));
+    return {};
+  }
+  return clean_info;
+}
+
 void LootDeployer::writePlugins() const
 {
   PluginDeployer::writePlugins();
