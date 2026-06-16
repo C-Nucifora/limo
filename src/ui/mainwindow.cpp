@@ -974,6 +974,9 @@ void MainWindow::setupMenus()
   // fork #211: Nexus news / announcements feed.
   QAction* nexus_news_action = tools_menu->addAction(tr("Nexus News"));
   connect(nexus_news_action, &QAction::triggered, this, &MainWindow::onShowNexusNews);
+  // fork #197: import a Wabbajack modlist and queue its Nexus downloads.
+  QAction* wabbajack_action = tools_menu->addAction(tr("Import Wabbajack Modlist..."));
+  connect(wabbajack_action, &QAction::triggered, this, &MainWindow::onImportWabbajack);
   // fork #49: dry-run deployment preview.
   QAction* deploy_preview_action = tools_menu->addAction(tr("Preview Deployment Changes"));
   connect(deploy_preview_action, &QAction::triggered, this, &MainWindow::onShowDeploymentPreview);
@@ -4577,6 +4580,34 @@ void MainWindow::onShowNexusNews()
   // fork #211: open the Nexus news/announcements feed dialog.
   auto* dialog = new NexusNewsDialog(this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->show();
+}
+
+void MainWindow::onImportWabbajack()
+{
+  // fork #197: import a .wabbajack modlist and queue its Nexus-hosted mods for download via
+  // the same per-mod path used by Collections (#1). Wabbajack install directives (binary
+  // patches / inlined files / FOMOD replay) are not applied; this obtains the listed mods.
+  if(currentApp() < 0)
+  {
+    QMessageBox::information(
+      this, "Import Wabbajack Modlist", "Select or create an application first.");
+    return;
+  }
+  auto* dialog = new WabbajackImportDialog(this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  const int app_id = currentApp();
+  connect(dialog,
+          &WabbajackImportDialog::requestNexusDownload,
+          this,
+          [this, app_id](QString game_name, int mod_id, int file_id, QString version)
+          {
+            // Mirror Collection::Entry::modUrl(): the Nexus mod id is carried in the URL,
+            // and -1 is passed as the Limo target group (fresh install).
+            const QString mod_url =
+              "https://www.nexusmods.com/" + game_name + "/mods/" + QString::number(mod_id);
+            onModDownloadRequested(app_id, -1, file_id, mod_url, version);
+          });
   dialog->show();
 }
 
