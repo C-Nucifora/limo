@@ -130,6 +130,9 @@ set(CORE_SOURCES
         src/core/tw3scriptmerge.h
         src/core/changelogentry.cpp
         src/core/changelogentry.h
+        # fork #197: Wabbajack .wabbajack modlist parser
+        src/core/wabbajackmodlist.cpp
+        src/core/wabbajackmodlist.h
         src/core/compressionerror.h
         src/core/conflictinfo.h
         src/core/consts.h
@@ -323,6 +326,10 @@ set(PROJECT_SOURCES
         src/ui/changelogdialog.cpp
         src/ui/changelogdialog.h
         src/ui/changelogdialog.ui
+        # fork #197: Wabbajack .wabbajack modlist importer dialog
+        src/ui/wabbajackimportdialog.cpp
+        src/ui/wabbajackimportdialog.h
+        src/ui/wabbajackimportdialog.ui
         # fork #211: in-app Nexus news/announcements feed
         src/ui/nexusnewsdialog.cpp
         src/ui/nexusnewsdialog.h

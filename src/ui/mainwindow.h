@@ -47,6 +47,7 @@
 #include "ui/bsabrowserdialog.h" // fork #201
 #include "ui/assetpreviewdialog.h" // fork #209
 #include "ui/nexusnewsdialog.h" // fork #211
+#include "ui/wabbajackimportdialog.h" // fork #197
 #include "ui/restorepointsdialog.h" // fork #54
 #include "ui/pluginflagsdialog.h" // fork #202
 #include "core/plugindeployer.h" // fork #202
@@ -1362,6 +1363,8 @@ private slots:
   void onRestorePoints(std::vector<RestorePoint> restore_points, int app_id);
   /*! \brief fork #211: Opens the Nexus news/announcements dialog. */
   void onShowNexusNews();
+  /*! \brief fork #197: Opens the Wabbajack modlist importer and queues its Nexus downloads. */
+  void onImportWabbajack();
   /*! \brief fork #212: Requests LOOT dirty/clean plugin info. */
   void onShowPluginCleanInfo();
   /*! \brief fork #59: Picks the Witcher 3 vanilla scripts folder for 3-way merges. */
