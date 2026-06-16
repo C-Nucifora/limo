@@ -521,6 +521,8 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::requestPluginCleanInfo);
   connect(app_manager_, &ApplicationManager::sendPluginCleanInfo, // fork #212
           this, &MainWindow::onPluginCleanInfo);
+  connect(this, &MainWindow::setTw3VanillaScriptsRoot, // fork #59
+          app_manager_, &ApplicationManager::setTw3VanillaScriptsRoot);
   connect(this, &MainWindow::setModPinned,
           app_manager_, &ApplicationManager::setModPinned);
   connect(this, &MainWindow::getModRulesFor,
@@ -978,6 +980,10 @@ void MainWindow::setupMenus()
   // fork #212: LOOT dirty/clean plugin info.
   QAction* plugin_clean_action = tools_menu->addAction(tr("Plugin Cleaning Info (LOOT)"));
   connect(plugin_clean_action, &QAction::triggered, this, &MainWindow::onShowPluginCleanInfo);
+  // fork #59: configure the Witcher 3 vanilla scripts folder for 3-way script merges.
+  QAction* tw3_vanilla_action =
+    tools_menu->addAction(tr("Set Witcher 3 Vanilla Scripts Folder..."));
+  connect(tw3_vanilla_action, &QAction::triggered, this, &MainWindow::onSetTw3VanillaScriptsRoot);
   // fork #54: deploy restore points.
   QAction* restore_points_action = tools_menu->addAction(tr("Restore Points"));
   connect(restore_points_action, &QAction::triggered, this, &MainWindow::onShowRestorePoints);
@@ -4603,6 +4609,22 @@ void MainWindow::onShowPluginCleanInfo()
   setStatusMessage("Reading LOOT dirty-plugin data");
   setBusyStatus(true);
   emit requestPluginCleanInfo(currentApp());
+}
+
+void MainWindow::onSetTw3VanillaScriptsRoot()
+{
+  // fork #59: pick the unpacked Witcher 3 vanilla scripts root used as the 3-way merge base.
+  if(currentApp() < 0)
+    return;
+  const QString dir = QFileDialog::getExistingDirectory(
+    this,
+    "Select the unpacked Witcher 3 vanilla scripts folder (content0/scripts)",
+    QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+    QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+  if(dir.isEmpty())
+    return;
+  emit setTw3VanillaScriptsRoot(currentApp(), dir);
+  setStatusMessage("Witcher 3 vanilla scripts folder set", 3000);
 }
 
 void MainWindow::onPluginCleanInfo(std::vector<PluginCleanInfoView> plugins, int app_id)
