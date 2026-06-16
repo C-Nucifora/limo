@@ -318,6 +318,10 @@ set(PROJECT_SOURCES
         src/ui/changelogdialog.cpp
         src/ui/changelogdialog.h
         src/ui/changelogdialog.ui
+        # fork #211: in-app Nexus news/announcements feed
+        src/ui/nexusnewsdialog.cpp
+        src/ui/nexusnewsdialog.h
+        src/ui/nexusnewsdialog.ui
         # fork #202: plugin ESM/ESL flag awareness
         src/ui/pluginflagsdialog.cpp
         src/ui/pluginflagsdialog.h
