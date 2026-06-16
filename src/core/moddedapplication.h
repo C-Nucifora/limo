@@ -9,6 +9,7 @@
 #include "autotag.h"
 #include "backupmanager.h"
 #include "deployer.h"
+#include "plugindeployer.h" // fork #202
 #include "deployerinfo.h"
 #include "editautotagaction.h"
 #include "editdeployerinfo.h"
@@ -219,6 +220,11 @@ public:
    * \return The vector.
    */
   std::vector<ModInfo> getModInfo() const;
+  /*!
+   * \brief fork #202: Returns ESM/ESL flag info for the plugins of this app's first plugin
+   * deployer (empty if the app has no plugin deployer).
+   */
+  std::vector<PluginDeployer::PluginFlagInfo> getPluginFlagInfo() const;
   /*!
    * \brief Getter for the current mod load order of one Deployer.
    * \param deployer The target Deployer.

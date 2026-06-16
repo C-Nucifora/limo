@@ -802,6 +802,12 @@ signals:
    * \param app_id Target app.
    */
   void sendRestorePoints(std::vector<RestorePoint> restore_points, int app_id);
+  /*!
+   * \brief fork #202: Emitted in response to requestPluginFlags.
+   * \param plugins Per-plugin ESM/ESL flag info.
+   * \param app_id Target app.
+   */
+  void sendPluginFlags(std::vector<PluginDeployer::PluginFlagInfo> plugins, int app_id);
 
 public slots:
   /*!
@@ -1517,6 +1523,11 @@ public slots:
    */
   void requestRestorePoints(int app_id);
   /*!
+   * \brief fork #202: Computes plugin ESM/ESL flag info and emits it via sendPluginFlags.
+   * \param app_id Target app.
+   */
+  void requestPluginFlags(int app_id);
+  /*!
    * \brief Re-applies the load orders of the restore point at index to every deployer. // fork #54
    * \param app_id Target app.
    * \param index Restore point index.
@@ -1538,3 +1549,4 @@ public slots:
 };
 
 Q_DECLARE_METATYPE(std::vector<RestorePoint>); // fork #54
+Q_DECLARE_METATYPE(std::vector<PluginDeployer::PluginFlagInfo>); // fork #202

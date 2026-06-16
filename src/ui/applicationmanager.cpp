@@ -1117,6 +1117,16 @@ void ApplicationManager::requestRestorePoints(int app_id)
     emit sendRestorePoints(*points, app_id);
 }
 
+// fork #202: gather plugin ESM/ESL flag info from the app's plugin deployer and deliver it.
+void ApplicationManager::requestPluginFlags(int app_id)
+{
+  if(!appIndexIsValid(app_id))
+    return;
+  auto plugins = handleExceptions(&ModdedApplication::getPluginFlagInfo, apps_[app_id]);
+  if(plugins)
+    emit sendPluginFlags(*plugins, app_id);
+}
+
 void ApplicationManager::restoreRestorePoint(int app_id, int index)
 {
   if(appIndexIsValid(app_id))

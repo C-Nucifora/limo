@@ -45,6 +45,7 @@
 #include <QPalette>
 #include <QPushButton>
 #include <QColorDialog> // fork #199
+#include <QDateTime> // fork #54
 #include <QDragEnterEvent> // fork #16
 #include <QDropEvent> // fork #16
 #include <QMimeData> // fork #16
@@ -376,6 +377,8 @@ void MainWindow::setupConnections()
   qRegisterMetaType<Tool>();
   qRegisterMetaType<ImportModInfo>();
   qRegisterMetaType<std::vector<PrunableArchive>>(); // fork #145
+  qRegisterMetaType<std::vector<RestorePoint>>(); // fork #54
+  qRegisterMetaType<std::vector<PluginDeployer::PluginFlagInfo>>(); // fork #202
   qRegisterMetaType<std::vector<std::filesystem::path>>(); // fork #145/#208
   qRegisterMetaType<std::vector<ModRule>>();
   qRegisterMetaType<std::vector<std::string>>();
@@ -491,6 +494,20 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::updateModFromLocal);
   connect(this, &MainWindow::refreshReverseDeployers, // fork #81
           app_manager_, &ApplicationManager::refreshReverseDeployers);
+  connect(this, &MainWindow::createRestorePoint, // fork #54
+          app_manager_, &ApplicationManager::createRestorePoint);
+  connect(this, &MainWindow::requestRestorePoints, // fork #54
+          app_manager_, &ApplicationManager::requestRestorePoints);
+  connect(this, &MainWindow::restoreRestorePoint, // fork #54
+          app_manager_, &ApplicationManager::restoreRestorePoint);
+  connect(this, &MainWindow::deleteRestorePoint, // fork #54
+          app_manager_, &ApplicationManager::deleteRestorePoint);
+  connect(app_manager_, &ApplicationManager::sendRestorePoints, // fork #54
+          this, &MainWindow::onRestorePoints);
+  connect(this, &MainWindow::requestPluginFlags, // fork #202
+          app_manager_, &ApplicationManager::requestPluginFlags);
+  connect(app_manager_, &ApplicationManager::sendPluginFlags, // fork #202
+          this, &MainWindow::onPluginFlags);
   connect(this, &MainWindow::setModPinned,
           app_manager_, &ApplicationManager::setModPinned);
   connect(this, &MainWindow::getModRulesFor,
@@ -936,6 +953,12 @@ void MainWindow::setupMenus()
   // fork #201: BSA/BA2 archive browser & extractor.
   QAction* bsa_action = tools_menu->addAction(tr("BSA/BA2 Archive Browser"));
   connect(bsa_action, &QAction::triggered, this, &MainWindow::onOpenBsaBrowser);
+  // fork #202: plugin ESM/ESL flag overview.
+  QAction* plugin_flags_action = tools_menu->addAction(tr("Plugin ESM/ESL Flags"));
+  connect(plugin_flags_action, &QAction::triggered, this, &MainWindow::onShowPluginFlags);
+  // fork #54: deploy restore points.
+  QAction* restore_points_action = tools_menu->addAction(tr("Restore Points"));
+  connect(restore_points_action, &QAction::triggered, this, &MainWindow::onShowRestorePoints);
   // fork #78: a "View" menu with a checkable toggle for the Tools pane.
   QMenu* view_menu = menuBar()->addMenu(tr("View"));
   show_tools_pane_action_ = view_menu->addAction(tr("Show Tools Pane"));
@@ -4482,6 +4505,62 @@ void MainWindow::onUpdateModFromLocal()
   emit getModInfo(currentApp());
 }
 
+void MainWindow::onShowRestorePoints()
+{
+  // fork #54: ask the worker for the restore-point list; answered by onRestorePoints.
+  if(currentApp() < 0)
+    return;
+  emit requestRestorePoints(currentApp());
+}
+
+void MainWindow::onRestorePoints(std::vector<RestorePoint> restore_points, int app_id)
+{
+  // fork #54: show the restore-point dialog and act on restore/delete requests.
+  if(app_id != currentApp())
+    return;
+  auto* dialog = new RestorePointsDialog(restore_points, this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  connect(dialog,
+          &RestorePointsDialog::restoreRequested,
+          this,
+          [this](int index)
+          {
+            emit restoreRestorePoint(currentApp(), index);
+            emit getDeployerInfo(currentApp(), currentDeployer());
+            emit getModInfo(currentApp());
+          });
+  connect(dialog,
+          &RestorePointsDialog::deleteRequested,
+          this,
+          [this](int index) { emit deleteRestorePoint(currentApp(), index); });
+  dialog->exec();
+}
+
+void MainWindow::onShowPluginFlags()
+{
+  // fork #202: ask the worker for plugin flag info; answered by onPluginFlags.
+  if(currentApp() < 0)
+    return;
+  emit requestPluginFlags(currentApp());
+}
+
+void MainWindow::onPluginFlags(std::vector<PluginDeployer::PluginFlagInfo> plugins, int app_id)
+{
+  // fork #202: show the plugin ESM/ESL flags dialog.
+  if(app_id != currentApp())
+    return;
+  if(plugins.empty())
+  {
+    QMessageBox::information(
+      this,
+      "Plugin ESM/ESL Flags",
+      "This application has no plugin deployer, or it currently manages no plugins.");
+    return;
+  }
+  PluginFlagsDialog dialog(plugins, this);
+  dialog.exec();
+}
+
 void MainWindow::on_refresh_button_clicked()
 {
   // fork #81: re-scan reverse deployers so externally produced files become visible.
@@ -4986,6 +5065,11 @@ void MainWindow::onExternalChangesHandled(int app_id, int deployer, int num_depl
         return;
       }
     }
+    // fork #54: snapshot the load order before each deploy so it can be rolled back.
+    if(deploy)
+      emit createRestorePoint(
+        app_id,
+        "Before deploy " + QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
     const std::string action_string = deploy ? "Deploying" : "Undeploying";
     Log::info(action_string + " mods...");
     setStatusMessage((action_string + " mods").c_str());

@@ -633,6 +633,18 @@ std::vector<std::string> ModdedApplication::getDeployerNames() const
   return names;
 }
 
+// fork #202: ESM/ESL flag info from the app's first plugin deployer (empty if none).
+std::vector<PluginDeployer::PluginFlagInfo> ModdedApplication::getPluginFlagInfo() const
+{
+  for(const auto& deployer : deployers_)
+  {
+    auto* plugin_deployer = dynamic_cast<PluginDeployer*>(deployer.get());
+    if(plugin_deployer != nullptr)
+      return plugin_deployer->getPluginFlagInfo();
+  }
+  return {};
+}
+
 std::vector<ModInfo> ModdedApplication::getModInfo() const
 {
   std::vector<ModInfo> mod_info{};
