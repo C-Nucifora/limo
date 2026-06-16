@@ -803,3 +803,88 @@ std::vector<PluginDeployer::MissingMasterInfo> PluginDeployer::findMissingMaster
 
   return result;
 }
+
+// fork #202: plugin ESM/ESL flag awareness.
+PluginDeployer::PluginFlagInfo PluginDeployer::readPluginFlagInfo(
+  const std::string& plugin_name,
+  const sfs::path& plugin_path) const
+{
+  // Record-header flag bits in the TES4 header's 4 byte flags field.
+  constexpr uint32_t FLAG_MASTER = 0x1;   // ESM / master
+  constexpr uint32_t FLAG_LIGHT = 0x200;  // ESL / light
+
+  PluginFlagInfo info;
+  info.name = plugin_name;
+
+  // Extension hint: a .esl file is always light, a .esm file always a master. This is honored
+  // independently of whether the header could be read.
+  std::string ext = sfs::path(plugin_name).extension().string();
+  ext = toLowerAscii(ext);
+  if(ext == ".esl")
+    info.is_light = true;
+  else if(ext == ".esm")
+    info.is_master = true;
+
+  std::error_code ec;
+  if(!sfs::exists(plugin_path, ec) || ec)
+    return info;
+
+  std::ifstream file(plugin_path, std::ios::binary);
+  if(!file.is_open())
+    return info;
+
+  // The leading record is a 24 byte TES4 header: "TES4" | uint32 dataSize | uint32 flags | ...
+  // The flags field sits at offset 8, so reading the first 12 bytes is sufficient.
+  unsigned char header[12];
+  if(!file.read(reinterpret_cast<char*>(header), 12))
+    return info;
+  const std::string sig(reinterpret_cast<const char*>(header), 4);
+  if(sig != "TES4")
+    return info;
+
+  info.exists = true;
+  const uint32_t flags = readLE(header + 8, 4);
+  if(flags & FLAG_MASTER)
+    info.is_master = true;
+  if(flags & FLAG_LIGHT)
+    info.is_light = true;
+  return info;
+}
+
+// fork #202: plugin ESM/ESL flag awareness.
+std::vector<PluginDeployer::PluginFlagInfo> PluginDeployer::getPluginFlagInfo() const
+{
+  std::vector<PluginFlagInfo> result;
+  result.reserve(plugins_.size());
+  for(const auto& [name, _] : plugins_)
+  {
+    try
+    {
+      result.push_back(readPluginFlagInfo(name, source_path_ / name));
+    }
+    catch(...) // never let a malformed plugin abort the listing
+    {
+      PluginFlagInfo info;
+      info.name = name;
+      result.push_back(std::move(info));
+    }
+  }
+  return result;
+}
+
+// fork #202: plugin ESM/ESL flag awareness.
+std::pair<std::vector<PluginDeployer::PluginFlagInfo>, std::pair<int, int>>
+PluginDeployer::getPluginFlagInfoWithCounts() const
+{
+  std::vector<PluginFlagInfo> plugins = getPluginFlagInfo();
+  int full_count = 0;
+  int light_count = 0;
+  for(const auto& info : plugins)
+  {
+    if(info.is_light)
+      light_count++;
+    else
+      full_count++;
+  }
+  return { std::move(plugins), { full_count, light_count } };
+}

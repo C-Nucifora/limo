@@ -318,6 +318,10 @@ set(PROJECT_SOURCES
         src/ui/changelogdialog.cpp
         src/ui/changelogdialog.h
         src/ui/changelogdialog.ui
+        # fork #202: plugin ESM/ESL flag awareness
+        src/ui/pluginflagsdialog.cpp
+        src/ui/pluginflagsdialog.h
+        src/ui/pluginflagsdialog.ui
         # fork #145: bulk prune of outdated mod archive versions
         src/ui/pruneversionsdialog.cpp
         src/ui/pruneversionsdialog.h
