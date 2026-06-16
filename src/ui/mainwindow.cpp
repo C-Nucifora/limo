@@ -46,6 +46,9 @@
 #include <QPushButton>
 #include <QColorDialog> // fork #199
 #include <QDateTime> // fork #54
+#include <QDialog> // fork #212
+#include <QDialogButtonBox> // fork #212
+#include <QTableWidget> // fork #212
 #include <QDragEnterEvent> // fork #16
 #include <QDropEvent> // fork #16
 #include <QMimeData> // fork #16
