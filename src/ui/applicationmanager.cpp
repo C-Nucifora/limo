@@ -208,7 +208,7 @@ void ApplicationManager::applyAutoUpdateCheckConfig()
   }
   if(auto_update_check_enabled_)
   {
-    const int interval_hours = std::max(1, auto_update_check_interval_hours_);
+    const int interval_hours = std::max(1, auto_update_check_interval_hours_.load());
     // milliseconds; clamp the interval into QTimer's int range to avoid overflow.
     const qint64 interval_ms = static_cast<qint64>(interval_hours) * 60 * 60 * 1000;
     auto_update_timer_->setInterval(
