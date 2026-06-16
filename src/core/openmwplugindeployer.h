@@ -90,6 +90,33 @@ public:
    * \param profile The new profile.
    */
   virtual void setProfile(int profile) override;
+  // fork #87: OpenMW data= entry (VFS) deploy mode
+  /*!
+   * \brief Selects between the default behavior and the OpenMW native VFS deploy mode.
+   *
+   * This is an opt-in, deployer-local mode and does not change the inherited
+   * \ref Deployer::DeployMode (which always stays \ref copy for autonomous deployers).
+   * The base \ref setDeployMode is mapped here so existing UI/serialization can reach the
+   * new mode without touching always-compiled headers: \ref sym_link enables the VFS mode,
+   * any other value disables it.
+   * \param deploy_mode \ref sym_link enables data= entry mode, anything else disables it.
+   */
+  virtual void setDeployMode(DeployMode deploy_mode) override;
+  // fork #87: OpenMW data= entry (VFS) deploy mode
+  /*!
+   * \brief Explicitly enables or disables the OpenMW data= entry (VFS) deploy mode.
+   *
+   * When enabled, \ref writePluginsPrivate appends a Limo-owned block of
+   * \c data="..." lines (one per enabled mod's staging directory, in load order) to
+   * openmw.cfg instead of relying solely on the upstream file deployer. Default: off.
+   * \param enabled The new state.
+   */
+  void setUseDataEntryMode(bool enabled);
+  /*!
+   * \brief Getter for \ref use_data_entries_.
+   * \return True iff the OpenMW data= entry (VFS) deploy mode is active.
+   */
+  bool usesDataEntryMode() const;
 
 private:
   /*! \brief Name of the OpenMW config file. */
@@ -110,6 +137,11 @@ private:
   static constexpr std::array<std::string_view, 4> PLOX_RULES_FILE_NAMES = {
     "plox_rules.txt", "mlox_user.txt", "mlox_base.txt", "mlox_rules.txt"
   };
+  // fork #87: OpenMW data= entry (VFS) deploy mode
+  /*! \brief Marker line opening Limo's managed block of data= entries in openmw.cfg. */
+  static constexpr std::string_view DATA_BLOCK_BEGIN_MARKER = "# BEGIN limo data entries";
+  /*! \brief Marker line closing Limo's managed block of data= entries in openmw.cfg. */
+  static constexpr std::string_view DATA_BLOCK_END_MARKER = "# END limo data entries";
 
   /*! \brief Number of plugins with groundcover tag. */
   int num_groundcover_plugins_ = 0;
@@ -123,6 +155,9 @@ private:
   std::map<std::string, std::set<std::string>> tag_map_;
   /*! \brief Names of groundcover plugins. */
   std::set<std::string> groundcover_plugins_;
+  // fork #87: OpenMW data= entry (VFS) deploy mode
+  /*! \brief If true: manage a Limo-owned block of data= entries in openmw.cfg. Default: off. */
+  bool use_data_entries_ = false;
 
   /*! \brief Wrapper for \ref writePluginsPrivate. */
   void writePlugins() const override;
@@ -173,6 +208,26 @@ private:
                                   std::function<bool(int)> plugin_filter) const;
   /*! \brief Writes the plugins to disk. */
   void writePluginsPrivate() const;
+  // fork #87: OpenMW data= entry (VFS) deploy mode
+  /*!
+   * \brief Rewrites Limo's managed block of data= entries in openmw.cfg.
+   *
+   * Reads openmw.cfg, strips any previously written Limo block (delimited by
+   * \ref DATA_BLOCK_BEGIN_MARKER / \ref DATA_BLOCK_END_MARKER) while preserving every
+   * other line verbatim, then, if \p write_entries is true, appends a fresh block holding
+   * one \c data="..." line per enabled mod's staging directory in load order
+   * (deduplicated, order preserved). The file is written to a temporary file which then
+   * atomically replaces openmw.cfg so a failure can never corrupt the original. User and
+   * other non-Limo data= lines outside the marked block are never touched.
+   * \param write_entries If true: (re)write Limo's data= block; if false: only remove it.
+   */
+  void writeDataEntries(bool write_entries) const;
+  /*!
+   * \brief Computes the ordered, deduplicated list of staging directories to expose via
+   * \c data= entries for the currently enabled plugins, in load order.
+   * \return The directories (as quoted-ready strings).
+   */
+  std::vector<std::string> collectDataEntryPaths() const;
 
   /*!
    * \brief Locates a PLOX/mlox rules file in the destination directory.

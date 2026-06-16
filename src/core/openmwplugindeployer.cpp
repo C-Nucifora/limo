@@ -8,7 +8,9 @@
 #include <map>
 #include <queue>
 #include <ranges>
+#include <system_error>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace sfs = std::filesystem;
 namespace str = std::ranges;
@@ -56,6 +58,11 @@ void OpenMwPluginDeployer::unDeploy(std::optional<ProgressNode*> progress_node)
 
   log_(Log::LOG_INFO, std::format("Deployer '{}': Updating plugins...", name_));
   updatePlugins();
+  // fork #87: OpenMW data= entry (VFS) deploy mode
+  // Remove Limo's managed data= block on undeploy so openmw.cfg no longer references the
+  // staging directories. No-op (apart from a harmless rewrite) when the mode was never used.
+  if(use_data_entries_)
+    writeDataEntries(false);
 }
 
 std::vector<std::vector<int>> OpenMwPluginDeployer::getConflictGroups() const
@@ -573,6 +580,149 @@ void OpenMwPluginDeployer::writePluginsPrivate() const
                                return plugins_[i].second &&
                                       groundcover_plugins_.contains(plugins_[i].first);
                              });
+  // fork #87: OpenMW data= entry (VFS) deploy mode
+  // Keep Limo's managed data= block in sync with the current load order whenever the
+  // opt-in VFS mode is active. The default path above is left completely unchanged.
+  if(use_data_entries_)
+    writeDataEntries(true);
+}
+
+// fork #87: OpenMW data= entry (VFS) deploy mode
+void OpenMwPluginDeployer::setDeployMode(DeployMode deploy_mode)
+{
+  // Autonomous deployers always copy; we never change deploy_mode_. Instead, reuse the
+  // existing sym_link selector as the opt-in trigger for the native VFS data= entry mode
+  // so no always-compiled header needs a new enum value.
+  setUseDataEntryMode(deploy_mode == sym_link);
+}
+
+// fork #87: OpenMW data= entry (VFS) deploy mode
+void OpenMwPluginDeployer::setUseDataEntryMode(bool enabled)
+{
+  if(use_data_entries_ == enabled)
+    return;
+  const bool was_enabled = use_data_entries_;
+  use_data_entries_ = enabled;
+  if(enabled)
+    writeDataEntries(true);
+  else if(was_enabled)
+    writeDataEntries(false);
+}
+
+// fork #87: OpenMW data= entry (VFS) deploy mode
+bool OpenMwPluginDeployer::usesDataEntryMode() const
+{
+  return use_data_entries_;
+}
+
+// fork #87: OpenMW data= entry (VFS) deploy mode
+std::vector<std::string> OpenMwPluginDeployer::collectDataEntryPaths() const
+{
+  // One data= entry per enabled mod's staging directory, in load order, deduplicated.
+  // Each plugin file lives in source_path_ (the upstream deployer's target), so that is
+  // the directory OpenMW must be pointed at. Using the per-plugin source directory keeps
+  // this correct should a future layout place plugins in distinct directories.
+  std::vector<std::string> paths;
+  std::unordered_set<std::string> seen;
+  for(const auto& [plugin, enabled] : plugins_)
+  {
+    if(!enabled)
+      continue;
+    const sfs::path plugin_path = source_path_ / plugin;
+    std::error_code ec;
+    sfs::path dir = plugin_path.parent_path();
+    if(dir.empty())
+      dir = source_path_;
+    // Prefer the canonical path when it resolves, but never fail deployment over it.
+    const sfs::path canonical = sfs::weakly_canonical(dir, ec);
+    const std::string entry = (ec ? dir : canonical).string();
+    if(seen.insert(entry).second)
+      paths.push_back(entry);
+  }
+  return paths;
+}
+
+// fork #87: OpenMW data= entry (VFS) deploy mode
+void OpenMwPluginDeployer::writeDataEntries(bool write_entries) const
+{
+  const sfs::path config_path = dest_path_ / OPEN_MW_CONFIG_FILE_NAME;
+
+  std::ifstream in_file(config_path);
+  if(!in_file.is_open())
+    throw std::runtime_error(
+      std::format("Error: Could not open '{}'.", config_path.string()));
+
+  // Copy every line verbatim except the previously written Limo block, which is dropped.
+  std::vector<std::string> lines;
+  std::string line;
+  bool in_block = false;
+  while(std::getline(in_file, line))
+  {
+    std::string trimmed = line;
+    if(!trimmed.empty() && trimmed.back() == '\r')
+      trimmed.pop_back();
+    if(trimmed == DATA_BLOCK_BEGIN_MARKER)
+    {
+      in_block = true;
+      continue;
+    }
+    if(in_block)
+    {
+      if(trimmed == DATA_BLOCK_END_MARKER)
+        in_block = false;
+      continue;
+    }
+    lines.push_back(line);
+  }
+  in_file.close();
+
+  // Write to a temporary file first, then atomically replace openmw.cfg so an error can
+  // never leave the user with a corrupted config.
+  const sfs::path temp_path = config_path.string() + ".lmm_tmp";
+  {
+    std::ofstream out_file(temp_path, std::ios::binary | std::ios::trunc);
+    if(!out_file.is_open())
+      throw std::runtime_error(
+        std::format("Error: Could not open '{}'.", temp_path.string()));
+
+    for(const auto& out_line : lines)
+      out_file << out_line << "\n";
+
+    if(write_entries)
+    {
+      const auto data_paths = collectDataEntryPaths();
+      if(!data_paths.empty())
+      {
+        out_file << DATA_BLOCK_BEGIN_MARKER << "\n";
+        for(const auto& path : data_paths)
+          out_file << "data=\"" << path << "\"\n";
+        out_file << DATA_BLOCK_END_MARKER << "\n";
+      }
+    }
+
+    out_file.flush();
+    if(!out_file.good())
+    {
+      out_file.close();
+      std::error_code rm_ec;
+      sfs::remove(temp_path, rm_ec);
+      throw std::runtime_error(
+        std::format("Error: Failed while writing '{}'.", temp_path.string()));
+    }
+  }
+
+  std::error_code ec;
+  sfs::rename(temp_path, config_path, ec);
+  if(ec)
+  {
+    // Fallback for e.g. cross-device temp locations: copy then remove.
+    sfs::copy_file(temp_path, config_path, sfs::copy_options::overwrite_existing, ec);
+    std::error_code rm_ec;
+    sfs::remove(temp_path, rm_ec);
+    if(ec)
+      throw std::runtime_error(
+        std::format("Error: Could not replace '{}'.", config_path.string()));
+  }
 }
 
 std::optional<sfs::path> OpenMwPluginDeployer::findPloxRulesFile() const
