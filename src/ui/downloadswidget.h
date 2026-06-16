@@ -6,6 +6,7 @@
 #pragma once
 
 #include "applicationmanager.h"
+#include <QString>
 #include <QWidget>
 #include <vector>
 
@@ -58,13 +59,43 @@ private slots:
   void onClearFinishedClicked();
 
 private:
+  /*! \brief fork #141: A single persisted completed-download history record. */
+  struct HistoryEntry
+  {
+    /*! \brief Archive/display name of the completed download. */
+    QString name;
+    /*! \brief Remote source/url, if it was known (may be empty). */
+    QString source;
+    /*! \brief Total size in bytes (0 if unknown). */
+    long long size = 0;
+    /*! \brief Completion timestamp (unix seconds, UTC). */
+    qint64 timestamp = 0;
+  };
+
   /*! \brief Auto-generated UI. */
   Ui::DownloadsWidget* ui;
   /*! \brief Last queue snapshot, used by the Clear finished button. */
   std::vector<DownloadQueueItem> queue_;
+  /*! \brief fork #141: Persisted completed-download history (most-recent last). */
+  std::vector<HistoryEntry> history_;
 
   /*! \brief Returns a human readable status string for the given status. */
   static QString statusString(DownloadQueueItem::Status status);
   /*! \brief Returns a human readable size string (e.g. "12.3 MiB"). */
   static QString formatSize(double bytes);
+
+  /*! \brief fork #141: Maximum number of history records kept on disk. */
+  static constexpr int HISTORY_MAX = 500;
+  /*! \brief fork #141: Path of the JSON file the history is persisted to. */
+  static QString historyFilePath();
+  /*! \brief fork #141: Loads history from disk (missing/corrupt file -> empty). */
+  void loadHistory();
+  /*! \brief fork #141: Writes history to disk (guarded; failures are ignored). */
+  void saveHistory() const;
+  /*!
+   * \brief fork #141: Records newly completed downloads from a queue snapshot.
+   * \param queue Current download queue.
+   * \return true if a new history record was appended.
+   */
+  bool recordCompletedDownloads(const std::vector<DownloadQueueItem>& queue);
 };

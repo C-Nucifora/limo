@@ -1,9 +1,16 @@
 #include "downloadswidget.h"
 #include "ui_downloadswidget.h"
+#include <QDateTime>      // fork #141
+#include <QDir>           // fork #141
+#include <QFile>          // fork #141
 #include <QHBoxLayout>
 #include <QHeaderView>
+#include <QJsonArray>     // fork #141
+#include <QJsonDocument>  // fork #141
+#include <QJsonObject>    // fork #141
 #include <QProgressBar>
 #include <QPushButton>
+#include <QStandardPaths> // fork #141
 #include <QTableWidgetItem>
 #include <QWidget>
 
@@ -44,6 +51,11 @@ DownloadsWidget::DownloadsWidget(QWidget* parent) :
           &QPushButton::clicked,
           this,
           &DownloadsWidget::onClearFinishedClicked);
+
+  // fork #141: restore completed downloads from previous sessions before any
+  // live queue snapshot arrives, so prior-session history is visible at startup.
+  loadHistory();
+  onDownloadQueueChanged({});
 
   // ask the application manager for the current queue
   emit requestDownloadQueue();
@@ -87,7 +99,32 @@ QString DownloadsWidget::formatSize(double bytes)
 void DownloadsWidget::onDownloadQueueChanged(std::vector<DownloadQueueItem> queue)
 {
   queue_ = queue;
-  ui->download_table->setRowCount((int)queue.size());
+
+  // fork #141: persist any newly completed downloads from this snapshot.
+  if(recordCompletedDownloads(queue))
+    saveHistory();
+
+  // fork #141: append persisted history rows that are not represented by a live
+  // queue item, so prior-session completed downloads stay visible after restart.
+  std::vector<const HistoryEntry*> shown_history;
+  for(int i = (int)history_.size() - 1; i >= 0; i--)
+  {
+    const HistoryEntry& entry = history_[i];
+    bool in_queue = false;
+    for(const DownloadQueueItem& item : queue)
+    {
+      if(item.status == DownloadQueueItem::done &&
+         QString::fromStdString(item.name) == entry.name)
+      {
+        in_queue = true;
+        break;
+      }
+    }
+    if(!in_queue)
+      shown_history.push_back(&entry);
+  }
+
+  ui->download_table->setRowCount((int)queue.size() + (int)shown_history.size());
   for(int row = 0; row < (int)queue.size(); row++)
   {
     const DownloadQueueItem& item = queue[row];
@@ -143,6 +180,39 @@ void DownloadsWidget::onDownloadQueueChanged(std::vector<DownloadQueueItem> queu
 
     ui->download_table->setCellWidget(row, COL_ACTIONS, actions);
   }
+
+  // fork #141: render persisted history rows as clearly-finished, read-only
+  // entries (no progress widget, no Cancel/Retry that could restart anything).
+  for(int i = 0; i < (int)shown_history.size(); i++)
+  {
+    const HistoryEntry& entry = *shown_history[i];
+    const int row = (int)queue.size() + i;
+
+    auto* name_item = new QTableWidgetItem(entry.name);
+    if(!entry.source.isEmpty())
+      name_item->setToolTip(entry.source);
+    ui->download_table->setItem(row, COL_NAME, name_item);
+
+    auto* bar = new QProgressBar();
+    bar->setMinimum(0);
+    bar->setMaximum(100);
+    bar->setValue(100);
+    ui->download_table->setCellWidget(row, COL_PROGRESS, bar);
+
+    QString size_text = entry.size > 0 ? formatSize((double)entry.size) : QString("-");
+    ui->download_table->setItem(row, COL_SPEED, new QTableWidgetItem(size_text));
+
+    QString status_text = "Done";
+    if(entry.timestamp > 0)
+    {
+      const QDateTime when = QDateTime::fromSecsSinceEpoch(entry.timestamp);
+      status_text += " (" + when.toLocalTime().toString("yyyy-MM-dd hh:mm") + ")";
+    }
+    ui->download_table->setItem(row, COL_STATUS, new QTableWidgetItem(status_text));
+
+    // empty actions cell: history rows have no per-item buttons.
+    ui->download_table->setItem(row, COL_ACTIONS, new QTableWidgetItem(QString()));
+  }
 }
 
 void DownloadsWidget::onClearFinishedClicked()
@@ -153,4 +223,106 @@ void DownloadsWidget::onClearFinishedClicked()
        item.status == DownloadQueueItem::cancelled)
       emit removeDownload(item.id);
   }
+
+  // fork #141: clearing finished downloads also empties the persisted history,
+  // keeping the in-memory rows and the on-disk store consistent.
+  history_.clear();
+  saveHistory();
+  onDownloadQueueChanged(queue_);
+}
+
+QString DownloadsWidget::historyFilePath()
+{
+  // fork #141: same base dir the app uses for its other JSON settings.
+  const QString dir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+  QDir().mkpath(dir);
+  return dir + "/download_history.json";
+}
+
+void DownloadsWidget::loadHistory()
+{
+  // fork #141: missing or corrupt file simply yields an empty history.
+  history_.clear();
+  QFile file(historyFilePath());
+  if(!file.open(QIODevice::ReadOnly))
+    return;
+  const QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
+  if(!doc.isArray())
+    return;
+  for(const QJsonValue& value : doc.array())
+  {
+    if(!value.isObject())
+      continue;
+    const QJsonObject obj = value.toObject();
+    HistoryEntry entry;
+    entry.name = obj.value("name").toString();
+    entry.source = obj.value("source").toString();
+    entry.size = (long long)obj.value("size").toDouble(0);
+    entry.timestamp = (qint64)obj.value("timestamp").toDouble(0);
+    if(entry.name.isEmpty())
+      continue;
+    history_.push_back(entry);
+  }
+  // enforce the cap in case an older/edited file exceeds it.
+  if((int)history_.size() > HISTORY_MAX)
+    history_.erase(history_.begin(), history_.end() - HISTORY_MAX);
+}
+
+void DownloadsWidget::saveHistory() const
+{
+  // fork #141: guarded write; failure to persist is non-fatal.
+  QJsonArray array;
+  for(const HistoryEntry& entry : history_)
+  {
+    QJsonObject obj;
+    obj.insert("name", entry.name);
+    obj.insert("source", entry.source);
+    obj.insert("size", (double)entry.size);
+    obj.insert("timestamp", (double)entry.timestamp);
+    array.append(obj);
+  }
+  QFile file(historyFilePath());
+  if(!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+    return;
+  file.write(QJsonDocument(array).toJson(QJsonDocument::Compact));
+}
+
+bool DownloadsWidget::recordCompletedDownloads(const std::vector<DownloadQueueItem>& queue)
+{
+  // fork #141: append a lightweight record for each freshly completed download
+  // that is not already in the history (deduped on name + size).
+  bool changed = false;
+  for(const DownloadQueueItem& item : queue)
+  {
+    if(item.status != DownloadQueueItem::done)
+      continue;
+    const QString name = QString::fromStdString(item.name);
+    if(name.isEmpty())
+      continue;
+
+    bool already_known = false;
+    for(const HistoryEntry& entry : history_)
+    {
+      if(entry.name == name && entry.size == item.bytes_total)
+      {
+        already_known = true;
+        break;
+      }
+    }
+    if(already_known)
+      continue;
+
+    HistoryEntry entry;
+    entry.name = name;
+    entry.source = QString::fromStdString(
+      !item.remote_source.empty() ? item.remote_source : item.remote_request_url);
+    entry.size = item.bytes_total;
+    entry.timestamp = QDateTime::currentSecsSinceEpoch();
+    history_.push_back(entry);
+    changed = true;
+  }
+
+  if(changed && (int)history_.size() > HISTORY_MAX)
+    history_.erase(history_.begin(), history_.end() - HISTORY_MAX);
+  return changed;
 }
