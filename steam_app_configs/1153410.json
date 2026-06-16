@@ -1,0 +1,12 @@
+{
+  "name": "JDM: Japanese Drift Master",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Paks (~mods)",
+      "target_dir": "$STEAM_INSTALL_PATH$/JDM/Content/Paks/~mods",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

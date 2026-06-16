@@ -1,0 +1,12 @@
+{
+  "name": "Cities: Skylines",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Mods",
+      "target_dir": "$STEAM_PREFIX_PATH$/users/steamuser/AppData/Local/Colossal Order/Cities_Skylines/Addons/Mods",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

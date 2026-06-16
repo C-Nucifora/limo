@@ -1,0 +1,28 @@
+{
+  "name": "Mount & Blade II: Bannerlord",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Modules",
+      "target_dir": "$STEAM_INSTALL_PATH$/Modules",
+      "deploy_mode": "hard link"
+    }
+  ],
+  "auto_tags":
+  [
+    {
+      "name": "Module",
+      "expression": "0",
+      "conditions":
+      [
+        {
+          "condition_type": "file_name",
+          "invert": false,
+          "search_string": "SubModule.xml",
+          "use_regex": false
+        }
+      ]
+    }
+  ]
+}

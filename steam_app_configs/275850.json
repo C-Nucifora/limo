@@ -1,0 +1,12 @@
+{
+  "name": "No Man's Sky",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Mods",
+      "target_dir": "$STEAM_INSTALL_PATH$/GAMEDATA/MODS",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

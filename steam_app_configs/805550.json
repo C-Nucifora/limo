@@ -1,0 +1,12 @@
+{
+  "name": "Assetto Corsa Competizione",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Custom Liveries",
+      "target_dir": "$STEAM_PREFIX_PATH$/users/steamuser/Documents/Assetto Corsa Competizione/Customs",
+      "deploy_mode": "hard link"
+    }
+  ]
+}

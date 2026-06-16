@@ -1,0 +1,11 @@
+{
+  "name": "X4: Foundations",
+  "deployers":
+  [
+    { "type": "Case Matching Deployer", "name": "Extensions", "target_dir": "$STEAM_INSTALL_PATH$/extensions", "deploy_mode": "hard link" }
+  ],
+  "auto_tags":
+  [
+    { "name": "Extension", "expression": "0", "conditions": [ { "condition_type": "file_name", "invert": false, "search_string": "content.xml", "use_regex": false } ] }
+  ]
+}

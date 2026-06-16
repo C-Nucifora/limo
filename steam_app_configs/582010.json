@@ -1,0 +1,12 @@
+{
+  "name": "Monster Hunter: World",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "nativePC",
+      "target_dir": "$STEAM_INSTALL_PATH$/nativePC",
+      "deploy_mode": "hard link"
+    }
+  ]
+}
