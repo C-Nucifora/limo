@@ -58,6 +58,12 @@ AddModDialog::AddModDialog(ModListModel* mod_list_model,
     box->setLayout(layout);
     grid->addWidget(box, i / 2, i % 2);
   }
+  // no_extract is a standalone toggle (not part of an exclusive group): deploy the archive
+  // file itself instead of its contents (e.g. Farming Simulator / Factorio .zip mods).
+  no_extract_check_ = new QCheckBox(Installer::OPTION_NAMES.at(Installer::no_extract).c_str());
+  no_extract_check_->setToolTip(Installer::OPTION_DESCRIPTIONS.at(Installer::no_extract).c_str());
+  grid->addWidget(
+    no_extract_check_, static_cast<int>(Installer::OPTION_GROUPS.size() + 1) / 2, 0, 1, 2);
   auto group_validator = [groups = &groups_](QString s) { return groups->contains(s); };
   ui->group_field->setCustomValidator(group_validator);
   ui->group_field->setValidationMode(ValidatingLineEdit::VALID_CUSTOM);
@@ -66,6 +72,12 @@ AddModDialog::AddModDialog(ModListModel* mod_list_model,
 AddModDialog::~AddModDialog()
 {
   delete ui;
+}
+
+void AddModDialog::setDefaultInstallFlags(int flags)
+{
+  if(no_extract_check_)
+    no_extract_check_->setChecked((flags & Installer::no_extract) != 0);
 }
 
 void AddModDialog::updateOkButton()
@@ -499,6 +511,8 @@ void AddModDialog::on_buttonBox_accepted()
   int options = 0;
   for(const auto group : static_cast<const QList<QButtonGroup*>>(option_groups_))
     options |= group->checkedId();
+  if(no_extract_check_ && no_extract_check_->isChecked())
+    options |= Installer::no_extract;
   const bool replace_mod = ui->group_combo_box->currentIndex() == REPLACE_MOD_INDEX;
   int group = -1;
   const QString group_name = ui->group_field->text();

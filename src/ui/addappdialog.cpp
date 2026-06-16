@@ -16,6 +16,8 @@
 #include <QStandardPaths>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <optional>
 #include <set>
 
 namespace sfs = std::filesystem;
@@ -237,13 +239,15 @@ std::vector<sfs::path> AddAppDialog::gameConfigSearchDirs()
   return dirs;
 }
 
-bool AddAppDialog::hasGameConfig(const std::string& app_id)
+namespace
+{
+// Locates "<app_id>.json" without needing an AddAppDialog instance: the user-writable
+// config dir first, then the bundled steam_app_configs dir. Uses the global flatpak flag
+// (set during MainWindow init) so the bundled path resolves correctly.
+std::optional<sfs::path> findGameConfigFile(const std::string& app_id)
 {
   if(app_id.empty())
-    return false;
-  // Mirror gameConfigSearchDirs() without needing an instance: the user-writable
-  // config dir first, then the bundled steam_app_configs dir. Uses the global flatpak
-  // flag (set during MainWindow init) so the bundled path resolves correctly.
+    return std::nullopt;
   const bool is_flatpak = Installer::isAFlatpak();
   std::vector<sfs::path> dirs;
   const QString user_loc = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
@@ -260,9 +264,55 @@ bool AddAppDialog::hasGameConfig(const std::string& app_id)
   for(const auto& dir : dirs)
   {
     if(sfs::is_regular_file(dir / config_file_name, ec))
-      return true;
+      return dir / config_file_name;
   }
-  return false;
+  return std::nullopt;
+}
+}
+
+bool AddAppDialog::hasGameConfig(const std::string& app_id)
+{
+  return findGameConfigFile(app_id).has_value();
+}
+
+int AddAppDialog::presetInstallFlags(const std::string& app_id)
+{
+  const auto config_file = findGameConfigFile(app_id);
+  if(!config_file)
+    return 0;
+  std::ifstream file(*config_file);
+  if(!file.is_open())
+    return 0;
+  Json::Value root;
+  try
+  {
+    file >> root;
+  }
+  catch(const std::exception&)
+  {
+    return 0;
+  }
+  static const std::map<std::string, Installer::Flag> flag_by_name{
+    { "preserve_case", Installer::preserve_case },
+    { "lower_case", Installer::lower_case },
+    { "upper_case", Installer::upper_case },
+    { "preserve_directories", Installer::preserve_directories },
+    { "single_directory", Installer::single_directory },
+    { "no_extract", Installer::no_extract }
+  };
+  int flags = 0;
+  if(root.isMember("default_install_flags") && root["default_install_flags"].isArray())
+  {
+    for(const auto& value : root["default_install_flags"])
+    {
+      if(!value.isString())
+        continue;
+      const auto it = flag_by_name.find(value.asString());
+      if(it != flag_by_name.end())
+        flags |= it->second;
+    }
+  }
+  return flags;
 }
 
 void AddAppDialog::initConfigForApp()

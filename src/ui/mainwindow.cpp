@@ -2941,6 +2941,10 @@ void MainWindow::onExtractionComplete(ImportModInfo info)
                                                      root_level_conditions_);
   if(was_successful)
   {
+    // Default the install options from the game's preset (e.g. drop-in archive games
+    // default to "no extract" so their .zip mods deploy whole). #230.
+    add_mod_dialog_->setDefaultInstallFlags(
+      AddAppDialog::presetInstallFlags(std::to_string(app_info_.steam_app_id)));
     setBusyStatus(true, false);
     add_mod_dialog_->show();
   }
