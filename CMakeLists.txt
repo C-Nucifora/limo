@@ -322,6 +322,10 @@ set(PROJECT_SOURCES
         src/ui/pluginflagsdialog.cpp
         src/ui/pluginflagsdialog.h
         src/ui/pluginflagsdialog.ui
+        # fork #54: deploy restore points (load-order snapshots)
+        src/ui/restorepointsdialog.cpp
+        src/ui/restorepointsdialog.h
+        src/ui/restorepointsdialog.ui
         # fork #145: bulk prune of outdated mod archive versions
         src/ui/pruneversionsdialog.cpp
         src/ui/pruneversionsdialog.h

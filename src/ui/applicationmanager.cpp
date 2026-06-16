@@ -1100,6 +1100,44 @@ void ApplicationManager::sortModsByConflicts(int app_id, int deployer)
   emit completedOperations("Mods sorted");
 }
 
+// fork #54: deploy restore points (load-order snapshots).
+void ApplicationManager::createRestorePoint(int app_id, QString name)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::createRestorePoint>(app_id, name.toStdString());
+  emit completedOperations("Restore point created");
+}
+
+void ApplicationManager::requestRestorePoints(int app_id)
+{
+  if(!appIndexIsValid(app_id))
+    return;
+  auto points = handleExceptions(&ModdedApplication::getRestorePoints, apps_[app_id]);
+  if(points)
+    emit sendRestorePoints(*points, app_id);
+}
+
+void ApplicationManager::restoreRestorePoint(int app_id, int index)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::restoreRestorePoint>(app_id, index);
+  emit completedOperations("Restore point applied");
+}
+
+void ApplicationManager::deleteRestorePoint(int app_id, int index)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::deleteRestorePoint>(app_id, index);
+  emit completedOperations("Restore point deleted");
+}
+
+std::vector<RestorePoint> ApplicationManager::getRestorePoints(int app_id)
+{
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return {};
+  return apps_[app_id].getRestorePoints();
+}
+
 void ApplicationManager::extractArchive(ImportModInfo info)
 {
   handleExceptionsForFunction(performExtraction, info, this);
