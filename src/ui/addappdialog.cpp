@@ -12,6 +12,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <filesystem>
 #include <fstream>
@@ -40,6 +41,10 @@ AddAppDialog::AddAppDialog(bool is_flatpak, QWidget* parent) :
           &ImportFromSteamDialog::applicationImported,
           this,
           &AddAppDialog::onApplicationImported);
+  connect(import_from_steam_dialog_.get(),
+          &ImportFromSteamDialog::addAllSupportedRequested,
+          this,
+          &AddAppDialog::onAddAllSupported);
   // Populate GOG template combo at construction so it's ready when setAddMode() is called.
   // (issue #74 / limo-app/limo#51)
   populateGogTemplateCombo();
@@ -768,13 +773,78 @@ void AddAppDialog::on_buttonBox_accepted()
 
 void AddAppDialog::on_import_button_clicked()
 {
+  batch_import_done_ = false;
   import_from_steam_dialog_->init();
   import_from_steam_dialog_->exec();
+  // If the user chose "Add all supported", the apps were created during the import dialog's
+  // signal; close this dialog now that the modal import sub-dialog has returned.
+  if(batch_import_done_)
+  {
+    batch_import_done_ = false;
+    accept();
+  }
 }
 
 void AddAppDialog::openSteamImport()
 {
   on_import_button_clicked();
+}
+
+void AddAppDialog::addImportedAppDirect(const QString& name,
+                                        const QString& app_id,
+                                        const QString& install_dir,
+                                        const QString& prefix_path,
+                                        const QString& icon_path,
+                                        const QString& staging_dir)
+{
+  // Populate the same state the interactive import sets (members + deployers_/auto_tags_
+  // via initConfigForApp), then build the app info directly without the visible form.
+  onApplicationImported(name, app_id, install_dir, prefix_path, icon_path);
+  std::error_code ec;
+  sfs::create_directories(staging_dir.toStdString(), ec);
+  if(ec)
+  {
+    Log::error("Batch import: could not create staging dir '" + staging_dir.toStdString() +
+               "': " + ec.message() + " — skipping '" + name.toStdString() + "'.");
+    return;
+  }
+  EditApplicationInfo info;
+  info.name = name.toStdString();
+  info.staging_dir = staging_dir.toStdString();
+  info.command = ("xdg-open steam://rungameid/" + app_id).toStdString();
+  info.icon_path = icon_path.toStdString();
+  info.steam_app_id = steam_app_id_;
+  info.deployers = deployers_;
+  info.auto_tags = auto_tags_;
+  emit applicationAdded(info);
+}
+
+void AddAppDialog::onAddAllSupported(const QList<QStringList>& games)
+{
+  if(games.isEmpty())
+    return;
+  const QString root = QFileDialog::getExistingDirectory(
+    this,
+    "Select a parent folder for mod staging",
+    QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+    QFileDialog::ShowDirsOnly);
+  if(root.isEmpty())
+    return;
+  int added = 0;
+  for(const QStringList& g : games)
+  {
+    if(g.size() < 5)
+      continue;
+    QString folder = g[0];
+    folder.replace(QRegularExpression("[^A-Za-z0-9._ -]"), "_");
+    if(folder.trimmed().isEmpty())
+      folder = g[1];
+    const sfs::path staging = sfs::path(root.toStdString()) / folder.toStdString();
+    addImportedAppDirect(g[0], g[1], g[2], g[3], g[4], QString::fromStdString(staging.string()));
+    added++;
+  }
+  Log::info("Batch import: added " + std::to_string(added) + " supported game(s).");
+  batch_import_done_ = true;
 }
 
 void AddAppDialog::onApplicationImported(QString name,

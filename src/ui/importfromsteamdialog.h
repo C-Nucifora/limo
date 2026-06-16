@@ -6,6 +6,8 @@
 #pragma once
 
 #include <QDialog>
+#include <QList>
+#include <QStringList>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -124,6 +126,8 @@ private slots:
   void on_app_table_itemSelectionChanged();
   /*! \brief Opens a file dialog to choose a custom Proton/WINE prefix drive_c directory. */
   void on_pick_prefix_button_clicked();
+  /*! \brief Collects every supported (preset) game and requests a batch add. */
+  void onAddAllSupportedClicked();
 
 signals:
   /*!
@@ -140,4 +144,9 @@ signals:
                            QString install_dir,
                            QString prefix_path,
                            QString icon_path);
+  /*!
+   * \brief Requests batch import of every supported game.
+   * \param games List of [name, app_id, install_dir, prefix_path, icon_path] per game.
+   */
+  void addAllSupportedRequested(QList<QStringList> games);
 };

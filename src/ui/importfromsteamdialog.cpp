@@ -5,6 +5,7 @@
 #include <QDebug>
 #include <QFileDialog>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QSettings>
 #include <QStandardPaths>
 #include <fstream>
@@ -23,6 +24,14 @@ ImportFromSteamDialog::ImportFromSteamDialog(QWidget* parent) :
 {
   ui->setupUi(this);
   setWindowTitle("Import App");
+  // Batch action: add every game Limo has a preset for in one go.
+  QPushButton* add_all_button =
+    ui->buttonBox->addButton("Add all supported", QDialogButtonBox::ActionRole);
+  add_all_button->setToolTip("Add every detected game that Limo has a preset for");
+  connect(add_all_button,
+          &QPushButton::clicked,
+          this,
+          &ImportFromSteamDialog::onAddAllSupportedClicked);
   QString path = QSettings(QCoreApplication::applicationName()).value("import/path", "").toString();
   if(!path.isEmpty() && pathIsValid(path.toStdString()))
     ui->path_field->setText(path);
@@ -367,4 +376,41 @@ void ImportFromSteamDialog::on_pick_prefix_button_clicked()
     this, "Select prefix drive_c Directory", starting_dir, QFileDialog::ShowDirsOnly);
   if(!path.isEmpty())
     ui->prefix_field->setText(path);
+}
+
+void ImportFromSteamDialog::onAddAllSupportedClicked()
+{
+  QList<QStringList> games;
+  for(int i = 0; i < ui->app_table->rowCount(); i++)
+  {
+    const QTableWidgetItem* preset_item = ui->app_table->item(i, 4);
+    if(!preset_item || !preset_item->data(Qt::UserRole).toBool())
+      continue;
+    const QTableWidgetItem* name_item = ui->app_table->item(i, 0);
+    const QTableWidgetItem* app_id_item = ui->app_table->item(i, 1);
+    const QTableWidgetItem* path_item = ui->app_table->item(i, 3);
+    if(!name_item || !app_id_item || !path_item)
+      continue;
+    QString icon_path = name_item->data(Qt::UserRole).toString();
+    if(!sfs::exists(icon_path.toStdString()))
+      icon_path = "";
+    games.append(QStringList{
+      name_item->text(), app_id_item->text(), path_item->text(), autoPrefixForRow(i), icon_path });
+  }
+  if(games.isEmpty())
+  {
+    QMessageBox::information(
+      this, "No supported games", "None of the detected games have a Limo preset to import.");
+    return;
+  }
+  if(QMessageBox::question(
+       this,
+       "Add all supported games",
+       QString("Add %1 supported game(s)? You will be asked for a parent folder to hold each "
+               "game's mod staging directory.")
+         .arg(games.size())) != QMessageBox::Yes)
+    return;
+  dialog_completed_ = true;
+  emit addAllSupportedRequested(games);
+  accept();
 }

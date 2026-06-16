@@ -112,6 +112,19 @@ private:
    * Populated by populateGogTemplateCombo(). (issue #74 / limo-app/limo#51)
    */
   QStringList gog_template_paths_;
+  /*! \brief Set by onAddAllSupported() so the dialog closes itself once the modal import
+   *  sub-dialog returns (closing it mid-stack would be unsafe). */
+  bool batch_import_done_ = false;
+  /*!
+   * \brief Creates one application from imported Steam data plus a staging directory, using
+   * the game's preset for deployers/auto-tags. Emits applicationAdded(). Used by batch import.
+   */
+  void addImportedAppDirect(const QString& name,
+                            const QString& app_id,
+                            const QString& install_dir,
+                            const QString& prefix_path,
+                            const QString& icon_path,
+                            const QString& staging_dir);
 
   /*!
    * \brief Set the enabled state of this dialogs OK button.
@@ -269,6 +282,13 @@ private slots:
                              QString install_dir,
                              QString prefix_path,
                              QString icon_path);
+  /*!
+   * \brief Batch-adds every supported game from the Steam import dialog. Prompts once for a
+   * parent staging directory, then creates one application per game (with deployers/auto-tags
+   * from its preset) under that parent.
+   * \param games List of [name, app_id, install_dir, prefix_path, icon_path] per game.
+   */
+  void onAddAllSupported(const QList<QStringList>& games);
   /*!
    * \brief Updates the staging directory path to given path.
    * \param path The new path.
