@@ -808,6 +808,12 @@ signals:
    * \param app_id Target app.
    */
   void sendPluginFlags(std::vector<PluginDeployer::PluginFlagInfo> plugins, int app_id);
+  /*!
+   * \brief fork #49: Emitted in response to requestDeploymentPreview.
+   * \param plans Per-deployer dry-run deployment plans.
+   * \param app_id Target app.
+   */
+  void sendDeploymentPlans(std::vector<Deployer::DeploymentPlan> plans, int app_id);
 
 public slots:
   /*!
@@ -1528,6 +1534,11 @@ public slots:
    */
   void requestPluginFlags(int app_id);
   /*!
+   * \brief fork #49: Computes a dry-run deployment preview and emits it via sendDeploymentPlans.
+   * \param app_id Target app.
+   */
+  void requestDeploymentPreview(int app_id);
+  /*!
    * \brief Re-applies the load orders of the restore point at index to every deployer. // fork #54
    * \param app_id Target app.
    * \param index Restore point index.
@@ -1550,3 +1561,4 @@ public slots:
 
 Q_DECLARE_METATYPE(std::vector<RestorePoint>); // fork #54
 Q_DECLARE_METATYPE(std::vector<PluginDeployer::PluginFlagInfo>); // fork #202
+Q_DECLARE_METATYPE(std::vector<Deployer::DeploymentPlan>); // fork #49

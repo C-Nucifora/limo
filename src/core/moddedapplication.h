@@ -221,6 +221,11 @@ public:
    */
   std::vector<ModInfo> getModInfo() const;
   /*!
+   * \brief fork #49: Computes a dry-run deployment plan for every non-autonomous deployer
+   * without touching the disk.
+   */
+  std::vector<Deployer::DeploymentPlan> computeDeploymentPlans() const;
+  /*!
    * \brief fork #202: Returns ESM/ESL flag info for the plugins of this app's first plugin
    * deployer (empty if the app has no plugin deployer).
    */

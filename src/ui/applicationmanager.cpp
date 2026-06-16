@@ -1123,6 +1123,16 @@ void ApplicationManager::requestRestorePoints(int app_id)
     emit sendRestorePoints(*points, app_id);
 }
 
+// fork #49: compute a dry-run deployment preview for the app and deliver it.
+void ApplicationManager::requestDeploymentPreview(int app_id)
+{
+  if(!appIndexIsValid(app_id))
+    return;
+  auto plans = handleExceptions(&ModdedApplication::computeDeploymentPlans, apps_[app_id]);
+  if(plans)
+    emit sendDeploymentPlans(*plans, app_id);
+}
+
 // fork #202: gather plugin ESM/ESL flag info from the app's plugin deployer and deliver it.
 void ApplicationManager::requestPluginFlags(int app_id)
 {
