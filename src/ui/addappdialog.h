@@ -10,6 +10,8 @@
 #include "importfromsteamdialog.h"
 #include <QDialog>
 #include <json/json.h>
+#include <filesystem>
+#include <vector>
 
 
 namespace Ui
@@ -147,6 +149,11 @@ private:
    *  if present, it's prefix directory.
    */
   void initDefaultAppConfig();
+  // fork #204: Returns the ordered list of directories to search for a "<id>.json" game
+  // definition: the user-writable config dir first (so user defs override bundled), then
+  // the bundled steam_app_configs dir. Missing dirs are still returned; callers check
+  // existence. The user dir is created lazily here.
+  std::vector<std::filesystem::path> gameConfigSearchDirs();
   /*!
    * \brief Populates the GOG template combo box with names from all bundled steam_app_configs.
    * Also fills gog_template_paths_ with the corresponding file paths. (issue #74)

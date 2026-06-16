@@ -379,6 +379,7 @@ void MainWindow::setupConnections()
   qRegisterMetaType<std::vector<PrunableArchive>>(); // fork #145
   qRegisterMetaType<std::vector<RestorePoint>>(); // fork #54
   qRegisterMetaType<std::vector<PluginDeployer::PluginFlagInfo>>(); // fork #202
+  qRegisterMetaType<std::vector<Deployer::DeploymentPlan>>(); // fork #49
   qRegisterMetaType<std::vector<std::filesystem::path>>(); // fork #145/#208
   qRegisterMetaType<std::vector<ModRule>>();
   qRegisterMetaType<std::vector<std::string>>();
@@ -508,6 +509,10 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::requestPluginFlags);
   connect(app_manager_, &ApplicationManager::sendPluginFlags, // fork #202
           this, &MainWindow::onPluginFlags);
+  connect(this, &MainWindow::requestDeploymentPreview, // fork #49
+          app_manager_, &ApplicationManager::requestDeploymentPreview);
+  connect(app_manager_, &ApplicationManager::sendDeploymentPlans, // fork #49
+          this, &MainWindow::onDeploymentPlans);
   connect(this, &MainWindow::setModPinned,
           app_manager_, &ApplicationManager::setModPinned);
   connect(this, &MainWindow::getModRulesFor,
@@ -959,6 +964,9 @@ void MainWindow::setupMenus()
   // fork #211: Nexus news / announcements feed.
   QAction* nexus_news_action = tools_menu->addAction(tr("Nexus News"));
   connect(nexus_news_action, &QAction::triggered, this, &MainWindow::onShowNexusNews);
+  // fork #49: dry-run deployment preview.
+  QAction* deploy_preview_action = tools_menu->addAction(tr("Preview Deployment Changes"));
+  connect(deploy_preview_action, &QAction::triggered, this, &MainWindow::onShowDeploymentPreview);
   // fork #54: deploy restore points.
   QAction* restore_points_action = tools_menu->addAction(tr("Restore Points"));
   connect(restore_points_action, &QAction::triggered, this, &MainWindow::onShowRestorePoints);
@@ -4553,6 +4561,27 @@ void MainWindow::onShowNexusNews()
   auto* dialog = new NexusNewsDialog(this);
   dialog->setAttribute(Qt::WA_DeleteOnClose);
   dialog->show();
+}
+
+void MainWindow::onShowDeploymentPreview()
+{
+  // fork #49: ask the worker to compute a dry-run deployment plan; answered by onDeploymentPlans.
+  if(currentApp() < 0)
+    return;
+  setStatusMessage("Computing deployment preview");
+  setBusyStatus(true);
+  emit requestDeploymentPreview(currentApp());
+}
+
+void MainWindow::onDeploymentPlans(std::vector<Deployer::DeploymentPlan> plans, int app_id)
+{
+  // fork #49: show the read-only dry-run preview of what a deployment would change.
+  setBusyStatus(false);
+  setStatusMessage("");
+  if(app_id != currentApp())
+    return;
+  DeployPreviewDialog dialog(plans, this);
+  dialog.exec();
 }
 
 void MainWindow::onPluginFlags(std::vector<PluginDeployer::PluginFlagInfo> plugins, int app_id)

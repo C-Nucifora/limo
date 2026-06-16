@@ -13,6 +13,7 @@
 #include <QStandardPaths>
 #include <filesystem>
 #include <fstream>
+#include <set>
 
 namespace sfs = std::filesystem;
 namespace str = std::ranges;
@@ -156,53 +157,92 @@ bool AddAppDialog::iconIsValid(const QString& path)
   return QIcon(icon_path).availableSizes().size() > 0;
 }
 
+std::vector<sfs::path> AddAppDialog::gameConfigSearchDirs()
+{
+  // fork #204: community game definitions can be dropped into a user-writable directory
+  // so new games can be supported without rebuilding/patching. The user dir is searched
+  // first so its definitions override the bundled ones.
+  std::vector<sfs::path> dirs;
+
+  const QString user_loc =
+    QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+  if(!user_loc.isEmpty())
+  {
+    sfs::path user_dir = sfs::path(user_loc.toStdString()) / "game_configs";
+    // Create lazily; a failure here just means the user dir is treated as empty.
+    std::error_code ec;
+    sfs::create_directories(user_dir, ec);
+    dirs.push_back(user_dir);
+  }
+
+  sfs::path bundled_dir =
+    sfs::path(is_flatpak_ ? "/app" : APP_INSTALL_PREFIX) / "share/limo/steam_app_configs";
+  // Overwrite for local build
+  if(!is_flatpak_ && sfs::exists("steam_app_configs"))
+    bundled_dir = "steam_app_configs";
+  dirs.push_back(bundled_dir);
+
+  return dirs;
+}
+
 void AddAppDialog::initConfigForApp()
 {
   deployers_.clear();
   auto_tags_.clear();
-  sfs::path config_path =
-    sfs::path(is_flatpak_ ? "/app" : APP_INSTALL_PREFIX) / "share/limo/steam_app_configs";
-  // Overwrite for local build
-  if(!is_flatpak_ && sfs::exists("steam_app_configs"))
-    config_path = "steam_app_configs";
-  Log::debug("Config path: " + config_path.string());
-  if(!sfs::exists(config_path))
+  // fork #204: resolve "<id>.json" from the user dir first, then the bundled dir.
+  // Build the ordered list of existing candidate files so a malformed user file can
+  // fall back to the bundled one rather than dropping the game entirely.
+  const std::string config_file_name = std::to_string(steam_app_id_) + ".json";
+  std::vector<sfs::path> candidates;
+  for(const auto& dir : gameConfigSearchDirs())
   {
-    Log::error("Could not find \"steam_app_configs\" directory. "
-               "Make sure Limo is installed correctly");
-    initDefaultAppConfig();
-    return;
+    if(!sfs::exists(dir))
+      continue;
+    sfs::path candidate = dir / config_file_name;
+    if(sfs::exists(candidate))
+      candidates.push_back(candidate);
   }
-
-  config_path /= (std::to_string(steam_app_id_) + ".json");
-  if(!sfs::exists(config_path))
+  if(candidates.empty())
   {
     initDefaultAppConfig();
     return;
   }
 
   Json::Value json;
-  std::ifstream file(config_path, std::fstream::binary);
-  if(!file.is_open())
+  sfs::path config_path;
+  bool parsed = false;
+  for(const auto& candidate : candidates)
   {
-    Log::debug("Failed to open app settings file at: " + config_path.string());
-    initDefaultAppConfig();
-    return;
+    Json::Value parsed_json;
+    std::ifstream file(candidate, std::fstream::binary);
+    if(!file.is_open())
+    {
+      Log::debug("Failed to open app settings file at: " + candidate.string());
+      continue;
+    }
+    try
+    {
+      file >> parsed_json;
+    }
+    catch(Json::Exception& e)
+    {
+      Log::debug("Failed to read from app settings file at: " + candidate.string() +
+                 ". Error was: " + e.what());
+      continue;
+    }
+    catch(...)
+    {
+      Log::debug("Failed to read from app settings file at: " + candidate.string());
+      continue;
+    }
+    json = parsed_json;
+    config_path = candidate;
+    parsed = true;
+    break;
   }
-  try
+  Log::debug("Config path: " + config_path.string());
+  if(!parsed)
   {
-    file >> json;
-  }
-  catch(Json::Exception& e)
-  {
-    Log::debug("Failed to read from app settings file at: " + config_path.string() +
-               ". Error was: " + e.what());
-    initDefaultAppConfig();
-    return;
-  }
-  catch(...)
-  {
-    Log::debug("Failed to read from app settings file at: " + config_path.string());
     initDefaultAppConfig();
     return;
   }
@@ -670,41 +710,50 @@ void AddAppDialog::populateGogTemplateCombo()
   ui->gog_template_combo->clear();
   gog_template_paths_.clear();
 
-  sfs::path config_dir =
-    sfs::path(is_flatpak_ ? "/app" : APP_INSTALL_PREFIX) / "share/limo/steam_app_configs";
-  if(!is_flatpak_ && sfs::exists("steam_app_configs"))
-    config_dir = "steam_app_configs";
-
-  if(!sfs::exists(config_dir))
-  {
-    Log::debug("GOG template: could not find steam_app_configs directory");
-    return;
-  }
+  // fork #204: scan both the user game-config dir and the bundled dir (user first, so a
+  // user definition wins on filename/id collision) so user-added games appear as templates.
+  std::vector<sfs::path> config_dirs = gameConfigSearchDirs();
+  bool any_dir_found = false;
 
   // Collect (display_name, file_path) pairs then sort by name for a tidy combo.
   std::vector<std::pair<QString, QString>> entries;
-  for(const auto& entry : sfs::directory_iterator(config_dir))
+  std::set<std::string> seen_ids; // fork #204: dedupe by file stem; user dir is seen first
+  for(const auto& config_dir : config_dirs)
   {
-    if(entry.path().extension() != ".json")
+    if(!sfs::exists(config_dir))
       continue;
-    Json::Value json;
-    std::ifstream f(entry.path(), std::fstream::binary);
-    if(!f.is_open())
-      continue;
-    try
+    any_dir_found = true;
+    for(const auto& entry : sfs::directory_iterator(config_dir))
     {
-      f >> json;
+      if(entry.path().extension() != ".json")
+        continue;
+      // fork #204: skip an id already provided by an earlier (higher-priority) dir.
+      if(!seen_ids.insert(entry.path().stem().string()).second)
+        continue;
+      Json::Value json;
+      std::ifstream f(entry.path(), std::fstream::binary);
+      if(!f.is_open())
+        continue;
+      try
+      {
+        f >> json;
+      }
+      catch(...)
+      {
+        continue;
+      }
+      QString display_name;
+      if(!json[JSON_NAME].isNull())
+        display_name = json[JSON_NAME].asCString();
+      else
+        display_name = entry.path().stem().string().c_str();
+      entries.emplace_back(display_name, entry.path().string().c_str());
     }
-    catch(...)
-    {
-      continue;
-    }
-    QString display_name;
-    if(!json[JSON_NAME].isNull())
-      display_name = json[JSON_NAME].asCString();
-    else
-      display_name = entry.path().stem().string().c_str();
-    entries.emplace_back(display_name, entry.path().string().c_str());
+  }
+  if(!any_dir_found)
+  {
+    Log::debug("GOG template: could not find steam_app_configs directory");
+    return;
   }
   std::sort(entries.begin(), entries.end(),
             [](const auto& a, const auto& b) { return a.first < b.first; });

@@ -633,6 +633,20 @@ std::vector<std::string> ModdedApplication::getDeployerNames() const
   return names;
 }
 
+// fork #49: dry-run preview — compute the deployment plan of every non-autonomous deployer
+// without touching the disk.
+std::vector<Deployer::DeploymentPlan> ModdedApplication::computeDeploymentPlans() const
+{
+  std::vector<Deployer::DeploymentPlan> plans;
+  for(const auto& deployer : deployers_)
+  {
+    if(deployer->isAutonomous())
+      continue;
+    plans.push_back(deployer->computeDeploymentPlan());
+  }
+  return plans;
+}
+
 // fork #202: ESM/ESL flag info from the app's first plugin deployer (empty if none).
 std::vector<PluginDeployer::PluginFlagInfo> ModdedApplication::getPluginFlagInfo() const
 {
