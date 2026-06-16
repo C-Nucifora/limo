@@ -282,13 +282,23 @@ TEST_CASE("Files are deployed as sym links", "[deployer]")
   depl.addMod(2, true);
   depl.deploy();
   verifyDirsAreEqual(DATA_DIR / "app", DATA_DIR / "target" / "mod012", false);
+  // Pre-existing app files that no mod overwrites: these remain plain files (not symlinks).
+  // Excluded by full relative path so that identically-named deployed files (e.g. the
+  // root "0" and "f/g/0", which are real symlinks) are still checked.
+  const std::set<std::filesystem::path> non_overwritten_files{
+    "a/file.cfg", // pre-existing app file, no mod provides a/file.cfg
+    "c/wasd",     // pre-existing app file, no mod provides c/wasd
+    "c/0",        // pre-existing app file, no mod provides c/0
+  };
   for(const auto& dir_entry : std::filesystem::recursive_directory_iterator(DATA_DIR / "app"))
   {
-    // exclude directories, files which are not overwritten and .lmmfiles
+    const auto rel_path =
+      std::filesystem::relative(dir_entry.path(), DATA_DIR / "app");
+    // exclude directories, files which are not overwritten and limo metadata files
     if(!dir_entry.is_directory() && dir_entry.path().extension() != ".lmmbak"
-      && dir_entry.path().filename() != ".lmmfiles" && dir_entry.path().filename() != "file.cfg"
-      && dir_entry.path().filename() != "wasd" && dir_entry.path().filename() != "0"
-      && dir_entry.path().filename() != ".lmm_managed_dir")
+      && dir_entry.path().filename() != ".lmmfiles"
+      && dir_entry.path().filename() != ".lmm_managed_dir"
+      && !non_overwritten_files.contains(rel_path))
         REQUIRE(std::filesystem::is_symlink(dir_entry.path()));
   }
 }

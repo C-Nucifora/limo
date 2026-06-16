@@ -264,9 +264,23 @@ private:
   std::filesystem::path working_directory_;
   /*! \brief Maps environment variables to their values. */
   std::map<std::string, std::string> environment_variables_;
-  /*! \brief Arguments to be passed to the executable. */
+  /*!
+   * \brief Arguments to be passed to the executable.
+   * \warning SECURITY: This string is appended to the generated command verbatim and is
+   * interpreted by the shell (it is not escaped, since it may hold several individually
+   * tokenized arguments). It must only ever contain trusted, user-authored content. Never
+   * populate it from mod-, network-, or otherwise untrusted-derived data, and warn the user
+   * when importing tool configurations from untrusted sources.
+   */
   std::string arguments_;
-  /*! \brief Arguments to be passed to protontricks. */
+  /*!
+   * \brief Arguments to be passed to protontricks.
+   * \warning SECURITY: This string is appended to the generated command verbatim and is
+   * interpreted by the shell (it is not escaped, since it may hold several individually
+   * tokenized arguments). It must only ever contain trusted, user-authored content. Never
+   * populate it from mod-, network-, or otherwise untrusted-derived data, and warn the user
+   * when importing tool configurations from untrusted sources.
+   */
   std::string protontricks_arguments_;
   /*! \brief If runtime is umu: Value passed to umu-launcher as GAMEID. */
   std::string umu_game_id_ = "0";

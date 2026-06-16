@@ -41,15 +41,46 @@ void IpcServer::shutdown()
 void IpcServer::setupConnection()
 {
   auto socket = server_->nextPendingConnection();
+  if(!socket)
+    return;
+  buffers_.insert(socket, QByteArray());
   connect(socket, &QLocalSocket::readyRead, this, &IpcServer::processData);
+  // The client writes a single message then closes the connection. Buffer the bytes as they
+  // arrive (a message may be split across multiple reads) and only emit it once the peer
+  // disconnects, so partial reads no longer silently drop or fragment requests.
+  connect(socket, &QLocalSocket::disconnected, this, &IpcServer::finalizeConnection);
 }
 
 void IpcServer::processData()
 {
   auto socket = static_cast<QLocalSocket*>(sender());
-  auto bytes = socket->readAll();
-  std::string data;
-  for(const auto& b : std::as_const(bytes))
-    data.append({ b });
-  emit receivedMessage(data.c_str());
+  if(!socket)
+    return;
+  auto it = buffers_.find(socket);
+  if(it == buffers_.end())
+    return;
+  it->append(socket->readAll());
+  // Guard against a malicious or buggy peer streaming unbounded data into our buffer.
+  if(it->size() > max_message_size)
+    it->truncate(max_message_size);
+}
+
+void IpcServer::finalizeConnection()
+{
+  auto socket = static_cast<QLocalSocket*>(sender());
+  if(!socket)
+    return;
+  auto it = buffers_.find(socket);
+  if(it != buffers_.end())
+  {
+    // Drain anything still pending before emitting the reassembled message.
+    it->append(socket->readAll());
+    if(it->size() > max_message_size)
+      it->truncate(max_message_size);
+    const QByteArray message = *it;
+    buffers_.erase(it);
+    if(!message.isEmpty())
+      emit receivedMessage(QString::fromUtf8(message));
+  }
+  socket->deleteLater();
 }

@@ -173,13 +173,26 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
 
 MainWindow::~MainWindow()
 {
+  // The worker writes to disk; never terminate() it mid-write as that can corrupt mod state.
+  // Ask its event loop to quit and wait (without a hard short timeout) for any in-flight
+  // filesystem operations to finish before tearing anything down.
   worker_thread_->quit();
-  worker_thread_->wait(5000);
-  if(worker_thread_->isRunning())
-    worker_thread_->terminate();
+  if(!worker_thread_->wait(30000))
+  {
+    // Last resort only: the thread is wedged and we are exiting anyway. Wait once more so an
+    // ongoing write has the best chance of completing, then leak app_manager_ rather than
+    // deleting an object that may still be executing on a live thread.
+    Log::warning("Worker thread did not finish in time during shutdown");
+    if(!worker_thread_->wait(30000))
+    {
+      delete ui;
+      return;
+    }
+  }
+  // The thread has fully finished, so app_manager_ is no longer executing and can be deleted.
+  delete app_manager_;
   delete worker_thread_;
   delete ui;
-  delete app_manager_;
 }
 
 void MainWindow::closeEvent(QCloseEvent* event)
@@ -1571,7 +1584,7 @@ void MainWindow::setupLog()
       log->moveCursor(QTextCursor::End);
       log->appendHtml(QString("<p style='color: " + color.name(QColor::HexRgb) + "'>") +
                       QString(message.c_str()).toHtmlEscaped().replace("\n", "<br/>") + "</p>");
-      if(*show_error && level <= Log::LOG_ERROR || *show_warning && level <= Log::LOG_WARNING)
+      if((*show_error && level <= Log::LOG_ERROR) || (*show_warning && level <= Log::LOG_WARNING))
         log_container->setVisible(true);
     });
   // tool log
@@ -1595,7 +1608,7 @@ void MainWindow::setupLog()
       log->moveCursor(QTextCursor::End);
       log->appendHtml(QString("<p style='color: " + color.name(QColor::HexRgb) + "'>") +
                       QString(message.c_str()).toHtmlEscaped().replace("\n", "<br/>") + "</p>");
-      if(*show_error && level <= Log::LOG_ERROR || *show_warning && level <= Log::LOG_WARNING)
+      if((*show_error && level <= Log::LOG_ERROR) || (*show_warning && level <= Log::LOG_WARNING))
         log_container->setVisible(true);
     });
 
@@ -1645,8 +1658,10 @@ QPair<QString, int> MainWindow::runCommand(QString command, bool ignore_flatpak)
 
 void MainWindow::runConcurrent(QString command, QString name, QString type, bool ignore_flatpak)
 {
-  Log::info(
-    ("Running " + type.toLower() + " '" + name + "' with command '" + command + "'").toStdString());
+  // Do not log the raw command: it may contain credentials, tokens or other secret-looking
+  // arguments passed to external tools. The full command remains visible to the user in the edit
+  // dialogs.
+  Log::info(("Running " + type.toLower() + " '" + name + "'").toStdString());
   auto watcher = new QFutureWatcher<QPair<QString, int>>;
   connect(
     watcher,
@@ -1660,8 +1675,14 @@ void MainWindow::runConcurrent(QString command, QString name, QString type, bool
                   .toStdString());
       delete watcher;
     });
-  auto future = QtConcurrent::run(
-    [this, command, ignore_flatpak]() { return runCommand(command, ignore_flatpak); });
+  // Capture is_a_flatpak_ by value so the work running on the thread pool does not read the member
+  // (which the GUI thread owns); the flatpak prefix is resolved here and runCommand is told to skip
+  // re-applying it.
+  const bool is_a_flatpak = is_a_flatpak_;
+  if(is_a_flatpak && !ignore_flatpak)
+    command = "flatpak-spawn --host " + command;
+  auto future =
+    QtConcurrent::run([this, command]() { return runCommand(command, /*ignore_flatpak=*/true); });
   watcher->setFuture(future);
 }
 
@@ -2014,12 +2035,19 @@ bool MainWindow::versionIsLessOrEqual(QString current_version, QString target_ve
   if(std::regex_search(target_version.toStdString(), regex))
     return false;
 
-  for(const auto& [cur_sub, cur_target] :
-      stv::zip(current_version.split("."), target_version.split(".")))
+  const QStringList cur_parts = current_version.split(".");
+  const QStringList target_parts = target_version.split(".");
+  const int num_parts = std::max(cur_parts.size(), target_parts.size());
+  for(int i = 0; i < num_parts; i++)
   {
-    if(cur_sub.isEmpty() || cur_target.isEmpty())
-      continue;
-    if(cur_sub.toInt() > cur_target.toInt())
+    // Missing or empty components are treated as 0 so versions of differing length compare
+    // correctly (e.g. "1.2" vs "1.2.0").
+    const int cur_sub = i < cur_parts.size() && !cur_parts[i].isEmpty() ? cur_parts[i].toInt() : 0;
+    const int cur_target =
+      i < target_parts.size() && !target_parts[i].isEmpty() ? target_parts[i].toInt() : 0;
+    if(cur_sub < cur_target)
+      return true;
+    if(cur_sub > cur_target)
       return false;
   }
   return true;
@@ -5268,26 +5296,12 @@ void MainWindow::onExternalChangesHandled(int app_id, int deployer, int num_depl
   setBusyStatus(false);
   if(deployer == num_deployers - 1 || !deploy_for_all_)
   {
-    // fork feature #49: deploy dry-run / preview.
-    // Optional confirm step shown immediately before the real deploy is dispatched to the
-    // ApplicationManager worker thread. The DeploymentPlan primitive lives on Deployer
-    // (Deployer::computeDeploymentPlan); the deployer instances are owned by the
-    // ApplicationManager and run on a separate thread, so the fully populated per-deployer
-    // plans must be delivered to this point via an ApplicationManager signal. Wiring that
-    // signal touches applicationmanager, which is out of scope for this change, so the seam is
-    // staged here: when deploy_preview_plans_ is populated (by that future signal) and the
-    // feature is enabled, the preview dialog is shown and deployment only proceeds on OK.
-    if(deploy && show_deploy_preview_ && !deploy_preview_plans_.empty())
-    {
-      DeployPreviewDialog preview(deploy_preview_plans_, this);
-      deploy_preview_plans_.clear();
-      if(preview.exec() != QDialog::Accepted)
-      {
-        setStatusMessage("Deployment cancelled");
-        setBusyStatus(false);
-        return;
-      }
-    }
+    // fork feature #49: deploy dry-run / preview is available on demand via the Tools menu
+    // ("Preview Deployment Changes" -> onShowDeploymentPreview -> onDeploymentPlans), which asks
+    // the worker to compute the plans and shows the read-only DeployPreviewDialog. An automatic
+    // confirm step in this deploy path would require ApplicationManager to deliver the populated
+    // per-deployer plans here via a signal; that wiring lives in another class, so it is not done
+    // inline (the previous staged branch was permanently dead and has been removed).
     // fork #54: snapshot the load order before each deploy so it can be rolled back.
     if(deploy)
       emit createRestorePoint(

@@ -65,6 +65,26 @@ std::pair<int, std::string> OverlayDeployer::runCommand(const std::string& cmd)
   return { exit_code, output };
 }
 
+std::string OverlayDeployer::shellEscape(const std::string& value)
+{
+  // Wrap in single quotes and replace every embedded ' with the sequence '\''
+  // (close quote, escaped literal quote, reopen quote).  This makes the result
+  // safe to splice into a /bin/sh command line as a single argument regardless
+  // of spaces, quotes or other shell metacharacters in the input.
+  std::string out;
+  out.reserve(value.size() + 2);
+  out += '\'';
+  for(const char c : value)
+  {
+    if(c == '\'')
+      out += "'\\''";
+    else
+      out += c;
+  }
+  out += '\'';
+  return out;
+}
+
 std::string OverlayDeployer::findFuseOverlayfs()
 {
   // Check common install locations and PATH via "which"
@@ -237,7 +257,7 @@ void OverlayDeployer::doUnmount()
 
   // Prefer fusermount3 (user-space unmount, no root needed)
   auto [code, output] =
-    runCommand(std::format("fusermount3 -u -- '{}'", dest_path_.string()));
+    runCommand(std::format("fusermount3 -u -- {}", shellEscape(dest_path_.string())));
   if(code != 0)
   {
     // Fallback: lazy unmount via umount
@@ -245,7 +265,7 @@ void OverlayDeployer::doUnmount()
          std::format("OverlayDeployer '{}': fusermount3 failed ({}), trying umount -l",
                      name_, output));
     auto [code2, out2] =
-      runCommand(std::format("umount -l -- '{}'", dest_path_.string()));
+      runCommand(std::format("umount -l -- {}", shellEscape(dest_path_.string())));
     if(code2 != 0)
     {
       log_(Log::LOG_ERROR,
@@ -326,6 +346,18 @@ std::map<int, unsigned long> OverlayDeployer::deploy(
   // redundant copies on every deploy.
   if(sfs::is_empty(origDir()))
   {
+    // Re-verify dest_path_ is definitively NOT a live mount point immediately
+    // before snapshotting.  Steps 2/3 should have torn down any previous mount,
+    // but if a stale overlay (or an unrelated mount) is still present we would
+    // otherwise copy already-merged overlay content into orig/ and permanently
+    // poison the original-game snapshot.  Refuse rather than corrupt it.
+    if(isMounted())
+      throw std::runtime_error(
+        std::format("OverlayDeployer '{}': refusing to snapshot game directory '{}' because it "
+                    "is still an active mount point; the original-game snapshot would capture "
+                    "overlay content instead of the real game files.  Unmount it and retry.",
+                    name_, dest_path_.string()));
+
     log_(Log::LOG_INFO,
          std::format("OverlayDeployer '{}': Creating original-game snapshot in '{}'",
                      name_, origDir().string()));
@@ -395,13 +427,19 @@ std::map<int, unsigned long> OverlayDeployer::deploy(
   // ---- 6. Compose and run the mount command --------------------------------
   // Upper/work dirs allow the game to write files at runtime; those writes land
   // in upper/ and do not touch the staging dirs or orig/.
-  const std::string mount_cmd =
-    std::format("'{}' -o lowerdir='{}',upperdir='{}',workdir='{}' -- '{}'",
-                fuse_overlayfs,
+  // The -o option value (lowerdir=…,upperdir=…,workdir=…) is wrapped as a single
+  // shell-escaped argument; its internal paths were already validated above to be
+  // free of fuse-overlayfs delimiters (':', ',', '\').
+  const std::string overlay_opt =
+    std::format("lowerdir={},upperdir={},workdir={}",
                 lowerdir_opt,
                 upperDir().string(),
-                workDir().string(),
-                dest_path_.string());
+                workDir().string());
+  const std::string mount_cmd =
+    std::format("{} -o {} -- {}",
+                shellEscape(fuse_overlayfs),
+                shellEscape(overlay_opt),
+                shellEscape(dest_path_.string()));
 
   log_(Log::LOG_DEBUG,
        std::format("OverlayDeployer '{}': Running: {}", name_, mount_cmd));

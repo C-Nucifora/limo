@@ -23,6 +23,13 @@ void recordLogEntry(const std::string& message, Log::LogLevel log_level)
   while(log_buffer.size() > Log::max_log_buffer_size)
     log_buffer.pop_front();
 }
+
+/*! \brief Guards access to the persistent log file stream. */
+std::mutex log_file_mutex;
+/*! \brief Persistent output stream kept open for the lifetime of the log file. */
+std::ofstream log_file_stream;
+/*! \brief Path the persistent stream is currently open for. */
+std::filesystem::path open_log_file_path;
 }
 
 inline constexpr std::string default_log_file_name = "limo_log";
@@ -58,11 +65,20 @@ void writeLog(const std::string& message, Log::LogLevel log_level, int target_pr
 
   try
   {
-    std::ofstream fstream(Log::log_file_path, std::ios::app);
-    if(!fstream.is_open())
+    std::lock_guard<std::mutex> lock(log_file_mutex);
+    // Open (or reopen) the persistent stream only when the target path changes
+    // or the stream is not currently usable, avoiding a per-message open/close.
+    if(!log_file_stream.is_open() || open_log_file_path != Log::log_file_path)
+    {
+      log_file_stream.close();
+      log_file_stream.clear();
+      log_file_stream.open(Log::log_file_path, std::ios::app);
+      open_log_file_path = Log::log_file_path;
+    }
+    if(!log_file_stream.is_open())
       return;
-    fstream << message << "\n";
-    fstream.flush();
+    log_file_stream << message << "\n";
+    log_file_stream.flush();
   }
   catch(...)
   {
@@ -151,6 +167,15 @@ void init(sfs::path log_dir_path)
     return;
 
   debug("Initializing config path to: " + log_dir_path.string());
+
+  // Close any previously held log file stream so rotation below operates on the
+  // file and the next write reopens the freshly rotated log file.
+  {
+    std::lock_guard<std::mutex> lock(log_file_mutex);
+    log_file_stream.close();
+    log_file_stream.clear();
+    open_log_file_path.clear();
+  }
 
   try
   {

@@ -140,6 +140,16 @@ private:
    */
   bool iconIsValid(const QString& path = "");
   /*!
+   * \brief Security guard for deployer target directories coming from (community) game
+   * configs: a resolved target path may only be created on disk if it is lexically
+   * contained within one of the known Steam install/prefix roots and contains no ".."
+   * components. This prevents an untrusted config from causing directory creation at
+   * arbitrary filesystem locations.
+   * \param target_dir Resolved (placeholder-expanded) target directory.
+   * \return true if the path is safe to create, false otherwise.
+   */
+  bool targetDirIsSafe(const std::filesystem::path& target_dir) const;
+  /*!
    * \brief Initializes default settings for deployers and auto tags from a file named "app_id_.json".
    * If no such file exists, creates generic deployers targeting installation directory and prefix.
    */

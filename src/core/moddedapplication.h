@@ -1259,6 +1259,30 @@ private:
   int runHook(const std::string& hook_name, const std::string& command) const;
 
   /*!
+   * \brief Allocates an unused mod id, larger than every existing mod id and not colliding
+   * with a leftover staging directory. The id comparison is performed explicitly on Mod::id.
+   * \return A free mod id.
+   * \throws std::runtime_error If no free id could be generated.
+   */
+  int allocateNewModId() const;
+  /*!
+   * \brief Removes the group at the given index from every per-group parallel vector
+   * (groups_, active_group_members_, group_names_, group_notes_) in lockstep and fixes up
+   * group_map_ indices. Out-of-range indices are ignored.
+   * \param group Index of the group to erase.
+   */
+  void eraseGroup(int group);
+  /*!
+   * \brief Filters a serialized load-order tree, dropping any entries that reference mods which
+   * are not currently installed. Separators (entries without a "status"/"id") are kept.
+   * \param loadorder Serialized load-order tree ({ children: [...] }).
+   * \param context Human readable context used in warning logs (e.g. "importing profile").
+   * \return The filtered load-order tree.
+   */
+  Json::Value filterLoadorderForInstalledMods(const Json::Value& loadorder,
+                                              const std::string& context) const;
+
+  /*!
    * \brief Updates json_settings_ with the current state of this object.
    * \param write If true: write json_settings_ to a file after updating.
    */

@@ -9,6 +9,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QStandardPaths>
 #include <filesystem>
@@ -154,7 +155,52 @@ bool AddAppDialog::createStagingDirIfNeeded() // fork #78
 bool AddAppDialog::iconIsValid(const QString& path)
 {
   QString icon_path = path.isEmpty() ? ui->icon_field->text() : path;
+  if(icon_path.isEmpty())
+    return false;
+  // Cheap pre-checks before the (potentially expensive) full QIcon decode: the path must
+  // refer to an existing regular file with a recognised image suffix. This avoids decoding
+  // arbitrary / large files on the UI thread just to reject obviously-invalid icons.
+  std::error_code ec;
+  const sfs::path fs_path(icon_path.toStdString());
+  if(!sfs::is_regular_file(fs_path, ec) || ec)
+    return false;
+  static const std::set<QString> image_suffixes{ "png", "jpg", "jpeg", "bmp",
+                                                  "gif", "svg", "svgz", "ico",
+                                                  "webp", "tiff", "tif", "xpm" };
+  const QString suffix = QFileInfo(icon_path).suffix().toLower();
+  if(!image_suffixes.contains(suffix))
+    return false;
   return QIcon(icon_path).availableSizes().size() > 0;
+}
+
+bool AddAppDialog::targetDirIsSafe(const sfs::path& target_dir) const
+{
+  if(target_dir.empty() || !target_dir.is_absolute())
+    return false;
+  // Reject any ".." (or "." trickery) component outright: even a path that ends up under a
+  // known root after normalisation should not contain traversal segments coming from config.
+  for(const auto& component : target_dir)
+  {
+    if(component == "..")
+      return false;
+  }
+  // The target must be lexically contained within one of the known Steam install/prefix
+  // roots. lexically_normal avoids resolving symlinks (the dirs may not exist yet) while
+  // still collapsing any redundant separators.
+  const sfs::path normalized = target_dir.lexically_normal();
+  const auto is_within = [&normalized](const QString& root_str)
+  {
+    if(root_str.isEmpty())
+      return false;
+    const sfs::path root = sfs::path(root_str.toStdString()).lexically_normal();
+    if(root.empty())
+      return false;
+    const sfs::path rel = normalized.lexically_relative(root);
+    // lexically_relative yields an empty path when unrelated, and a leading ".." when the
+    // target escapes the root.
+    return !rel.empty() && *rel.begin() != "..";
+  };
+  return is_within(steam_install_path_) || is_within(steam_prefix_path_);
 }
 
 std::vector<sfs::path> AddAppDialog::gameConfigSearchDirs()
@@ -250,6 +296,7 @@ void AddAppDialog::initConfigForApp()
   Log::debug(std::format("Reading app config for id {}", steam_app_id_));
   try
   {
+    std::vector<std::string> skipped_unsafe_targets;
     for(int i = 0; i < json["deployers"].size(); i++)
     {
       Json::Value deployer = json["deployers"][i];
@@ -286,6 +333,21 @@ void AddAppDialog::initConfigForApp()
         // Settings/Application Data/<Game>") and is only created once the game has run. Create it
         // rather than silently dropping the deployer, so imports set up every recommended deployer
         // (limo-app/limo#224).
+        // Security: the target comes from a (potentially user-supplied/community) game config.
+        // Only create it if it resolves to a location inside the known Steam install/prefix
+        // roots and contains no ".." traversal, so a malicious config can not create
+        // directories at arbitrary filesystem locations.
+        if(!targetDirIsSafe(target_dir))
+        {
+          Log::debug(std::format(
+            "App config for deployer {} for app {} has an unsafe target {} outside the install/"
+            "prefix roots; skipping deployer",
+            i,
+            steam_app_id_,
+            target_dir));
+          skipped_unsafe_targets.push_back(target_dir);
+          continue;
+        }
         std::error_code ec;
         sfs::create_directories(target_dir, ec);
         if(ec)
@@ -346,6 +408,20 @@ void AddAppDialog::initConfigForApp()
       deployers_.push_back(info);
     }
     Log::debug(std::format("Found {} deployers", deployers_.size()));
+
+    if(!skipped_unsafe_targets.empty())
+    {
+      QString details;
+      for(const auto& target : skipped_unsafe_targets)
+        details += "\n- " + QString::fromStdString(target).toHtmlEscaped();
+      QMessageBox::warning(
+        this,
+        "Skipped deployers",
+        QString("Some deployers from the game configuration were skipped because their target "
+                "directory pointed outside the game's install/prefix directories and was not "
+                "created for security reasons:%1")
+          .arg(details));
+    }
 
     for(int i = 0; i < json[JSON_AUTO_TAGS_GROUP].size(); i++)
     {
@@ -482,9 +558,27 @@ void AddAppDialog::saveHooksToConfig(const QString& staging_dir)
     sfs::path(staging_dir.toStdString()) / ModdedApplication::CONFIG_FILE_NAME;
   // Only an existing app config can carry hooks. For freshly created apps the
   // config file does not exist yet at this point; hooks can be set later by
-  // editing the application.
+  // editing the application. If the user actually entered hook commands but they
+  // cannot be persisted yet, warn them rather than silently discarding the input
+  // (limo-app/limo audit F063).
   if(!sfs::exists(config_path))
+  {
+    const bool has_hooks = !ui->pre_deploy_field->text().isEmpty() ||
+                           !ui->post_deploy_field->text().isEmpty() ||
+                           !ui->pre_undeploy_field->text().isEmpty() ||
+                           !ui->post_undeploy_field->text().isEmpty();
+    if(has_hooks)
+    {
+      Log::debug("App config does not exist yet; deploy hooks could not be saved at: " +
+                 config_path.string());
+      QMessageBox::warning(
+        this,
+        "Deploy hooks not saved",
+        "The deploy hooks could not be saved yet because the application has not been fully "
+        "created. Please re-open this application for editing to set its deploy hooks.");
+    }
     return;
+  }
 
   Json::Value json;
   {

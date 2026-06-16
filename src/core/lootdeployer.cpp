@@ -955,6 +955,56 @@ void LootDeployer::readPluginTags()
     updatePluginTagsPrivate();
 }
 
+namespace
+{
+/*!
+ * \brief Percent-encodes characters in a URL that are unsafe to transmit while
+ * preserving characters that carry URL structure (scheme, host, path and query
+ * delimiters). Generalizes the previous space-only substitution so that spaces,
+ * control characters, non-ASCII bytes and other unsafe characters are encoded.
+ * \param url The URL to encode.
+ * \return The encoded URL.
+ */
+std::string encodeUrl(const std::string& url)
+{
+  // Unreserved characters (RFC 3986) plus the reserved characters that may
+  // legitimately appear unencoded in a full URL are left untouched; everything
+  // else is percent-encoded.
+  static const std::string safe_chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    "-._~"          // unreserved
+    ":/?#[]@"       // gen-delims
+    "!$&'()*+,;=";  // sub-delims
+  const auto is_hex = [](char ch)
+  { return std::isxdigit(static_cast<unsigned char>(ch)) != 0; };
+  std::string encoded;
+  encoded.reserve(url.size());
+  for(std::size_t i = 0; i < url.size(); i++)
+  {
+    const unsigned char c = static_cast<unsigned char>(url[i]);
+    // Preserve already valid percent-encoded triplets so that pre-encoded URLs
+    // are not double-encoded.
+    if(c == '%' && i + 2 < url.size() && is_hex(url[i + 1]) && is_hex(url[i + 2]))
+    {
+      encoded.push_back('%');
+      encoded.push_back(url[i + 1]);
+      encoded.push_back(url[i + 2]);
+      i += 2;
+    }
+    else if(c == '%' || safe_chars.find(static_cast<char>(c)) == std::string::npos)
+    {
+      static const char hex_digits[] = "0123456789ABCDEF";
+      encoded.push_back('%');
+      encoded.push_back(hex_digits[(c >> 4) & 0x0F]);
+      encoded.push_back(hex_digits[c & 0x0F]);
+    }
+    else
+      encoded.push_back(static_cast<char>(c));
+  }
+  return encoded;
+}
+}
+
 void LootDeployer::downloadList(std::string url, const std::string& file_name)
 {
   const std::string tmp_file_name = file_name + ".tmp";
@@ -963,12 +1013,7 @@ void LootDeployer::downloadList(std::string url, const std::string& file_name)
     throw std::runtime_error("Failed to update " + file_name + ": Could not write to: \"" +
                              dest_path_.string() + "\".");
 
-  auto pos = url.find(" ");
-  while(pos != std::string::npos)
-  {
-    url.replace(pos, 1, "%20");
-    pos = url.find(" ");
-  }
+  url = encodeUrl(url);
   cpr::Response response = cpr::Download(fstream, cpr::Url{ url });
   if(response.status_code != 200)
   {

@@ -11,6 +11,7 @@
 #include <system_error>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 namespace sfs = std::filesystem;
 namespace str = std::ranges;
@@ -63,6 +64,22 @@ void OpenMwPluginDeployer::unDeploy(std::optional<ProgressNode*> progress_node)
   // staging directories. No-op (apart from a harmless rewrite) when the mode was never used.
   if(use_data_entries_)
     writeDataEntries(false);
+}
+
+void OpenMwPluginDeployer::restoreUndeployBackupIfExists()
+{
+  // OpenMW backs up only the single plugin file (see unDeploy), so the inherited
+  // LootDeployer two-file restore never matches. Use the single-file PluginDeployer
+  // semantics here so the backup is actually restored.
+  const std::string plugin_backup_path =
+    dest_path_ / (hideFile(plugin_file_name_) + UNDEPLOY_BACKUP_EXTENSION);
+  if(sfs::exists(plugin_backup_path))
+  {
+    log_(Log::LOG_DEBUG, std::format("Deployer '{}': Restoring undeploy backup.", name_));
+    sfs::remove(dest_path_ / plugin_file_name_);
+    sfs::rename(plugin_backup_path, dest_path_ / plugin_file_name_);
+    loadPlugins();
+  }
 }
 
 std::vector<std::vector<int>> OpenMwPluginDeployer::getConflictGroups() const
@@ -667,7 +684,13 @@ void OpenMwPluginDeployer::writeDataEntries(bool write_entries) const
       std::format("Error: Could not open '{}'.", config_path.string()));
 
   // Copy every line verbatim except the previously written Limo block, which is dropped.
+  // Lines seen after a BEGIN marker are buffered (not yet committed to the output) until a
+  // matching END marker is found; only then is the block known to be a properly terminated
+  // Limo block and safe to discard. If EOF is reached while still inside a block (a malformed
+  // or user-authored BEGIN without a matching END), the buffered lines are re-included so no
+  // existing cfg content is ever lost.
   std::vector<std::string> lines;
+  std::vector<std::string> block_buffer;
   std::string line;
   bool in_block = false;
   while(std::getline(in_file, line))
@@ -675,18 +698,38 @@ void OpenMwPluginDeployer::writeDataEntries(bool write_entries) const
     std::string trimmed = line;
     if(!trimmed.empty() && trimmed.back() == '\r')
       trimmed.pop_back();
-    if(trimmed == DATA_BLOCK_BEGIN_MARKER)
+    if(!in_block && trimmed == DATA_BLOCK_BEGIN_MARKER)
     {
       in_block = true;
+      block_buffer.clear();
+      block_buffer.push_back(line);
       continue;
     }
     if(in_block)
     {
       if(trimmed == DATA_BLOCK_END_MARKER)
+      {
+        // Properly terminated Limo block: drop the whole buffered block.
         in_block = false;
+        block_buffer.clear();
+      }
+      else
+        block_buffer.push_back(line);
       continue;
     }
     lines.push_back(line);
+  }
+  if(in_block)
+  {
+    // Unterminated block: not a valid Limo block, so preserve its content verbatim.
+    log_(Log::LOG_WARNING,
+         std::format("Deployer '{}': Found an unterminated '{}' block in '{}'; preserving its "
+                     "content instead of dropping it.",
+                     name_,
+                     std::string(DATA_BLOCK_BEGIN_MARKER),
+                     config_path.string()));
+    for(auto& buffered : block_buffer)
+      lines.push_back(std::move(buffered));
   }
   in_file.close();
 

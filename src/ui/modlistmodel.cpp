@@ -352,25 +352,17 @@ void ModListModel::setModInfo(const std::vector<ModInfo>& mods)
     manual_tag_map_[info.mod.id] = info.manual_tags;
     auto_tag_map_[info.mod.id] = info.auto_tags;
 
-    unsigned long size = info.mod.size_on_disk;
-    unsigned long last_size = 0;
-    std::size_t exp = 0;
     const std::vector<QString> units{ "B", "KiB", "MiB", "GiB", "TiB", "PiB", "EiB" };
-    QString size_string = "";
-    while(size > 1024 && exp + 1 < units.size())
+    double size = static_cast<double>(info.mod.size_on_disk);
+    std::size_t exp = 0;
+    while(size >= 1024.0 && exp + 1 < units.size())
     {
-      last_size = size;
-      size /= 1024;
+      size /= 1024.0;
       exp++;
     }
-    last_size /= 1.024;
-    size_string = QString::number(size);
-    const int first_digit = (last_size / 100) % 10;
-    const int second_digit = (last_size / 10) % 10;
-    if(first_digit != 0 || second_digit != 0)
-      size_string += "." + QString::number(first_digit);
-    if(second_digit != 0)
-      size_string += QString::number(second_digit);
+    // Whole bytes need no decimal place; larger units show a single decimal.
+    QString size_string =
+      exp == 0 ? QString::number(static_cast<unsigned long>(size)) : QString::number(size, 'f', 1);
     size_string += " " + units[exp];
     mod_size_strings_[info.mod.id] = size_string;
   }

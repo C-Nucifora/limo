@@ -92,7 +92,13 @@ void RepositoriesDialog::saveRepos() const
   }
   QFile file(configFilePath());
   if(file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+  {
+    // Restrict to owner read/write before writing any credentials. The stored
+    // password is only base64-obfuscated (recoverable), so the file must not be
+    // readable by other users on the system.
+    file.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     file.write(QJsonDocument(array).toJson(QJsonDocument::Indented));
+  }
 }
 
 void RepositoriesDialog::refreshRepoList()
@@ -144,9 +150,12 @@ void RepositoriesDialog::onAddRepoClicked()
       const QMessageBox::StandardButton answer =
         QMessageBox::question(this,
                               tr("Save Password"),
-                              tr("Save the password to disk? It will only be base64 "
-                                 "obfuscated, not encrypted."),
-                              QMessageBox::Yes | QMessageBox::No);
+                              tr("WARNING: the password will only be base64 obfuscated, "
+                                 "NOT encrypted. Anyone who can read the configuration "
+                                 "file can recover it in plain text. Save it to disk "
+                                 "anyway?"),
+                              QMessageBox::Yes | QMessageBox::No,
+                              QMessageBox::No);
       config.save_password = answer == QMessageBox::Yes;
     }
   }

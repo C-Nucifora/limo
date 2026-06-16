@@ -62,8 +62,19 @@ QVariant DeployerListModel::data(const QModelIndex& index, int role) const
   const int row = index.row();
   const int col = index.column();
   auto entry = qModelIndexToShared<TreeItem<DeployerEntry>>(index);
-  auto modinfo = qModelIndexToShared<TreeItem<DeployerModInfo>>(index)->getData();
+  if(!entry)
+    return QVariant();
   auto data = entry->getData();
+  if(!data)
+    return QVariant();
+  // Separator and root nodes are plain DeployerEntry objects; only non-separator
+  // nodes are actually DeployerModInfo. Forming the DeployerModInfo alias and reading
+  // its derived members (id/enabled/sourceName/tags) for a separator/root node would
+  // read past the underlying object, so only build it when it is safe to do so.
+  std::shared_ptr<DeployerModInfo> modinfo =
+    data->isSeparator
+      ? nullptr
+      : reinterpret_pointer_cast<TreeItem<DeployerModInfo>>(entry)->getData();
   if (role == Qt::CheckStateRole)
   {
     if (index.column() == name_col && !data->isSeparator)
@@ -73,7 +84,7 @@ QVariant DeployerListModel::data(const QModelIndex& index, int role) const
   }
   if(role == Qt::ForegroundRole)
   {
-    if(!text_colors_.contains(modinfo->id))
+    if(!modinfo || !text_colors_.contains(modinfo->id))
       return QApplication::palette().text();
     return text_colors_.at(modinfo->id);
   }

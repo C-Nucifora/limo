@@ -368,6 +368,40 @@ sfs::path findFragment(const sfs::path& source_path, const std::string& file_nam
   return {};
 }
 
+/*!
+ * \brief Heuristic: does \p source_path look like it contains config-style files?
+ * \details Used only to decide whether a failure of \ref findFragment is worth warning about.
+ * A directory that holds \c .xml / \c .settings / \c .ini files (directly or one level deep)
+ * but whose target fragment was not located by the shallow search is a likely candidate for a
+ * deeper or game-mirrored layout that the MVP depth-1 search misses, so the silent no-op should
+ * be surfaced. Returns false on any filesystem error (warn-on-best-effort only).
+ */
+bool looksLikeConfigDir(const sfs::path& source_path)
+{
+  static const std::set<std::string> kConfigExts{ ".xml", ".settings", ".ini" };
+  std::error_code ec;
+  if(!sfs::is_directory(source_path, ec))
+    return false;
+  for(sfs::recursive_directory_iterator it(source_path, ec), end; !ec && it != end;
+      it.increment(ec))
+  {
+    // Bound the scan depth so a deeply nested mod tree does not stall the heuristic.
+    if(it.depth() > 2)
+    {
+      it.disable_recursion_pending();
+      continue;
+    }
+    if(it->is_regular_file(ec))
+    {
+      std::string ext = it->path().extension().string();
+      std::ranges::transform(ext, ext.begin(), [](unsigned char c) { return std::tolower(c); });
+      if(kConfigExts.contains(ext))
+        return true;
+    }
+  }
+  return false;
+}
+
 MergeResult mergeInputXml(const sfs::path& game_root,
                           const std::vector<MergeSource>& sources,
                           bool dry_run)
@@ -419,11 +453,23 @@ MergeResult mergeInputXml(const sfs::path& game_root,
 
   int total_entries = 0;
   int mods_with_entries = 0;
+  int contexts_created = 0;
   for(const auto& src : sources)
   {
     const sfs::path fragment = findFragment(src.source_path, INPUT_XML_NAME);
     if(fragment.empty())
+    {
+      // The shallow (depth-1) search found nothing. If the mod nonetheless ships config-like
+      // files, its fragment may live in a deeper or game-mirrored subtree that findFragment does
+      // not reach; warn so this silent no-op is diagnosable instead of mysteriously dropping the
+      // mod's bindings.
+      if(looksLikeConfigDir(src.source_path))
+        Log::warning(std::string("Tw3MergeUtil: no ") + INPUT_XML_NAME + " found within depth 1 "
+                     "for mod " + std::to_string(src.mod_id) + " (" + src.source_path.string() +
+                     "), but the directory contains config-like files; a deeper layout may be "
+                     "unsupported.");
       continue;
+    }
 
     pugi::xml_document frag_doc;
     const pugi::xml_parse_result pr =
@@ -472,6 +518,12 @@ MergeResult mergeInputXml(const sfs::path& game_root,
       }
       pugi::xml_node end_comment = target_ctx.append_child(pugi::node_comment);
       end_comment.set_value(endMarker(src.mod_id).c_str());
+
+      // Track contexts we synthesised that actually received entries: because the identifying
+      // attribute used by findOrCreateContext is unverified, the game may not recognise a
+      // from-scratch <InputContext>, silently ignoring its bindings. Surface this in the result.
+      if(created_ctx)
+        contexts_created++;
     }
 
     if(entries_this_mod > 0)
@@ -488,6 +540,18 @@ MergeResult mergeInputXml(const sfs::path& game_root,
   // the file from scratch.
   result.changed = stripped > 0 || total_entries > 0 || !target_existed;
 
+  // Experimental-format caveat: contexts we created from scratch use an identifying attribute
+  // that has not been validated against a real input.xml, so the game may ignore their bindings.
+  std::string experimental_warning;
+  if(contexts_created > 0)
+  {
+    experimental_warning =
+      " WARNING (experimental/unvalidated format): " + std::to_string(contexts_created) +
+      " <InputContext> section(s) were created from scratch; because their identifying attribute "
+      "is unverified, the game may not recognise them and could silently ignore those bindings.";
+    Log::warning("Tw3MergeUtil:" + experimental_warning);
+  }
+
   if(!result.changed)
   {
     result.message = "input.xml already up to date; no changes written.";
@@ -497,7 +561,8 @@ MergeResult mergeInputXml(const sfs::path& game_root,
   if(dry_run)
   {
     result.message = "Dry run: input.xml would be updated (" + std::to_string(total_entries) +
-                     " entries from " + std::to_string(mods_with_entries) + " mods).";
+                     " entries from " + std::to_string(mods_with_entries) + " mods)." +
+                     experimental_warning;
     return result;
   }
 
@@ -521,7 +586,8 @@ MergeResult mergeInputXml(const sfs::path& game_root,
   }
 
   result.message = "Merged " + std::to_string(total_entries) + " input.xml entries from " +
-                   std::to_string(mods_with_entries) + " mods into " + target.string() + ".";
+                   std::to_string(mods_with_entries) + " mods into " + target.string() + "." +
+                   experimental_warning;
   Log::info(result.message);
   return result;
 }

@@ -59,6 +59,17 @@ private:
    * \return The converted string.
    */
   QString bbcodeToHtml(const QString& bbcode);
+  /*!
+   * \brief Removes and deletes every child widget of files_widget and installs a fresh layout.
+   */
+  void resetFilesWidget();
+  /*!
+   * \brief Validates that the given URL uses an http or https scheme and returns an
+   * HTML-attribute-safe version of it. Returns an empty string for disallowed schemes.
+   * \param url URL to validate and escape.
+   * \return The escaped URL or an empty string if the scheme is not permitted.
+   */
+  static QString sanitizeLinkUrl(const QString& url);
 
 private slots:
   /*!

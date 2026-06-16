@@ -92,6 +92,8 @@ void moveFilesToDirectory(const sfs::path& source, const sfs::path& destination,
 
 std::string normalizePath(const std::string& path)
 {
+  // Only swaps separators; does not lexically normalize ('..', '.', duplicate separators are
+  // left as-is). This is not a security boundary, see the header documentation.
   return std::regex_replace(path, std::regex(R"(\\)"), "/");
 }
 

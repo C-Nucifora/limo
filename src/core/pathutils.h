@@ -42,8 +42,13 @@ void moveFilesToDirectory(const std::filesystem::path& source,
                           const std::filesystem::path& destination,
                           bool move = true);
 /*!
- * \brief Replaces all double backslash path separators with a forward slash.
- * \return The normalized path.
+ * \brief Replaces all backslash path separators with a forward slash.
+ *
+ * This only swaps separators. It does NOT lexically normalize the path: '..' segments,
+ * duplicate separators and '.' segments are left untouched. Consequently this function is
+ * NOT a security boundary and must not be used to sanitize untrusted paths or to prevent
+ * path traversal. Validate paths separately if such guarantees are required.
+ * \return The path with all backslashes converted to forward slashes.
  */
 std::string normalizePath(const std::string& path);
 /*!

@@ -169,10 +169,14 @@ private:
    * order prefix if the file is an ordering sensitive \c .archive.
    * \param relative_path Path relative to the mod's root directory.
    * \param loadorder_index Index of the mod in the load order (0 = top = highest priority).
+   * \param loadorder_size Total number of mods in the load order, used to size the zero padded
+   * prefix so that ordering correctness holds for any number of mods (minimum width of 4 is kept
+   * for backwards compatible naming on typical setups).
    * \return The destination relative path.
    */
   std::filesystem::path destinationPath(const std::filesystem::path& relative_path,
-                                        int loadorder_index) const;
+                                        int loadorder_index,
+                                        std::size_t loadorder_size) const;
   /*!
    * \brief Deploys all given files. Mirrors \ref Deployer.deployFiles "Deployer::deployFiles" but
    * resolves the source path through \p source_paths instead of assuming source and destination

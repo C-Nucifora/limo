@@ -1,10 +1,12 @@
 #include "ommrepository.h"
 #include "../log.h"
+#include <algorithm>
 #include <cctype>
 #include <charconv>
 #include <cpr/cpr.h>
 #include <format>
 #include <pugixml.hpp>
+#include <string_view>
 
 using namespace remote;
 
@@ -67,6 +69,40 @@ long parseLong(const std::string& text)
   if(ec != std::errc{})
     return -1;
   return value;
+}
+
+/*! \brief Returns true if \p text is non-empty and consists solely of ASCII digits. */
+bool isAllDigits(const std::string& text)
+{
+  if(text.empty())
+    return false;
+  for(char c : text)
+  {
+    if(!std::isdigit(static_cast<unsigned char>(c)))
+      return false;
+  }
+  return true;
+}
+
+/*!
+ * \brief Compares two all-digit strings as arbitrary-precision unsigned integers
+ * (length first, then lexically), avoiding integer overflow.
+ * \return Negative if a<b, zero if equal, positive if a>b.
+ */
+int compareNumericStrings(const std::string& a, const std::string& b)
+{
+  // Strip leading zeros so "007" and "7" compare equal and lengths are comparable.
+  const std::size_t a_start = std::min(a.find_first_not_of('0'), a.size());
+  const std::size_t b_start = std::min(b.find_first_not_of('0'), b.size());
+  const std::string_view a_view(a.data() + a_start, a.size() - a_start);
+  const std::string_view b_view(b.data() + b_start, b.size() - b_start);
+  if(a_view.size() != b_view.size())
+    return a_view.size() < b_view.size() ? -1 : 1;
+  if(a_view < b_view)
+    return -1;
+  if(a_view > b_view)
+    return 1;
+  return 0;
 }
 
 /*!
@@ -187,13 +223,20 @@ int OmmRepository::compareVersions(const std::string& a, const std::string& b)
     const std::string a_part = i < a_parts.size() ? a_parts[i] : "0";
     const std::string b_part = i < b_parts.size() ? b_parts[i] : "0";
 
-    const long a_num = parseLong(a_part);
-    const long b_num = parseLong(b_part);
-    if(a_num >= 0 && b_num >= 0)
+    // Use a single consistent ordering for all component kinds: two numeric
+    // components compare as arbitrary-precision integers (no long overflow),
+    // numeric components always sort before non-numeric ones, and two
+    // non-numeric components compare lexically.
+    const bool a_numeric = isAllDigits(a_part);
+    const bool b_numeric = isAllDigits(b_part);
+    if(a_numeric && b_numeric)
     {
-      if(a_num != b_num)
-        return a_num < b_num ? -1 : 1;
+      const int cmp = compareNumericStrings(a_part, b_part);
+      if(cmp != 0)
+        return cmp;
     }
+    else if(a_numeric != b_numeric)
+      return a_numeric ? -1 : 1;
     else if(a_part != b_part)
       return a_part < b_part ? -1 : 1;
   }

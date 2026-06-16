@@ -174,4 +174,15 @@ private:
    * \return Pair of (exit code, stdout+stderr output).
    */
   static std::pair<int, std::string> runCommand(const std::string& cmd);
+
+  /*!
+   * \brief POSIX-escapes an arbitrary string for safe use as a single shell word.
+   *
+   * Wraps the value in single quotes and turns every embedded ' into '\\'' so that
+   * paths containing quotes, spaces or shell metacharacters cannot break out of the
+   * argument and inject commands when passed to runCommand()/popen().
+   * \param value The raw string (e.g. a filesystem path).
+   * \return A shell-safe, single-quoted token.
+   */
+  static std::string shellEscape(const std::string& value);
 };

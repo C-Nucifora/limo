@@ -48,7 +48,7 @@ public:
    * \brief Returns the total number of steps in this task.
    * \return The number of steps.
    */
-  int totalSteps() const;
+  uint64_t totalSteps() const;
   /*!
    * \brief Sets the total number of steps in this task.
    * \param total_steps The number of steps.
@@ -98,7 +98,7 @@ private:
   /*! \brief Current step in this task. Only used for leaf nodes. */
   uint64_t cur_step_ = 0;
   /*! \brief Number of total steps in this task. Only used for leaf nodes. */
-  uint64_t total_steps_;
+  uint64_t total_steps_ = 0;
   /*! \brief Current progress in this task. */
   float progress_ = 0.0f;
   /*! \brief Progress at the time of the last call to \ref set_progress_. */

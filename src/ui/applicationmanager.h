@@ -17,6 +17,7 @@
 #include <QObject>
 #include <QStandardPaths>
 #include <QTimer>
+#include <atomic>
 #include <filesystem>
 #include <mutex>
 #include <vector>
@@ -601,10 +602,12 @@ private:
   /*! \brief Drives the periodic automatic update check. Owned by, and fires on, this
    *  object's thread; null until \ref init. */
   QTimer* auto_update_timer_ = nullptr;
-  /*! \brief Whether automatic update checks are enabled. */
-  bool auto_update_check_enabled_ = false;
-  /*! \brief Hours between automatic update checks (minimum 1). */
-  int auto_update_check_interval_hours_ = 24;
+  /*! \brief Whether automatic update checks are enabled. Atomic: written on this object's own
+   *  thread (see \ref setAutoUpdateCheck) but read from arbitrary caller threads via the getters. */
+  std::atomic<bool> auto_update_check_enabled_ = false;
+  /*! \brief Hours between automatic update checks (minimum 1). Atomic for the same cross-thread
+   *  read reason as \ref auto_update_check_enabled_. */
+  std::atomic<int> auto_update_check_interval_hours_ = 24;
   /*! \brief App targeted by automatic update checks (the active app). */
   int auto_update_check_app_id_ = 0;
   /*! \brief Guards against overlapping scheduled checks. */

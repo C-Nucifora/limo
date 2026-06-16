@@ -609,7 +609,7 @@ std::string Api::getApiKey()
   return api_key_;
 }
 
-std::optional<std::pair<std::string, int>> Api::extractDomainAndModId(const std::string& mod_url)
+std::optional<std::pair<std::string, long>> Api::extractDomainAndModId(const std::string& mod_url)
 {
   const std::regex regex(R"((?:https:\/\/)?www\.nexusmods\.com\/(.+)\/mods\/(\d+).*)");
   std::smatch match;
@@ -620,9 +620,11 @@ std::optional<std::pair<std::string, int>> Api::extractDomainAndModId(const std:
     // game-domain token so a crafted URL cannot redirect the call to another endpoint.
     if(!std::regex_match(domain, std::regex("[a-zA-Z0-9]+")))
       return {};
+    // Parse the mod id as a long so large Nexus ids are not truncated, and guard against
+    // std::stoll throwing on overflow/invalid input.
     try
     {
-      return { { domain, std::stoi(match[2]) } };
+      return { { domain, std::stoll(match[2]) } };
     }
     catch(const std::exception&)
     {

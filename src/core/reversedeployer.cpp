@@ -42,7 +42,23 @@ void ReverseDeployer::updateManagedFiles(bool write, std::optional<ProgressNode*
 {
   log_(Log::LOG_INFO, std::format("Deployer '{}': Updating managed files...", name_));
   if(progress_node)
-    (*progress_node)->setTotalSteps(std::max(number_of_files_in_target_, 0));
+  {
+    // Compute the actual file count up front so progress reflects this run, not the cached total.
+    long total_files = 0;
+    std::error_code count_ec;
+    if(sfs::exists(dest_path_, count_ec))
+    {
+      for(auto it = sfs::recursive_directory_iterator(
+            dest_path_, sfs::directory_options::skip_permission_denied, count_ec);
+          !count_ec && it != sfs::recursive_directory_iterator();
+          it.increment(count_ec))
+      {
+        if(it->is_regular_file(count_ec) || it->is_symlink(count_ec))
+          total_files++;
+      }
+    }
+    (*progress_node)->setTotalSteps(static_cast<uint64_t>(std::max(total_files, 0L)));
+  }
   number_of_files_in_target_ = updateFilesInDir(dest_path_, {}, dest_path_, false, progress_node);
   updateCurrentLoadorder();
   moveFilesFromTargetToSource();
@@ -450,18 +466,25 @@ void ReverseDeployer::enableSeparateDirs(bool enabled)
 
   if(enabled)
   {
+    const std::unordered_set<std::string> bookkeeping_files{
+      managed_files_name_, ignore_list_file_name_, deployed_loadorder_name_
+    };
     int temp_id = 0;
-    sfs::path temp_path = source_path_ / ("rev_depl_temp_dir_" + std::to_string(temp_id));
+    std::string temp_dir_name = "rev_depl_temp_dir_" + std::to_string(temp_id);
+    sfs::path temp_path = source_path_ / temp_dir_name;
     while(pu::exists(temp_path))
-      temp_path = source_path_ / ("rev_depl_temp_dir_" + std::to_string(++temp_id));
+    {
+      temp_dir_name = "rev_depl_temp_dir_" + std::to_string(++temp_id);
+      temp_path = source_path_ / temp_dir_name;
+    }
     sfs::create_directories(temp_path);
     for(const auto& dir_entry : sfs::directory_iterator(source_path_))
     {
       if(dir_entry.path() != temp_path &&
-         dir_entry.path().string() != (source_path_ / managed_files_name_).string())
+         !bookkeeping_files.contains(dir_entry.path().filename().string()))
       {
         const std::string relative_path = pu::getRelativePath(dir_entry.path(), source_path_);
-        sfs::rename(dir_entry.path(), source_path_ / temp_path / relative_path);
+        sfs::rename(dir_entry.path(), source_path_ / temp_dir_name / relative_path);
       }
     }
     sfs::rename(temp_path, source_path_ / std::to_string(current_profile_));
@@ -607,6 +630,20 @@ void ReverseDeployer::writeIgnoredFiles() const
   file << json_object;
 }
 
+bool ReverseDeployer::isPathWithinBase(const sfs::path& relative_path, const sfs::path& base)
+{
+  if(relative_path.empty() || relative_path.is_absolute())
+    return false;
+  const sfs::path normalized = (base / relative_path).lexically_normal();
+  const sfs::path normalized_base = base.lexically_normal();
+  // Ensure the normalized path is a descendant of base (no '..' escape).
+  const auto rel = normalized.lexically_relative(normalized_base);
+  if(rel.empty())
+    return false;
+  const std::string first = rel.begin()->string();
+  return first != "..";
+}
+
 void ReverseDeployer::readManagedFiles()
 {
   const sfs::path managed_files_path = source_path_ / managed_files_name_;
@@ -651,13 +688,31 @@ void ReverseDeployer::readManagedFiles()
     {
       const sfs::path path = json_object["managed_files"][prof]["files"][i]["path"].asString();
       const bool enabled = json_object["managed_files"][prof]["files"][i]["enabled"].asBool();
+      // Reject untrusted paths that are absolute or escape dest_path_ via '..'.
+      if(!isPathWithinBase(path, dest_path_))
+      {
+        log_(Log::LOG_WARNING,
+             std::format("Deployer '{}': Ignoring managed file with unsafe path '{}'.",
+                         name_,
+                         path.string()));
+        continue;
+      }
       managed_files_[prof][path] = enabled;
     }
   }
   deployed_loadorder_.clear();
   for(int i = 0; i < json_object["deployed_loadorder"].size(); i++)
   {
-    deployed_loadorder_.emplace_back(json_object["deployed_loadorder"][i]["path"].asString(),
+    const sfs::path lo_path = json_object["deployed_loadorder"][i]["path"].asString();
+    if(!isPathWithinBase(lo_path, dest_path_))
+    {
+      log_(Log::LOG_WARNING,
+           std::format("Deployer '{}': Ignoring deployed file with unsafe path '{}'.",
+                       name_,
+                       lo_path.string()));
+      continue;
+    }
+    deployed_loadorder_.emplace_back(lo_path,
                                      json_object["deployed_loadorder"][i]["enabled"].asBool());
   }
   updateCurrentLoadorder();

@@ -156,8 +156,9 @@ private:
   std::map<int, int> conflict_groups_;
   /*! \brief Id of the conflict group that contains mods without conflicts. */
   int no_conflict_group_ = 0;
-  /*! \brief For every displayed row: The text color used. */
-  std::vector<QBrush> row_text_colors_;
+  /*! \brief Maps mod ids to the text color used for their row. Keyed by mod id (rather
+   *  than proxy row) so lookups remain correct even if rows shift after filtering. */
+  std::map<int, QBrush> mod_text_colors_;
   /*! \brief Used to display to total number of rows. */
   QLabel* row_count_label_;
   /*! \brief String used to filter rows. */

@@ -14,7 +14,17 @@ std::vector<std::string> getFiles(sfs::path dir, bool get_contents = false)
        || dir_entry.path().filename() == ".gitkeep")
       continue;
     std::string entry = dir_entry.path().string().erase(0, dir.string().size());
-    if(get_contents && dir_entry.is_regular_file())
+    // Symlinks are recorded together with their (textual) target so that the deploy
+    // tests which rely on symlinks actually verify where the link points, not merely
+    // that a link of some name exists.
+    if(dir_entry.is_symlink())
+    {
+      std::error_code ec;
+      const sfs::path target = sfs::read_symlink(dir_entry.path(), ec);
+      entry.push_back('\0');
+      entry.append(ec ? std::string("<unreadable symlink>") : target.string());
+    }
+    else if(get_contents && dir_entry.is_regular_file())
     {
       std::ifstream file(dir_entry.path());
       entry.push_back('\0');

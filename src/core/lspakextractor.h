@@ -53,6 +53,21 @@ private:
   /*! \brief Indicates file is a supported .pak archive. */
   static constexpr unsigned int LS_PAK_MAGIC_HEADER_NUMBER = 0x4b50534c;
   /*!
+   * \brief Maximum accepted uncompressed size for an individual extracted file.
+   *
+   * Only meta.lsx files are ever extracted individually; these are small XML
+   * documents, so a 64 MiB cap is already extremely generous and prevents a
+   * malicious archive from forcing a huge allocation via untrusted size fields.
+   */
+  static constexpr unsigned int MAX_SINGLE_FILE_UNCOMPRESSED_SIZE = 64u * 1024u * 1024u;
+  /*!
+   * \brief Maximum accepted summed declared uncompressed size across the file list.
+   *
+   * Bounds the total allocation that a single archive's declared sizes can imply,
+   * rejecting archives whose summed declared sizes are implausible.
+   */
+  static constexpr uint64_t MAX_TOTAL_UNCOMPRESSED_SIZE = 4ull * 1024u * 1024u * 1024u;
+  /*!
    * \brief Supported archive format versions.
    *
    * Versions 16 and 18 share the same on-disk layout: the LSPKHeader16 header
@@ -86,12 +101,15 @@ private:
    * \param length Number of bytes to read.
    * \param uncompressed_size Uncompressed size of the data.
    * \param compression_type Compression type used.
+   * \param max_uncompressed_size Maximum accepted value for uncompressed_size; the
+   * untrusted size field is rejected if it exceeds this cap before any allocation.
    * \return The uncompressed data as a string.
    */
   std::string extractData(unsigned long offset,
                           unsigned int length,
                           unsigned int uncompressed_size,
-                          int compression_type);
+                          int compression_type,
+                          uint64_t max_uncompressed_size = MAX_SINGLE_FILE_UNCOMPRESSED_SIZE);
   /*!
    * \brief Reads the file list from the source archive and initializes file_list_.
    * \param archive_size Total byte size of the archive, used for bounds validation.

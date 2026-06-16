@@ -50,11 +50,31 @@ struct Match
  * \return Ordered, non-overlapping matching runs. Always terminated by a sentinel zero-length
  * match at (left.size(), right.size()) so callers can treat the tail uniformly.
  */
+/*!
+ * \brief Upper bound on the number of LCS table cells (\c n*m) \ref computeMatches is willing
+ * to allocate.
+ *
+ * The classic LCS dynamic program needs O(n*m) memory; for a maliciously (or accidentally)
+ * huge script pair this can exhaust the address space. ~50M cells of \c std::size_t is on the
+ * order of a few hundred MB, which comfortably covers any real WitcherScript file while
+ * refusing to attempt a pathological diff. When the cap is exceeded the diff is abandoned and
+ * an empty match set (just the sentinel) is returned, which makes the callers fall back to
+ * treating the whole content as one conflict region rather than crashing.
+ */
+constexpr std::size_t kMaxLcsCells = 50ull * 1000ull * 1000ull;
+
 std::vector<Match> computeMatches(const std::vector<std::string>& left,
                                   const std::vector<std::string>& right)
 {
   const std::size_t n = left.size();
   const std::size_t m = right.size();
+
+  // Guard against the O(n*m) LCS table exhausting memory on a pathologically large script
+  // pair. Returning only the sentinel makes the whole span surface as a single conflict
+  // region instead of attempting (and likely failing) a multi-gigabyte allocation. The check
+  // is written to avoid overflow in the n*m product itself.
+  if(n != 0 && m > kMaxLcsCells / n)
+    return { Match{ n, m, 0 } };
 
   // lcs[i][j] = length of the LCS of left[i:] and right[j:].
   std::vector<std::vector<std::size_t>> lcs(n + 1, std::vector<std::size_t>(m + 1, 0));

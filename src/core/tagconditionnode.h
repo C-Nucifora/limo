@@ -8,6 +8,8 @@
 #include "tagcondition.h"
 #include <filesystem>
 #include <map>
+#include <optional>
+#include <regex>
 #include <vector>
 
 
@@ -86,6 +88,14 @@ private:
    *  Else: Use a simple string matcher with * as a wildcard.
    */
   bool use_regex_;
+  /*!
+   * \brief If this is a regex leaf: The condition pattern compiled once at
+   *  construction time. Reused for every file to avoid recompilation and to
+   *  reject invalid patterns at load time rather than during evaluation.
+   */
+  std::optional<std::regex> compiled_regex_;
+  /*! \brief Maximum allowed length of a user supplied regex pattern (ReDoS mitigation). */
+  static constexpr std::size_t max_regex_length_ = 1024;
 
   /*!
    * \brief Checks if files in the given vector satisfy

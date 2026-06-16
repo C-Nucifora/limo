@@ -67,11 +67,15 @@ void LsPakExtractor::init()
 std::string LsPakExtractor::extractData(unsigned long offset,
                                         unsigned int length,
                                         unsigned int uncompressed_size,
-                                        int compression_type)
+                                        int compression_type,
+                                        uint64_t max_uncompressed_size)
 {
-  // this is used to extract xml files; they should never exceed 1GiB
-  if(uncompressed_size > 1u << 30)
-    throw std::runtime_error(std::format("Uncompressed file size is too large: {}B.", uncompressed_size));
+  // Reject implausibly large declared sizes before allocating any output buffer.
+  // Individual files are small XML documents; the file-list path passes its own
+  // (already bounded) cap.
+  if(static_cast<uint64_t>(uncompressed_size) > max_uncompressed_size)
+    throw std::runtime_error(std::format(
+      "Uncompressed file size is too large: {}B (cap {}B).", uncompressed_size, max_uncompressed_size));
 
   std::ifstream file(source_path_, std::ios::binary);
   if(!file)
@@ -218,11 +222,15 @@ unsigned int LsPakExtractor::readFileList(uint64_t archive_size)
       std::format("Compressed file list (offset={}, size={}) exceeds archive size {}.",
                   data_offset, compressed_size, archive_size));
 
+  // The file-list blob is not an individual user file; it can legitimately be
+  // larger than a single meta.lsx. uncompressed_list_size was already bounded to
+  // 1 GiB above, so reuse that as the cap for this internal extraction.
   std::string data = extractData(
     data_offset,
     compressed_size,
     static_cast<unsigned int>(uncompressed_list_size),
-    COMPRESSION_LZ4);
+    COMPRESSION_LZ4,
+    static_cast<uint64_t>(1u << 30));
 
   // Validate that decompressed data is exactly the expected size before
   // casting individual entries out of it.
@@ -233,6 +241,9 @@ unsigned int LsPakExtractor::readFileList(uint64_t archive_size)
 
   file_list_.clear();
   file_list_.reserve(num_files);
+  // Accumulate declared uncompressed sizes across the whole list and reject
+  // archives whose summed declared sizes are implausible.
+  uint64_t total_uncompressed_size = 0;
   for(uint32_t i = 0; i < num_files; ++i)
   {
     const uint64_t entry_offset = static_cast<uint64_t>(i) * sizeof(LsPakFileListEntry);
@@ -250,6 +261,13 @@ unsigned int LsPakExtractor::readFileList(uint64_t archive_size)
         std::format("File list entry {} has data region [offset={}, size={}] that exceeds "
                     "archive size {}.",
                     i, entry_file_offset, entry_csize, archive_size));
+
+    const uint32_t entry_usize = entry.uncompressed_size;
+    total_uncompressed_size += static_cast<uint64_t>(entry_usize);
+    if(total_uncompressed_size > MAX_TOTAL_UNCOMPRESSED_SIZE)
+      throw std::runtime_error(std::format(
+        "Summed declared uncompressed size of the file list exceeds the maximum allowed ({}B).",
+        MAX_TOTAL_UNCOMPRESSED_SIZE));
 
     file_list_.push_back(entry);
   }

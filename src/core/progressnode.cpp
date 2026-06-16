@@ -30,7 +30,7 @@ void ProgressNode::advance(uint64_t num_steps)
   propagateProgress();
 }
 
-int ProgressNode::totalSteps() const
+uint64_t ProgressNode::totalSteps() const
 {
   return total_steps_;
 }

@@ -16,6 +16,7 @@
 #include <QSettings>
 #include <QTableWidgetItem>
 #include <QUrl>
+#include <algorithm>
 
 namespace sfs = std::filesystem;
 
@@ -94,7 +95,9 @@ void SaveManagerWidget::refresh()
     const SaveManager::SaveFile& save = saves_[row];
 
     auto* name_item = new QTableWidgetItem(QString::fromStdString(save.name));
-    name_item->setData(Qt::UserRole, row);
+    // Store the absolute path as a stable key so that selection survives sorting and
+    // deletion always targets the correct file regardless of the current row order.
+    name_item->setData(Qt::UserRole, QString::fromStdString(save.path.string()));
     ui->save_table->setItem(row, COL_NAME, name_item);
 
     const QDateTime dt = QDateTime::fromSecsSinceEpoch(save.timestamp);
@@ -165,29 +168,52 @@ void SaveManagerWidget::onOpenClicked()
 void SaveManagerWidget::onDeleteClicked()
 {
   QList<QTableWidgetItem*> selected = ui->save_table->selectedItems();
-  std::vector<int> rows;
+  // Resolve the selected saves by their stable absolute-path key (stored in UserRole)
+  // rather than by a row index, which can become stale once the table is sorted.
+  std::vector<const SaveManager::SaveFile*> targets;
+  std::vector<std::string> seen_paths;
   for(QTableWidgetItem* item : selected)
   {
-    if(item->column() == COL_NAME)
-      rows.push_back(item->data(Qt::UserRole).toInt());
+    if(item->column() != COL_NAME)
+      continue;
+    const std::string key = item->data(Qt::UserRole).toString().toStdString();
+    if(key.empty())
+      continue;
+    // Guard against selecting the same logical save twice.
+    if(std::find(seen_paths.begin(), seen_paths.end(), key) != seen_paths.end())
+      continue;
+    for(const SaveManager::SaveFile& save : saves_)
+    {
+      if(save.path.string() == key)
+      {
+        targets.push_back(&save);
+        seen_paths.push_back(key);
+        break;
+      }
+    }
   }
-  if(rows.empty())
+  if(targets.empty())
     return;
 
-  const QString message = rows.size() == 1
-                            ? QString("Permanently delete the selected save file?")
-                            : QString("Permanently delete %1 selected save files?")
-                                .arg(rows.size());
+  // List the actual file names so the user can verify before a destructive,
+  // non-undoable delete.
+  QStringList names;
+  for(const SaveManager::SaveFile* save : targets)
+    names << QString::fromStdString(save->name).toHtmlEscaped();
+  const QString message =
+    targets.size() == 1
+      ? QString("Permanently delete the following save file?\n\n%1").arg(names.front())
+      : QString("Permanently delete the following %1 save files?\n\n%2")
+          .arg(targets.size())
+          .arg(names.join('\n'));
   if(QMessageBox::question(this, "Delete saves", message) != QMessageBox::Yes)
     return;
 
-  for(int row : rows)
+  for(const SaveManager::SaveFile* save : targets)
   {
-    if(row < 0 || row >= static_cast<int>(saves_.size()))
-      continue;
     try
     {
-      SaveManager::deleteSave(saves_[row].path);
+      SaveManager::deleteSave(save->path);
     }
     catch(const std::exception& e)
     {

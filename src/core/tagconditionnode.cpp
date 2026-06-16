@@ -64,7 +64,25 @@ TagConditionNode::TagConditionNode(std::string expression,
     condition_strings_ = splitString(condition_);
     invert_ = conditions[condition_index].invert ? !invert_ : invert_;
     use_regex_ = conditions[condition_index].use_regex;
-    if(!use_regex_)
+    if(use_regex_)
+    {
+      if(condition_.size() > max_regex_length_)
+        throw std::runtime_error(
+          std::format("Error: Regex pattern in expression '{}' exceeds the maximum length of {} "
+                      "characters",
+                      expression,
+                      max_regex_length_));
+      try
+      {
+        compiled_regex_.emplace(condition_, std::regex::ECMAScript | std::regex::optimize);
+      }
+      catch(const std::regex_error& error)
+      {
+        throw std::runtime_error(std::format(
+          "Error: Invalid regex pattern '{}' in expression '{}': {}", condition_, expression, error.what()));
+      }
+    }
+    else
       std::transform(condition_.begin(),
                      condition_.end(),
                      condition_.begin(),
@@ -107,7 +125,21 @@ bool TagConditionNode::evaluateWithoutInversion(
     {
       std::string target = type_ == Type::file_matcher ? file_name : path;
       if(use_regex_)
-        result = std::regex_match(target, std::regex(condition_));
+      {
+        if(!compiled_regex_)
+          result = false;
+        else
+        {
+          try
+          {
+            result = std::regex_match(target, *compiled_regex_);
+          }
+          catch(const std::regex_error&)
+          {
+            result = false;
+          }
+        }
+      }
       else
       {
         std::transform(target.begin(),

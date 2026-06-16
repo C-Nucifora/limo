@@ -43,6 +43,15 @@ public:
    */
   virtual void unDeploy(std::optional<ProgressNode*> progress_node = {}) override;
   /*!
+   * \brief Restores the single-file plugin backup created by \ref unDeploy, if it exists.
+   *
+   * OpenMW manages only one plugin file (\ref plugin_file_name_) rather than the
+   * loadorder + plugin file pair that \ref LootDeployer::restoreUndeployBackupIfExists
+   * expects, so the inherited two-file restore would never trigger. This override uses
+   * the single-file \ref PluginDeployer semantics to match what \ref unDeploy backs up.
+   */
+  virtual void restoreUndeployBackupIfExists() override;
+  /*!
    * \brief Groups plugins by whether or not they are scrips, groundcover plugins or neither.
    * \return For every group: The plugin IDs part of that group.
    */

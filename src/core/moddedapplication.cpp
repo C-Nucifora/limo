@@ -162,14 +162,7 @@ void ModdedApplication::installMod(const ImportModInfo& info)
   else
     progress_node.addChildren({ 1 });
   progress_node.child(0).setTotalSteps(1);
-  int mod_id = 0;
-  if(!installed_mods_.empty())
-    mod_id = std::max_element(installed_mods_.begin(), installed_mods_.end())->id + 1;
-  while(pu::exists(staging_dir_ / std::to_string(mod_id)) &&
-        mod_id < std::numeric_limits<int>().max())
-    mod_id++;
-  if(mod_id == std::numeric_limits<int>().max())
-    throw std::runtime_error("Error: Could not generate new mod id.");
+  const int mod_id = allocateNewModId();
   last_mod_id_ = mod_id;
   const auto mod_size = Installer::install(info.current_path,
                                            staging_dir_ / std::to_string(mod_id),
@@ -214,14 +207,7 @@ void ModdedApplication::installMod(const ImportModInfo& info)
 
 int ModdedApplication::createEmptyMod(const std::string& name, const std::string& version)
 {
-  int mod_id = 0;
-  if(!installed_mods_.empty())
-    mod_id = std::max_element(installed_mods_.begin(), installed_mods_.end())->id + 1;
-  while(pu::exists(staging_dir_ / std::to_string(mod_id)) &&
-        mod_id < std::numeric_limits<int>().max())
-    mod_id++;
-  if(mod_id == std::numeric_limits<int>().max())
-    throw std::runtime_error("Error: Could not generate new mod id.");
+  const int mod_id = allocateNewModId();
   last_mod_id_ = mod_id;
   sfs::create_directories(staging_dir_ / std::to_string(mod_id));
   const auto time_now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
@@ -742,6 +728,8 @@ std::vector<ModInfo> ModdedApplication::getModInfo() const
 
 std::shared_ptr<TreeItem<DeployerEntry>> ModdedApplication::getLoadorder(int deployer) const
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   return deployers_[deployer]->getLoadorder();
 }
 
@@ -756,12 +744,64 @@ void ModdedApplication::setStagingDir(std::string staging_dir, bool move_existin
     return;
   if(move_existing)
   {
-    for(const auto& mod : installed_mods_)
+    const sfs::path dest_root(staging_dir);
+    // Move one entry, falling back to copy+remove if rename fails (e.g. cross-device EXDEV).
+    const auto move_entry = [](const sfs::path& from, const sfs::path& to)
     {
-      std::string mod_dir = std::to_string(mod.id);
-      sfs::rename(staging_dir_ / mod_dir, sfs::path(staging_dir) / mod_dir);
+      std::error_code ec;
+      sfs::rename(from, to, ec);
+      if(!ec)
+        return;
+      // Cross-filesystem (or otherwise un-renamable): copy recursively, then remove the source.
+      ec.clear();
+      sfs::copy(from, to, sfs::copy_options::recursive | sfs::copy_options::overwrite_existing, ec);
+      if(ec)
+        throw std::runtime_error("Error: Could not move \"" + from.string() + "\" to \"" +
+                                 to.string() + "\": " + ec.message());
+      std::error_code remove_ec;
+      sfs::remove_all(from, remove_ec);
+    };
+
+    // Track what has been moved so a mid-way failure can be rolled back, leaving the original
+    // staging directory intact rather than half-migrated.
+    std::vector<std::pair<sfs::path, sfs::path>> moved;
+    try
+    {
+      for(const auto& mod : installed_mods_)
+      {
+        const std::string mod_dir = std::to_string(mod.id);
+        const sfs::path from = staging_dir_ / mod_dir;
+        const sfs::path to = dest_root / mod_dir;
+        if(!pu::exists(from))
+          continue;
+        move_entry(from, to);
+        moved.emplace_back(from, to);
+      }
+      const sfs::path config_from = staging_dir_ / CONFIG_FILE_NAME;
+      const sfs::path config_to = dest_root / CONFIG_FILE_NAME;
+      move_entry(config_from, config_to);
+      moved.emplace_back(config_from, config_to);
     }
-    sfs::rename(staging_dir_ / CONFIG_FILE_NAME, sfs::path(staging_dir) / CONFIG_FILE_NAME);
+    catch(...)
+    {
+      // Roll back every entry already moved before re-throwing.
+      for(auto it = moved.rbegin(); it != moved.rend(); ++it)
+      {
+        std::error_code ec;
+        sfs::rename(it->second, it->first, ec);
+        if(ec)
+        {
+          ec.clear();
+          sfs::copy(it->second,
+                    it->first,
+                    sfs::copy_options::recursive | sfs::copy_options::overwrite_existing,
+                    ec);
+          std::error_code remove_ec;
+          sfs::remove_all(it->second, remove_ec);
+        }
+      }
+      throw;
+    }
   }
   staging_dir_ = staging_dir;
   updateState(true);
@@ -878,6 +918,8 @@ std::vector<ConflictInfo> ModdedApplication::getFileConflicts(int deployer,
                                                               int mod_id,
                                                               bool show_disabled) const
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   ProgressNode node(progress_callback_);
   auto conflicts = deployers_[deployer]->getFileConflicts(mod_id, show_disabled, &node);
   if(deployers_[deployer]->isAutonomous())
@@ -955,6 +997,8 @@ void ModdedApplication::setCommand(const std::string& newCommand)
 
 void ModdedApplication::editDeployer(int deployer, const EditDeployerInfo& info)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   if(deployers_[deployer]->getType() == info.type)
   {
     deployers_[deployer]->setName(info.name);
@@ -1000,6 +1044,8 @@ void ModdedApplication::editDeployer(int deployer, const EditDeployerInfo& info)
 
 std::unordered_set<int> ModdedApplication::getModConflicts(int deployer, int mod_id)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   ProgressNode node(progress_callback_);
   return deployers_[deployer]->getModConflicts(mod_id, &node);
 }
@@ -1171,19 +1217,8 @@ void ModdedApplication::removeModFromGroup(int mod_id,
   if(groups_[group].size() == 1)
     group_map_.erase(groups_[group][0]);
   if(groups_[group].size() < 2)
-  {
-    groups_.erase(groups_.begin() + group);
-    active_group_members_.erase(active_group_members_.begin() + group);
-    if(group < (int)group_names_.size())
-      group_names_.erase(group_names_.begin() + group);
-    if(group < (int)group_notes_.size())
-      group_notes_.erase(group_notes_.begin() + group);
-    for(auto& pair : group_map_)
-    {
-      if(pair.second > group)
-        pair.second--;
-    }
-  }
+    // Erase the now-empty/singleton group from every per-group parallel vector in lockstep.
+    eraseGroup(group);
   group_map_.erase(mod_id);
   updateSettings(true);
 }
@@ -1310,6 +1345,8 @@ int ModdedApplication::getModGroup(int mod_id)
 
 void ModdedApplication::sortModsByConflicts(int deployer)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   ProgressNode node(progress_callback_);
   deployers_[deployer]->sortModsByConflicts(&node);
   updateSettings(true);
@@ -1317,6 +1354,8 @@ void ModdedApplication::sortModsByConflicts(int deployer)
 
 std::vector<std::vector<int>> ModdedApplication::getConflictGroups(int deployer)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   return deployers_[deployer]->getConflictGroups();
 }
 
@@ -1534,6 +1573,98 @@ void ModdedApplication::setDeployHooks(const std::string& pre_deploy,
   pre_undeploy_hook_ = pre_undeploy;
   post_undeploy_hook_ = post_undeploy;
   updateSettings(true);
+}
+
+int ModdedApplication::allocateNewModId() const
+{
+  int mod_id = 0;
+  // Compare explicitly on Mod::id rather than relying on Mod::operator<.
+  for(const Mod& m : installed_mods_)
+  {
+    if(m.id >= mod_id)
+      mod_id = m.id + 1;
+  }
+  while(pu::exists(staging_dir_ / std::to_string(mod_id)) &&
+        mod_id < std::numeric_limits<int>().max())
+    mod_id++;
+  if(mod_id == std::numeric_limits<int>().max())
+    throw std::runtime_error("Error: Could not generate new mod id.");
+  return mod_id;
+}
+
+void ModdedApplication::eraseGroup(int group)
+{
+  if(group < 0 || group >= (int)groups_.size())
+    return;
+  // Keep all per-group parallel vectors strictly in lockstep; only erase from a vector if the
+  // index is in range (older configs may have shorter name/note vectors).
+  groups_.erase(groups_.begin() + group);
+  if(group < (int)active_group_members_.size())
+    active_group_members_.erase(active_group_members_.begin() + group);
+  if(group < (int)group_names_.size())
+    group_names_.erase(group_names_.begin() + group);
+  if(group < (int)group_notes_.size())
+    group_notes_.erase(group_notes_.begin() + group);
+  for(auto& pair : group_map_)
+  {
+    if(pair.second > group)
+      pair.second--;
+  }
+}
+
+Json::Value ModdedApplication::filterLoadorderForInstalledMods(const Json::Value& loadorder,
+                                                               const std::string& context) const
+{
+  // Drop any saved load-order entries referencing mods that are not installed here, so
+  // setLoadorder never produces dangling ids. Separators (entries without a "status") are kept.
+  const auto is_installed = [this](int mod_id)
+  {
+    return std::find_if(installed_mods_.begin(),
+                        installed_mods_.end(),
+                        [mod_id](const Mod& m) { return m.id == mod_id; }) != installed_mods_.end();
+  };
+  std::function<Json::Value(const Json::Value&)> filter_node = [&](const Json::Value& node)
+  {
+    Json::Value out = node;
+    out.removeMember("children");
+    if(node.isMember("children"))
+    {
+      out["children"] = Json::Value(Json::arrayValue);
+      for(const Json::Value& child : node["children"])
+      {
+        if(child.isMember("status"))
+        {
+          const int mod_id = child["id"].asInt();
+          if(!is_installed(mod_id))
+          {
+            log_(Log::LOG_WARNING,
+                 std::format("Skipping unknown mod id {} while {}.", mod_id, context));
+            continue;
+          }
+        }
+        out["children"].append(filter_node(child));
+      }
+    }
+    return out;
+  };
+
+  Json::Value filtered;
+  filtered["children"] = Json::Value(Json::arrayValue);
+  for(const Json::Value& child : loadorder["children"])
+  {
+    if(child.isMember("status"))
+    {
+      const int mod_id = child["id"].asInt();
+      if(!is_installed(mod_id))
+      {
+        log_(Log::LOG_WARNING,
+             std::format("Skipping unknown mod id {} while {}.", mod_id, context));
+        continue;
+      }
+    }
+    filtered["children"].append(filter_node(child));
+  }
+  return filtered;
 }
 
 int ModdedApplication::runHook(const std::string& hook_name, const std::string& command) const
@@ -1971,10 +2102,26 @@ void ModdedApplication::deleteAllData()
   // the vector and skip every other deployer (leaving its mods deployed with no .lmmfiles).
   for(int i = static_cast<int>(deployers_.size()) - 1; i >= 0; i--)
     removeDeployer(i, true);
+  // Use the non-throwing overloads and continue past individual failures so a single unremovable
+  // file does not abort the whole teardown; log every failure instead.
+  const auto remove_all_logged = [this](const sfs::path& path)
+  {
+    std::error_code ec;
+    sfs::remove_all(path, ec);
+    if(ec)
+      log_(Log::LOG_ERROR,
+           std::format("Could not remove '{}': {}", path.string(), ec.message()));
+  };
   for(const auto& mod : installed_mods_)
-    sfs::remove_all(staging_dir_ / std::to_string(mod.id));
-  sfs::remove(staging_dir_ / CONFIG_FILE_NAME);
-  sfs::remove_all(getDownloadDir());
+    remove_all_logged(staging_dir_ / std::to_string(mod.id));
+  std::error_code ec;
+  sfs::remove(staging_dir_ / CONFIG_FILE_NAME, ec);
+  if(ec)
+    log_(Log::LOG_ERROR,
+         std::format("Could not remove '{}': {}",
+                     (staging_dir_ / CONFIG_FILE_NAME).string(),
+                     ec.message()));
+  remove_all_logged(getDownloadDir());
 }
 
 void ModdedApplication::setAppVersion(const std::string& app_version)
@@ -2243,6 +2390,35 @@ void ModdedApplication::importInstanceInto(const sfs::path& bundle, const sfs::p
 
   Json::Value config = parseInstanceBundle(bundle);
 
+  // Security: an imported bundle is untrusted input. Both deploy "hooks" and per-tool "command"
+  // overwrites are command lines that get handed to the shell (std::system / popen) during normal
+  // use, so importing them verbatim would let a malicious bundle run arbitrary commands without
+  // the user ever reviewing them. Strip these executable fields here; the user can re-add hooks
+  // and tool commands deliberately after reviewing the imported instance.
+  if(config.isMember("hooks"))
+  {
+    config.removeMember("hooks");
+    Log::log(Log::LOG_WARNING,
+             "Removed deploy hooks from imported instance bundle for security; re-add them "
+             "manually after reviewing the imported instance.");
+  }
+  if(config.isMember("tools") && config["tools"].isArray())
+  {
+    bool stripped_tool_command = false;
+    for(Json::Value& tool : config["tools"])
+    {
+      if(tool.isObject() && tool.isMember("command") && !tool["command"].asString().empty())
+      {
+        tool["command"] = "";
+        stripped_tool_command = true;
+      }
+    }
+    if(stripped_tool_command)
+      Log::log(Log::LOG_WARNING,
+               "Removed custom tool command overwrites from imported instance bundle for "
+               "security; re-add them manually after reviewing the imported instance.");
+  }
+
   sfs::create_directories(staging_dir);
   sfs::path config_path = staging_dir / CONFIG_FILE_NAME;
   sfs::path tmp_path = staging_dir / (CONFIG_FILE_NAME + ".tmp");
@@ -2280,8 +2456,15 @@ void ModdedApplication::exportProfile(int profile, const sfs::path& target) cons
       continue;
 
     // Temporarily switch the deployer to the requested profile to read its load order and
-    // conflict groups, then restore the previously active profile.
-    const int previous_profile = deployers_[depl]->getProfile();
+    // conflict groups, then restore the previously active profile. The RAII guard restores the
+    // profile even if serialization below throws, so the deployer is never left on the wrong
+    // profile.
+    struct ProfileGuard
+    {
+      Deployer* deployer;
+      int previous_profile;
+      ~ProfileGuard() { deployer->setProfile(previous_profile); }
+    } profile_guard{ deployers_[depl].get(), deployers_[depl]->getProfile() };
     deployers_[depl]->setProfile(profile);
 
     Json::Value depl_json;
@@ -2297,7 +2480,6 @@ void ModdedApplication::exportProfile(int profile, const sfs::path& target) cons
         depl_json["conflict_groups"][group][i] = conflict_groups[group][i];
     }
 
-    deployers_[depl]->setProfile(previous_profile);
     bundle["deployers"].append(depl_json);
   }
 
@@ -2449,18 +2631,35 @@ void ModdedApplication::importProfile(const sfs::path& bundle)
   addProfile(info);
   const int new_profile = (int)profile_names_.size() - 1;
 
-  // Index the saved per-deployer data by deployer name so we can match it against this instance's
-  // deployers regardless of ordering / count differences.
-  std::map<std::string, const Json::Value*> saved_by_name;
+  // Index the saved per-deployer data by (name, type) so we can match it against this instance's
+  // deployers regardless of ordering / count differences. Keying by name alone would silently
+  // drop one load order when two deployers share a name; keying by (name, type) keeps them
+  // distinct and we warn when even that pair collides.
+  std::map<std::pair<std::string, std::string>, const Json::Value*> saved_by_name_type;
   for(const Json::Value& depl_json : root["deployers"])
-    saved_by_name[depl_json["name"].asString()] = &depl_json;
+  {
+    const std::pair<std::string, std::string> key{ depl_json["name"].asString(),
+                                                   depl_json.get("type", "").asString() };
+    if(saved_by_name_type.contains(key))
+      log_(Log::LOG_WARNING,
+           std::format("Profile bundle contains multiple deployers named '{}' of the same type; "
+                       "only the last saved load order will be applied.",
+                       key.first));
+    saved_by_name_type[key] = &depl_json;
+  }
 
   for(int depl = 0; depl < (int)deployers_.size(); depl++)
   {
     if(deployers_[depl]->isAutonomous())
       continue;
-    auto iter = saved_by_name.find(deployers_[depl]->getName());
-    if(iter == saved_by_name.end())
+    const std::pair<std::string, std::string> key{ deployers_[depl]->getName(),
+                                                   deployers_[depl]->getType() };
+    auto iter = saved_by_name_type.find(key);
+    // Backward compatibility: bundles created before "type" was exported store an empty type,
+    // so fall back to matching the same name with an empty saved type.
+    if(iter == saved_by_name_type.end())
+      iter = saved_by_name_type.find({ deployers_[depl]->getName(), "" });
+    if(iter == saved_by_name_type.end())
     {
       log_(Log::LOG_DEBUG,
            std::format("No saved load order for deployer '{}' in profile bundle; left empty.",
@@ -2469,55 +2668,8 @@ void ModdedApplication::importProfile(const sfs::path& bundle)
     }
     const Json::Value& depl_json = *iter->second;
 
-    // Drop any saved load-order entries referencing mods that are not installed here, so
-    // setLoadorder never produces dangling ids. Separators (entries without an "id") are kept.
-    Json::Value loadorder = depl_json["loadorder"];
-    Json::Value filtered;
-    filtered["children"] = Json::Value(Json::arrayValue);
-    std::function<Json::Value(const Json::Value&)> filter_node = [&](const Json::Value& node)
-    {
-      Json::Value out = node;
-      out.removeMember("children");
-      if(node.isMember("children"))
-      {
-        out["children"] = Json::Value(Json::arrayValue);
-        for(const Json::Value& child : node["children"])
-        {
-          if(child.isMember("status"))
-          {
-            const int mod_id = child["id"].asInt();
-            if(std::find_if(installed_mods_.begin(),
-                            installed_mods_.end(),
-                            [mod_id](const Mod& m) { return m.id == mod_id; }) ==
-               installed_mods_.end())
-            {
-              log_(Log::LOG_WARNING,
-                   std::format("Skipping unknown mod id {} while importing profile.", mod_id));
-              continue;
-            }
-          }
-          out["children"].append(filter_node(child));
-        }
-      }
-      return out;
-    };
-    for(const Json::Value& child : loadorder["children"])
-    {
-      if(child.isMember("status"))
-      {
-        const int mod_id = child["id"].asInt();
-        if(std::find_if(installed_mods_.begin(),
-                        installed_mods_.end(),
-                        [mod_id](const Mod& m) { return m.id == mod_id; }) ==
-           installed_mods_.end())
-        {
-          log_(Log::LOG_WARNING,
-               std::format("Skipping unknown mod id {} while importing profile.", mod_id));
-          continue;
-        }
-      }
-      filtered["children"].append(filter_node(child));
-    }
+    Json::Value filtered =
+      filterLoadorderForInstalledMods(depl_json["loadorder"], "importing profile");
 
     deployers_[depl]->setProfile(new_profile);
     deployers_[depl]->setLoadorder(filtered);
@@ -2619,53 +2771,8 @@ void ModdedApplication::restoreRestorePoint(int index)
     // Drop any saved entries referencing mods no longer installed, so setLoadorder never
     // produces dangling ids. Separators (entries without an "id") are kept. This mirrors the
     // filtering done in importProfile before reusing the same Deployer::setLoadorder path.
-    Json::Value loadorder = depl_json["loadorder"];
-    Json::Value filtered;
-    filtered["children"] = Json::Value(Json::arrayValue);
-    std::function<Json::Value(const Json::Value&)> filter_node = [&](const Json::Value& node)
-    {
-      Json::Value out = node;
-      out.removeMember("children");
-      if(node.isMember("children"))
-      {
-        out["children"] = Json::Value(Json::arrayValue);
-        for(const Json::Value& child : node["children"])
-        {
-          if(child.isMember("status"))
-          {
-            const int mod_id = child["id"].asInt();
-            if(std::find_if(installed_mods_.begin(),
-                            installed_mods_.end(),
-                            [mod_id](const Mod& m) { return m.id == mod_id; }) ==
-               installed_mods_.end())
-            {
-              log_(Log::LOG_WARNING,
-                   std::format("Skipping unknown mod id {} while restoring load order.", mod_id));
-              continue;
-            }
-          }
-          out["children"].append(filter_node(child));
-        }
-      }
-      return out;
-    };
-    for(const Json::Value& child : loadorder["children"])
-    {
-      if(child.isMember("status"))
-      {
-        const int mod_id = child["id"].asInt();
-        if(std::find_if(installed_mods_.begin(),
-                        installed_mods_.end(),
-                        [mod_id](const Mod& m) { return m.id == mod_id; }) ==
-           installed_mods_.end())
-        {
-          log_(Log::LOG_WARNING,
-               std::format("Skipping unknown mod id {} while restoring load order.", mod_id));
-          continue;
-        }
-      }
-      filtered["children"].append(filter_node(child));
-    }
+    Json::Value filtered =
+      filterLoadorderForInstalledMods(depl_json["loadorder"], "restoring load order");
 
     // Reuse the same apply path the config load uses for the tree load-order format.
     deployers_[depl]->setLoadorder(filtered);

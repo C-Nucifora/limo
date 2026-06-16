@@ -36,9 +36,9 @@ private:
   /*! \brief If true: Dialog is used to edit, else: Dialog is used to create. */
   bool edit_mode_ = false;
   /*! \brief Target ModdedApplication. */
-  int app_id_;
+  int app_id_ = -1;
   /*! \brief Target profile. */
-  int profile_;
+  int profile_ = -1;
   /*! \brief Indicates whether the dialog has been completed. */
   bool dialog_completed_ = false;
 

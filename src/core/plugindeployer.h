@@ -323,7 +323,12 @@ protected:
 
   /*! \brief Updates current plugins to reflect plugins actually in the source directory. */
   virtual void updatePlugins();
-  /*! \brief Load plugins from the plugins file. */
+  /*!
+   * \brief Load plugins from the plugins file.
+   * \throws std::runtime_error If the plugin file (plugin_file_name_) could not be opened, e.g.
+   * because the game has never been launched and the file does not yet exist. Callers that may
+   * run before the plugin file exists must guard against or handle this exception.
+   */
   virtual void loadPlugins();
   /*!
    * \brief Reads the enabled/disabled state currently stored in the on-disk plugin state file.

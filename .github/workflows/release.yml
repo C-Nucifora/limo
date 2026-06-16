@@ -111,11 +111,33 @@ jobs:
       # linuxdeploy bundles the ELF + its non-system libraries; the Qt plugin
       # pulls in the needed Qt6 plugins/libs so the result runs on other distros.
       - name: Download linuxdeploy
+        env:
+          # Pin to a specific, immutable release tag instead of the rolling
+          # 'continuous' tag so builds are reproducible and the artifacts can be
+          # checksum-verified against the upstream-published .sha256 files.
+          LINUXDEPLOY_TAG: "1-alpha-20240109-1"
+          LINUXDEPLOY_QT_TAG: "1-alpha-20240109-1"
         run: |
+          set -euo pipefail
           cd /tmp
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          wget -q https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-qt-x86_64.AppImage
+
+          base_ld="https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_TAG}"
+          base_qt="https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/${LINUXDEPLOY_QT_TAG}"
+
+          # Download each binary together with its upstream SHA256 sidecar and
+          # verify before making it executable. Abort the build on any mismatch.
+          for spec in \
+            "${base_ld}|linuxdeploy-x86_64.AppImage" \
+            "${base_qt}|linuxdeploy-plugin-qt-x86_64.AppImage"; do
+            base="${spec%%|*}"
+            file="${spec##*|}"
+            wget -q "${base}/${file}"
+            wget -q "${base}/${file}.sha256"
+            # Some releases publish the checksum with the original download path
+            # as the filename; normalise it to the local filename before -c.
+            sha256sum -c <(awk -v f="${file}" '{print $1 "  " f}' "${file}.sha256")
+            chmod +x "${file}"
+          done
 
       - name: Build AppImage
         id: appimage
@@ -150,6 +172,22 @@ jobs:
           echo "Produced tarball: $TARBALL"
           ls -lh "$TARBALL"
 
+      # --- Verify the AppImage was actually produced ----------------------
+      # The AppImage step is allowed to fail (continue-on-error) so the tarball
+      # still uploads as a workflow artifact for debugging. But a *Release* must
+      # not silently degrade to tarball-only, so record whether a usable
+      # AppImage exists and surface a warning annotation when it does not.
+      - name: Check AppImage presence
+        id: check_appimage
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.appimage.outcome }}" = "success" ] && ls -1 *.AppImage >/dev/null 2>&1; then
+            echo "appimage_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "appimage_ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=AppImage missing::AppImage build did not produce an artifact (step outcome: ${{ steps.appimage.outcome }}); a GitHub Release will not be published from this run."
+          fi
+
       # --- Upload as workflow artifact (always) ---------------------------
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -160,9 +198,18 @@ jobs:
             Limo-*-x86_64.tar.gz
           if-no-files-found: error
 
+      # --- Fail tag releases that lack an AppImage ------------------------
+      # On a tag push the AppImage is a required release asset; if it is missing
+      # fail the run loudly rather than publishing a tarball-only Release.
+      - name: Require AppImage for tag releases
+        if: github.ref_type == 'tag' && steps.check_appimage.outputs.appimage_ok != 'true'
+        run: |
+          echo "::error title=Release blocked::No AppImage was produced for tag ${{ github.ref_name }}; refusing to publish a tarball-only Release."
+          exit 1
+
       # --- Attach to a GitHub Release (tag pushes only) -------------------
       - name: Publish GitHub Release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' && steps.check_appimage.outputs.appimage_ok == 'true'
         uses: softprops/action-gh-release@v2
         with:
           # Drafts a release for the pushed tag and uploads the assets.

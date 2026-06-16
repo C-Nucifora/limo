@@ -5,6 +5,7 @@
 #include "test_utils.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_vector.hpp>
+#include <filesystem>
 #include <ranges>
 
 ImportModInfo createImportModInfo(const std::string& name,
@@ -269,5 +270,54 @@ TEST_CASE("Mods are uninstalled", "[app]")
   // operation it required (info2_d0 was declared but never installed, and its name didn't even
   // match the assertion). After uninstalling the standalone mod 0 and the active group member
   // mod 2, only mod 1 correctly remains, which the assertions above verify.
+}
+
+TEST_CASE("Deploy hooks run and a failing hook does not abort deployment", "[app]")
+{
+  // Hook command strings are intentionally trusted/verbatim: they are handed to the
+  // shell exactly as authored by the user (like a Tool command overwrite, see issue #32)
+  // and are never re-escaped. This test uses harmless shell commands that drop sentinel
+  // files so we can observe that each hook actually ran.
+  resetStagingDir();
+  resetAppDir();
+
+  const sfs::path pre_sentinel = DATA_DIR / "staging" / "pre_deploy_hook.sentinel";
+  const sfs::path post_sentinel = DATA_DIR / "staging" / "post_deploy_hook.sentinel";
+  sfs::remove(pre_sentinel);
+  sfs::remove(post_sentinel);
+
+  ModdedApplication app(DATA_DIR / "staging", "test");
+  app.addDeployer({ DeployerFactory::SIMPLEDEPLOYER, "depl0", DATA_DIR / "app", Deployer::hard_link });
+  ImportModInfo info;
+  info.name = "mod 0";
+  info.version = "1.0";
+  info.installer = Installer::SIMPLEINSTALLER;
+  info.current_path = DATA_DIR / "source" / "mod0.tar.gz";
+  info.deployers = { 0 };
+  info.installer_flags = INSTALLER_FLAGS;
+  info.root_level = 0;
+  app.installMod(info);
+  info.name = "mod 1";
+  info.current_path = DATA_DIR / "source" / "mod1.zip";
+  app.installMod(info);
+  info.name = "mod 2";
+  info.current_path = DATA_DIR / "source" / "mod2.tar.gz";
+  app.installMod(info);
+
+  // The pre-deploy hook drops a sentinel; the post-deploy hook drops a sentinel and then
+  // fails (exit 1). A failing hook must only be logged and must NOT abort deployment.
+  const std::string pre_hook = "touch '" + pre_sentinel.string() + "'";
+  const std::string post_hook = "touch '" + post_sentinel.string() + "'; exit 1";
+  app.setDeployHooks(pre_hook, post_hook, "", "");
+  REQUIRE(app.getPreDeployHook() == pre_hook);
+  REQUIRE(app.getPostDeployHook() == post_hook);
+
+  app.deployMods();
+
+  // Both hooks ran (their sentinels exist), and despite the post hook's non-zero exit code
+  // the deployment still completed (the deployed files match the expected target).
+  REQUIRE(sfs::exists(pre_sentinel));
+  REQUIRE(sfs::exists(post_sentinel));
+  verifyDirsAreEqual(DATA_DIR / "app", DATA_DIR / "target" / "mod012", true);
 }
 

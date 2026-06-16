@@ -6,9 +6,32 @@
 #include <QHeaderView>
 #include <QStandardPaths>
 #include <filesystem>
+#include <limits>
 #include <ranges>
 
 namespace sfs = std::filesystem;
+
+namespace
+{
+/*!
+ * \brief Parses a Steam app ID from text, clamping to the valid int range.
+ *
+ * Using toLongLong with an ok flag (instead of toInt) avoids silently yielding 0 on
+ * overflow. Empty or invalid input yields 0; values outside the int range are clamped.
+ */
+int parseSteamAppId(const QString& text)
+{
+  bool ok = false;
+  const qlonglong value = text.toLongLong(&ok);
+  if(!ok)
+    return 0;
+  if(value < 0)
+    return 0;
+  if(value > std::numeric_limits<int>::max())
+    return std::numeric_limits<int>::max();
+  return static_cast<int>(value);
+}
+}
 
 
 EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
@@ -79,8 +102,8 @@ EditToolWidget::EditToolWidget(QWidget* parent) : QWidget{ parent }
 
   app_id_label_ = new QLabel("Steam App ID:", this);
   app_id_label_->setToolTip("Steam app ID for the Proton prefix");
-  app_id_field_ = new ValidatingLineEdit(this);
-  app_id_field_->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]*"), this));
+  app_id_field_ = new ValidatingLineEdit(this, ValidatingLineEdit::VALID_NOT_EMPTY);
+  app_id_field_->setValidator(new QRegularExpressionValidator(QRegularExpression("[0-9]+"), this));
   connect(app_id_field_, &QLineEdit::textChanged, this, &EditToolWidget::textFieldEdited);
   app_id_import_button_ = new QPushButton("Import", this);
   connect(app_id_import_button_, &QPushButton::clicked, this, &EditToolWidget::importButtonClicked);
@@ -203,7 +226,7 @@ Tool EditToolWidget::getTool()
   if(runtime == RUNTIME_STEAM_INDEX)
     return { name_field_->text().toStdString(),
              icon_field_->text().toStdString(),
-             app_id_field_->text().toInt(),
+             parseSteamAppId(app_id_field_->text()),
              runtime_version_box_->currentIndex() == VERSION_FLATPAK_INDEX };
 
   std::map<std::string, std::string> variable_map;
@@ -233,7 +256,7 @@ Tool EditToolWidget::getTool()
            icon_field_->text().toStdString(),
            executable_field_->text().toStdString(),
            runtime_version_box_->currentIndex() == VERSION_FLATPAK_INDEX,
-           app_id_field_->text().toInt(),
+           parseSteamAppId(app_id_field_->text()),
            working_directory_field_->text().toStdString(),
            variable_map,
            arguments_field_->text().toStdString(),

@@ -37,10 +37,25 @@ namespace remote
  * Providers are registered at program startup with their display names as keys.
  * Callers that only need the Thunderstore provider can use the static helper
  * thunderstore() directly.
+ *
+ * \warning EXPERIMENTAL: The Thunderstore/GameBanana/mod.io providers exposed by
+ * this registry are not yet wired into the repositories/import UI. They are
+ * provided as scaffolding for limo-app/limo#60 and their parse/install paths
+ * have not been validated end-to-end. Treat all results as untrusted and do not
+ * rely on this registry in production flows until it is integrated. Query
+ * isExperimental() to gate any UI that surfaces these providers.
  */
 class RemoteSourceRegistry
 {
 public:
+  /*!
+   * \brief Whether the providers in this registry are experimental/unwired.
+   *
+   * Returns true while the registry is not integrated into the import UI.
+   * UI code should hide or disable provider selection unless this is false.
+   */
+  static constexpr bool isExperimental() { return true; }
+
   /*! \brief Get the process-wide singleton instance. */
   static RemoteSourceRegistry& instance()
   {
