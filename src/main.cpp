@@ -701,6 +701,51 @@ int cmdDeploy(const std::vector<std::string>& sub_args)
 }
 
 // ---------------------------------------------------------------------------
+// Subcommand: undeploy (fork #207)
+// ---------------------------------------------------------------------------
+
+/*!
+ * \brief fork #207: Handles: undeploy <app_id> [profile_id]. Lets Steam Deck Game Mode
+ * (or any local control surface / Decky plugin) revert a deployment without Desktop Mode.
+ * \param sub_args Positional args after "undeploy".
+ * \return Exit code.
+ */
+int cmdUnDeploy(const std::vector<std::string>& sub_args)
+{
+  if(sub_args.empty())
+  {
+    std::cerr << "Usage: limo undeploy <app_id> [profile_id]\n";
+    return 1;
+  }
+
+  int app_id = parseId(sub_args[0]);
+  if(app_id < 0)
+    return cliError("app_id must be a non-negative integer.");
+
+  ApplicationManager am;
+  am.enableExceptions(true);
+  am.init();
+
+  if(app_id >= am.getNumApplications())
+    return cliError("app_id " + std::to_string(app_id) + " is out of range.");
+
+  // Optional profile argument (mirrors deploy).
+  if(sub_args.size() >= 2)
+  {
+    int profile_id = parseId(sub_args[1]);
+    if(profile_id < 0)
+      return cliError("profile_id must be a non-negative integer.");
+    if(profile_id >= am.getNumProfiles(app_id))
+      return cliError("profile_id " + std::to_string(profile_id) + " is out of range.");
+    am.setProfile(app_id, profile_id);
+  }
+
+  am.unDeployMods(app_id);
+  std::cout << "Mods undeployed for app " << app_id << ".\n";
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
 // Subcommand: status
 // ---------------------------------------------------------------------------
 
@@ -775,6 +820,8 @@ void printCliHelp()
     "      Switch the active profile.\n"
     "  deploy <app_id> [profile_id]\n"
     "      Deploy mods, optionally switching to the given profile first.\n"
+    "  undeploy <app_id> [profile_id]\n"
+    "      Undeploy mods, optionally switching to the given profile first.\n"
     "  status <app_id>\n"
     "      Print a summary (profiles, deployers, mod counts).\n"
     "\n"
@@ -904,7 +951,8 @@ int main(int argc, char* argv[])
   // entirely without touching Qt widgets.
   // -------------------------------------------------------------------------
   const std::vector<std::string> SUBCOMMANDS = {
-    "list", "install", "uninstall", "enable", "disable", "set-profile", "deploy", "status"
+    "list",   "install", "uninstall",   "enable", "disable",
+    "set-profile", "deploy", "undeploy", "status" // fork #207: undeploy
   };
 
   bool is_subcommand = !pos_tokens.empty() &&
@@ -1063,6 +1111,8 @@ int main(int argc, char* argv[])
         return cmdSetProfile(cmd_args);
       if(cmd == "deploy")
         return cmdDeploy(cmd_args);
+      if(cmd == "undeploy") // fork #207
+        return cmdUnDeploy(cmd_args);
       if(cmd == "status")
         return cmdStatus(cmd_args, json_out);
     }
