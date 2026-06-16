@@ -38,6 +38,11 @@ find_package(OpenSSL REQUIRED)
 find_package(QT NAMES Qt6 REQUIRED COMPONENTS Widgets)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Svg Network)
 
+# fork #22: LinguistTools is OPTIONAL. It is only used to compile the .ts
+# translation sources into .qm files. The build (LOOT on and LOOT off) must
+# succeed even when it is unavailable, so it is requested QUIET and never REQUIRED.
+find_package(Qt${QT_VERSION_MAJOR} COMPONENTS LinguistTools QUIET)
+
 # libunrar (only required for RAR-archive extraction support)
 if(LIMO_WITH_UNRAR)
 if(NOT DEFINED LIBUNRAR_INCLUDE_DIR)
@@ -543,6 +548,41 @@ else()
             DESTINATION ${LIMO_INSTALL_PREFIX}/share/applications)
   install(FILES install_files/changelogs.json
             DESTINATION ${LIMO_INSTALL_PREFIX}/share/limo)
+endif()
+
+# fork #22: Qt translation (i18n) support.
+# The .ts sources live in translations/. Compiling them into .qm requires the
+# Qt LinguistTools component, which is OPTIONAL: when it (or lrelease) is missing
+# the build proceeds unchanged and the app silently falls back to English. When
+# available, the generated .qm files are installed to share/limo/translations,
+# where main.cpp looks for them at runtime.
+set(LIMO_TS_FILES
+    ${PROJECT_SOURCE_DIR}/translations/limo_en.ts)
+
+if(Qt${QT_VERSION_MAJOR}LinguistTools_FOUND)
+  if(IS_FLATPAK)
+    set(LIMO_QM_INSTALL_DIR /app/share/limo/translations)
+  else()
+    set(LIMO_QM_INSTALL_DIR ${LIMO_INSTALL_PREFIX}/share/limo/translations)
+  endif()
+
+  if(COMMAND qt_add_translations)
+    # Qt >= 6.2 convenience API: builds the .qm files and ties them to the target.
+    qt_add_translations(Limo
+        TS_FILES ${LIMO_TS_FILES}
+        QM_FILES_OUTPUT_VARIABLE LIMO_QM_FILES)
+    install(FILES ${LIMO_QM_FILES} DESTINATION ${LIMO_QM_INSTALL_DIR})
+  else()
+    # Fallback: run lrelease directly, guarded behind the LinguistTools check.
+    qt_add_lrelease(LIMO_QM_FILES TS_FILES ${LIMO_TS_FILES})
+    add_custom_target(limo_translations ALL DEPENDS ${LIMO_QM_FILES})
+    add_dependencies(Limo limo_translations)
+    install(FILES ${LIMO_QM_FILES} DESTINATION ${LIMO_QM_INSTALL_DIR})
+  endif()
+else()
+  message(STATUS
+    "Qt LinguistTools not found: skipping .qm translation generation (fork #22). "
+    "The UI will use the English source strings.")
 endif()
 
 # Tests are built when LIMO_BUILD_TESTS is set (or the standard BUILD_TESTING flag).

@@ -91,6 +91,18 @@ void SettingsDialog::init()
                                                                                  : Qt::Unchecked);
   ui->deploy_for_box->setCurrentIndex(settings.value("deploy_for_all", true).toBool() ? 0 : 1);
   ui->theme_box->setCurrentIndex(settings.value("theme", 0).toInt());
+  // fork #22: Map the stored "language" locale string onto the combo entries.
+  // Empty / "system" selects the first entry (system default).
+  {
+    const QString language = settings.value("language", QString()).toString();
+    int language_index = ui->language_box->findData(language);
+    if(language_index < 0)
+    {
+      const QStringList language_codes = { "system", "en" };
+      language_index = language_codes.indexOf(language);
+    }
+    ui->language_box->setCurrentIndex(language_index < 0 ? 0 : language_index);
+  }
   // fork #140
   ui->download_speed_limit_box->setValue(settings.value("download_speed_limit_kbps", 0).toInt());
 
@@ -157,6 +169,17 @@ void SettingsDialog::on_buttonBox_accepted()
   settings.setValue("deploy_for_all", deploy_all_);
 
   settings.setValue("theme", ui->theme_box->currentIndex());
+
+  // fork #22: Store the selected UI language as a locale string. Index 0 is the
+  // system default (empty), index 1 is English ("en"). Takes effect on restart.
+  {
+    const QStringList language_codes = { "", "en" };
+    const int language_index = ui->language_box->currentIndex();
+    settings.setValue("language",
+                      language_index >= 0 && language_index < language_codes.size()
+                        ? language_codes.at(language_index)
+                        : QString());
+  }
 
   // fork #140
   settings.setValue("download_speed_limit_kbps", ui->download_speed_limit_box->value());
