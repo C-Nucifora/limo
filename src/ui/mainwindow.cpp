@@ -956,6 +956,9 @@ void MainWindow::setupMenus()
   // fork #202: plugin ESM/ESL flag overview.
   QAction* plugin_flags_action = tools_menu->addAction(tr("Plugin ESM/ESL Flags"));
   connect(plugin_flags_action, &QAction::triggered, this, &MainWindow::onShowPluginFlags);
+  // fork #211: Nexus news / announcements feed.
+  QAction* nexus_news_action = tools_menu->addAction(tr("Nexus News"));
+  connect(nexus_news_action, &QAction::triggered, this, &MainWindow::onShowNexusNews);
   // fork #54: deploy restore points.
   QAction* restore_points_action = tools_menu->addAction(tr("Restore Points"));
   connect(restore_points_action, &QAction::triggered, this, &MainWindow::onShowRestorePoints);
@@ -4542,6 +4545,14 @@ void MainWindow::onShowPluginFlags()
   if(currentApp() < 0)
     return;
   emit requestPluginFlags(currentApp());
+}
+
+void MainWindow::onShowNexusNews()
+{
+  // fork #211: open the Nexus news/announcements feed dialog.
+  auto* dialog = new NexusNewsDialog(this);
+  dialog->setAttribute(Qt::WA_DeleteOnClose);
+  dialog->show();
 }
 
 void MainWindow::onPluginFlags(std::vector<PluginDeployer::PluginFlagInfo> plugins, int app_id)
