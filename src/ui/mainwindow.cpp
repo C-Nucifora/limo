@@ -487,6 +487,8 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::setModCategory);
   connect(this, &MainWindow::mergeMods, // fork #148
           app_manager_, &ApplicationManager::mergeMods);
+  connect(this, &MainWindow::updateModFromLocal, // fork #66
+          app_manager_, &ApplicationManager::updateModFromLocal);
   connect(this, &MainWindow::refreshReverseDeployers, // fork #81
           app_manager_, &ApplicationManager::refreshReverseDeployers);
   connect(this, &MainWindow::setModPinned,
@@ -816,6 +818,10 @@ void MainWindow::setupMenus()
   preview_files_action_ = new QAction("Preview Files...", this); // fork #209
   preview_files_action_->setToolTip("Preview textures, text and other asset files shipped by this mod");
   connect(preview_files_action_, &QAction::triggered, this, &MainWindow::onPreviewModFiles);
+  update_from_local_action_ = new QAction("Update from Local...", this); // fork #66
+  update_from_local_action_->setToolTip(
+    "Replace this mod's files from a local archive, keeping its name, tags, load order and rules");
+  connect(update_from_local_action_, &QAction::triggered, this, &MainWindow::onUpdateModFromLocal);
   QList<QAction*> mod_list_actions{ ui->actionadd_to_deployer,      ui->actionAdd_to_Group,
                                     ui->actionbrowse_mod_files,     ui->actionRemove_from_Group,
                                     ui->actionRemove_Mods,          ui->actionRemove_Other_Versions,
@@ -827,7 +833,8 @@ void MainWindow::setupMenus()
                                     mod_rules_action_,               manage_groups_action_,
                                     set_color_action_,               clear_color_action_,
                                     edit_config_action_,             set_category_action_,
-                                    merge_mods_action_,              preview_files_action_ };
+                                    merge_mods_action_,              preview_files_action_,
+                                    update_from_local_action_ };
   std::sort(mod_list_actions.begin(), mod_list_actions.end(), sort_actions);
   mod_list_menu_->addActions(mod_list_actions);
 
@@ -861,6 +868,12 @@ void MainWindow::setupMenus()
   conflict_detail_action_ = new QAction("Conflict Details...", this);
   conflict_detail_action_->setToolTip("Show which files this mod wins and loses against other mods");
   connect(conflict_detail_action_, &QAction::triggered, this, &MainWindow::onConflictDetails);
+  rename_separator_action_ = new QAction("Rename Separator", this); // fork #10
+  rename_separator_action_->setToolTip("Rename this separator");
+  connect(rename_separator_action_, &QAction::triggered, this, &MainWindow::onRenameSeparator);
+  delete_separator_action_ = new QAction("Delete Separator", this); // fork #10
+  delete_separator_action_->setToolTip("Delete this separator; its mods move up to the parent level");
+  connect(delete_separator_action_, &QAction::triggered, this, &MainWindow::onDeleteSeparator);
   merge_tw3_scripts_action_ = new QAction("Merge Witcher 3 Scripts (experimental)...", this);
   merge_tw3_scripts_action_->setToolTip(
     "Merge conflicting WitcherScript (.ws) files across the enabled mods of this deployer");
@@ -884,7 +897,8 @@ void MainWindow::setupMenus()
     ui->actionAdd_to_Ignore_List,   conflict_detail_action_,
     merge_tw3_scripts_action_,      merge_tw3_config_action_,
     cyberpunk_setup_action_,        deploy_redmods_action_,
-    ui->actionExport_Mod_List
+    ui->actionExport_Mod_List,      rename_separator_action_,
+    delete_separator_action_
   };
   std::sort(deployer_list_actions.begin(), deployer_list_actions.end(), sort_actions);
   deployer_list_menu_->addActions(deployer_list_actions);
@@ -2442,6 +2456,11 @@ void MainWindow::onDeployerListContextMenu(QPoint pos)
   merge_tw3_config_action_->setVisible(is_tw3);
   cyberpunk_setup_action_->setVisible(is_cp);
   deploy_redmods_action_->setVisible(is_cp);
+  // fork #10: separator actions only apply when a separator row is selected.
+  const auto sep_index = deployer_list_proxy_->mapToSource(ui->deployer_list->indexAt(pos));
+  const bool is_separator = deployer_model_->isSeparator(sep_index);
+  rename_separator_action_->setVisible(is_separator);
+  delete_separator_action_->setVisible(is_separator);
 
   bool has_visible_actions = false;
   for(auto&& action : deployer_list_menu_->actions())
@@ -4442,6 +4461,27 @@ void MainWindow::onPreviewModFiles()
   dialog->show();
 }
 
+void MainWindow::onUpdateModFromLocal()
+{
+  // fork #66: replace the selected mod's files from a chosen local archive, keeping its config.
+  const auto index = mod_list_proxy_->mapToSource(ui->mod_list->selectionModel()->currentIndex());
+  if(!index.isValid())
+    return;
+  const int mod_id = mod_list_model_->data(index, ModListModel::mod_id_role).toInt();
+  const QString mod_name = index.data(ModListModel::mod_name_role).toString();
+  const QString file = QFileDialog::getOpenFileName(
+    this,
+    "Select archive to update \"" + mod_name + "\" from",
+    QStandardPaths::writableLocation(QStandardPaths::HomeLocation),
+    "Archives (*.zip *.7z *.rar *.tar *.gz *.bz2 *.xz *.archive *.fomod);;All files (*)");
+  if(file.isEmpty())
+    return;
+  setStatusMessage("Updating mod files");
+  setBusyStatus(true);
+  emit updateModFromLocal(currentApp(), mod_id, std::filesystem::path(file.toStdString()));
+  emit getModInfo(currentApp());
+}
+
 void MainWindow::on_refresh_button_clicked()
 {
   // fork #81: re-scan reverse deployers so externally produced files become visible.
@@ -4554,6 +4594,28 @@ void MainWindow::onConflictDetails()
   setStatusMessage("Finding file conflicts");
   setBusyStatus(true);
   emit getFileConflicts(currentApp(), currentDeployer(), conflict_detail_mod_id_, false);
+}
+
+void MainWindow::onRenameSeparator()
+{
+  // fork #10: start inline editing of the selected separator's name.
+  const auto proxy_index = ui->deployer_list->currentIndex();
+  if(!proxy_index.isValid())
+    return;
+  const auto name_index = proxy_index.siblingAtColumn(DeployerListModel::name_col);
+  ui->deployer_list->setCurrentIndex(name_index);
+  ui->deployer_list->edit(name_index);
+}
+
+void MainWindow::onDeleteSeparator()
+{
+  // fork #10: delete the selected separator, promoting its children, then persist.
+  const auto src_index = deployer_list_proxy_->mapToSource(ui->deployer_list->currentIndex());
+  if(!deployer_model_->isSeparator(src_index))
+    return;
+  deployer_model_->removeSeparator(src_index);
+  emit commitChanges(currentApp(), currentDeployer());
+  emit getDeployerInfo(currentApp(), currentDeployer());
 }
 
 void MainWindow::onManageGroups()

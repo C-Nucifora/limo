@@ -247,8 +247,14 @@ private:
   QAction* merge_mods_action_ = nullptr;
   /*! \brief fork #209: Mod context action: preview a mod's asset files. */
   QAction* preview_files_action_ = nullptr;
+  /*! \brief fork #66: Mod context action: update a mod's files from a local archive. */
+  QAction* update_from_local_action_ = nullptr;
   /*! \brief Deployer context action: show per-file win/loss conflict detail for the selected mod. */
   QAction* conflict_detail_action_;
+  /*! \brief fork #10: Deployer context action: rename the selected separator. */
+  QAction* rename_separator_action_ = nullptr;
+  /*! \brief fork #10: Deployer context action: delete the selected separator (promoting children). */
+  QAction* delete_separator_action_ = nullptr;
   /*! \brief Deployer context action (Witcher 3): merge conflicting WitcherScript files. */
   QAction* merge_tw3_scripts_action_;
   /*! \brief Deployer context action (Witcher 3): merge input.xml config fragments. */
@@ -1344,6 +1350,8 @@ private slots:
   void onMergeMods();
   /*! \brief fork #209: Opens the asset preview dialog for the selected mod. */
   void onPreviewModFiles();
+  /*! \brief fork #66: Picks an archive and replaces the selected mod's files from it. */
+  void onUpdateModFromLocal();
   /*! \brief fork #81: Re-scans reverse deployers and refreshes the view. */
   void on_refresh_button_clicked();
   /*! \brief fork #208: Confirms then purges and redeploys all deployers from scratch. */
@@ -1368,6 +1376,10 @@ private slots:
   void onModRulesChanged(int app_id, int source_mod_id, std::vector<ModRule> rules);
   /*! \brief Opens a ConflictDetailDialog for the mod selected in the deployer list. */
   void onConflictDetails();
+  /*! \brief fork #10: Starts inline editing of the selected separator's name. */
+  void onRenameSeparator();
+  /*! \brief fork #10: Deletes the selected separator, promoting its children. */
+  void onDeleteSeparator();
   /*!
    * \brief Receives the rules for one mod and opens the ManageModRulesDialog.
    * \param app_id Target app.
@@ -1972,6 +1984,8 @@ signals:
   void setModCategory(int app_id, int mod_id, QString category);
   /*! \brief fork #148: Merges the source mods into the target mod, removing the sources. */
   void mergeMods(int app_id, std::vector<int> source_mod_ids, int target_mod_id);
+  /*! \brief fork #66: Replaces a mod's files from a local archive, keeping its config. */
+  void updateModFromLocal(int app_id, int mod_id, std::filesystem::path source_archive);
   /*! \brief fork #81: Re-scans reverse deployers so externally produced files appear. */
   void refreshReverseDeployers(int app_id);
   /*!
