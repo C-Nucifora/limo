@@ -972,6 +972,19 @@ public:
    * \return A human-readable summary of what was merged and which scripts need manual review.
    */
   std::string mergeTw3Scripts(int deployer);
+  // fork #59: configured root of unpacked vanilla Witcher 3 scripts for 3-way merge.
+  /*!
+   * \brief Sets the path to an already-unpacked vanilla Witcher 3 scripts root used as the
+   * common base for the 3-way script merge. An empty string disables the 3-way base (the merge
+   * then falls back to 2-way).
+   * \param path Absolute path to the unpacked vanilla scripts root.
+   */
+  void setTw3VanillaScriptsRoot(const std::string& path);
+  /*!
+   * \brief Returns the configured vanilla Witcher 3 scripts root, or an empty string if unset.
+   * \return The configured path.
+   */
+  std::string getTw3VanillaScriptsRoot() const;
   /*!
    * \brief Merges each enabled mod's input.xml fragment into the Witcher 3 shared input.xml
    * for the given deployer, idempotently (via LIMO_MERGE sentinel markers).
@@ -1157,6 +1170,8 @@ private:
   std::vector<Tool> tools_;
   /*! \brief The command used to run this application. */
   std::string command_ = "";
+  /*! \brief fork #59: path to an unpacked vanilla Witcher 3 scripts root for 3-way merge. */
+  std::string tw3_vanilla_scripts_root_ = "";
   /*! \brief The currently active profile id. */
   int current_profile_ = 0;
   /*! \brief Contains names of all profiles. */

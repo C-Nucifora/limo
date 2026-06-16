@@ -1505,6 +1505,21 @@ public slots:
    * \param deployer Target deployer.
    */
   void mergeTw3Scripts(int app_id, int deployer);
+  // fork #59: configured vanilla Witcher 3 scripts root used as the 3-way merge base.
+  /*!
+   * \brief Sets the path to an unpacked vanilla Witcher 3 scripts root for the given app, used
+   * as the common base for the 3-way script merge. An empty path disables the 3-way base.
+   * \param app_id Target app.
+   * \param path Absolute path to the unpacked vanilla scripts root.
+   */
+  void setTw3VanillaScriptsRoot(int app_id, QString path);
+  /*!
+   * \brief Returns the configured vanilla Witcher 3 scripts root for the given app, or an empty
+   * string if unset.
+   * \param app_id Target app.
+   * \return The configured path.
+   */
+  QString getTw3VanillaScriptsRoot(int app_id);
   /*!
    * \brief Merges Witcher 3 input.xml fragments for the given deployer. Emits sendGameToolResult.
    * \param app_id Target app.
