@@ -932,12 +932,20 @@ private slots:
   /*! \brief fork #241: Queues the selected FS server mods for download.
    *  \param mods One [file_name, download_url] entry per mod. */
   void onFsServerDownloadRequested(QList<QStringList> mods);
-  /*! \brief fork #232: Populates the open Modpacks dialog with the application's packs. */
-  void onGetPackInfo(QStringList all_packs, QStringList active_packs);
+  /*! \brief fork #232/#242: Populates the open Modpacks dialog from a pack-info JSON payload. */
+  void onGetPackInfo(QString json);
   /*! \brief fork #232: Activates/deactivates a pack and refreshes the mod views. */
   void onPackToggled(QString pack_name, bool active);
-  /*! \brief fork #232: Creates a new (empty) pack, then refreshes the Modpacks dialog. */
+  /*! \brief fork #242: Creates a new (empty) pack, then refreshes the Modpacks dialog. */
   void onNewPackRequested(QString pack_name);
+  /*! \brief fork #242: Renames a pack, then refreshes the Modpacks dialog. */
+  void onRenamePackRequested(QString old_name, QString new_name);
+  /*! \brief fork #242: Removes a pack, then refreshes the Modpacks dialog + mod views. */
+  void onRemovePackRequested(QString pack_name);
+  /*! \brief fork #242: Sets a pack's notes, then refreshes the Modpacks dialog. */
+  void onSetPackNotesRequested(QString pack_name, QString notes);
+  /*! \brief fork #242: Sets a pack's ordered mods, then refreshes the Modpacks dialog + views. */
+  void onSetPackModsRequested(QString pack_name, QList<int> mod_ids);
   /*! \brief fork #232: Duplicates the current profile (inheriting its load order + packs). */
   void onDuplicateProfileButtonClicked();
   /*! \brief Updates the currently active ModdedApplication. */
@@ -1750,9 +1758,19 @@ signals:
   void removeProfile(int app_id, int profile);
   /*! \brief fork #232: Activates/deactivates a modpack for the application's current profile. */
   void setPackActive(int app_id, QString pack, bool active);
-  /*! \brief fork #232: Requests the application's packs and the subset active for its profile. */
+  /*! \brief fork #232/#242: Requests the application's pack-info JSON payload. */
   void getPackInfo(int app_id);
-  /*! \brief fork #232: Creates a new manual tag, usable as a modpack. */
+  /*! \brief fork #242: Creates a new, empty pack. */
+  void addPack(int app_id, QString name, QString notes);
+  /*! \brief fork #242: Removes a pack. */
+  void removePack(int app_id, QString name);
+  /*! \brief fork #242: Renames a pack. */
+  void renamePack(int app_id, QString old_name, QString new_name);
+  /*! \brief fork #242: Sets a pack's notes. */
+  void setPackNotes(int app_id, QString name, QString notes);
+  /*! \brief fork #242: Sets a pack's ordered member mod ids. */
+  void setPackMods(int app_id, QString name, QList<int> mod_ids);
+  /*! \brief fork #232: Creates a new manual tag. */
   void addManualTag(int app_id, QString tag_name);
   /*! \brief fork #236: Requests the Steam app ids of all existing applications. */
   void getSteamAppIds();

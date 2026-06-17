@@ -648,11 +648,10 @@ signals:
    */
   void sendModInfo(std::vector<ModInfo> mod_info);
   /*!
-   * \brief fork #232: Emitted in response to \ref getPackInfo.
-   * \param all_packs    Names of every available pack (manual tag).
-   * \param active_packs Names of the packs active in the current profile.
+   * \brief fork #232/#242: Emitted in response to \ref getPackInfo with a JSON payload
+   * describing the app's packs, their members/notes, the active set and the app's mods.
    */
-  void sendPackInfo(QStringList all_packs, QStringList active_packs);
+  void sendPackInfo(QString json);
   /*!
    * \brief fork #145: Emitted in response to \ref requestPrunableArchives.
    * \param archives The prunable archive files.
@@ -1063,9 +1062,19 @@ public slots:
    * \param active Whether the pack should be active.
    */
   void setPackActive(int app_id, QString pack, bool active);
+  /*! \brief fork #242: Creates a new, empty pack. */
+  void addPack(int app_id, QString name, QString notes);
+  /*! \brief fork #242: Removes a pack. */
+  void removePack(int app_id, QString name);
+  /*! \brief fork #242: Renames a pack. */
+  void renamePack(int app_id, QString old_name, QString new_name);
+  /*! \brief fork #242: Sets a pack's notes. */
+  void setPackNotes(int app_id, QString name, QString notes);
+  /*! \brief fork #242: Sets a pack's ordered member mod ids. */
+  void setPackMods(int app_id, QString name, QList<int> mod_ids);
   /*!
-   * \brief fork #232: Emits \ref sendPackInfo with the application's packs and the subset
-   * active in its current profile.
+   * \brief fork #232/#242: Emits \ref sendPackInfo with a JSON payload of the application's
+   * packs, members, notes, the active set and the app's mods.
    * \param app_id The target application.
    */
   void getPackInfo(int app_id);

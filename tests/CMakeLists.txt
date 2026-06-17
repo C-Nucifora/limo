@@ -24,6 +24,7 @@ set(TEST_SOURCES
         test_installer.cpp
         test_linkimporter.cpp
         test_moddedapplication.cpp
+        test_pack.cpp
         test_reversedeployer.cpp
         test_tagconditionnode.cpp
         test_tool.cpp

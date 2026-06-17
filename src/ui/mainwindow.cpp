@@ -536,13 +536,18 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::addProfile);
   connect(this, &MainWindow::removeProfile,
           app_manager_, &ApplicationManager::removeProfile);
-  // fork #232: modpacks plumbing.
+  // fork #232/#242: modpacks plumbing.
   connect(this, &MainWindow::setPackActive,
           app_manager_, &ApplicationManager::setPackActive);
   connect(this, &MainWindow::getPackInfo,
           app_manager_, &ApplicationManager::getPackInfo);
   connect(app_manager_, &ApplicationManager::sendPackInfo,
           this, &MainWindow::onGetPackInfo);
+  connect(this, &MainWindow::addPack, app_manager_, &ApplicationManager::addPack);
+  connect(this, &MainWindow::removePack, app_manager_, &ApplicationManager::removePack);
+  connect(this, &MainWindow::renamePack, app_manager_, &ApplicationManager::renamePack);
+  connect(this, &MainWindow::setPackNotes, app_manager_, &ApplicationManager::setPackNotes);
+  connect(this, &MainWindow::setPackMods, app_manager_, &ApplicationManager::setPackMods);
   connect(this, &MainWindow::addManualTag,
           app_manager_, &ApplicationManager::addManualTag);
   // fork #236: existing-Steam-id lookup for batch-import dedupe.
@@ -3352,6 +3357,22 @@ void MainWindow::onShowModpacks()
             &ModpacksDialog::newPackRequested,
             this,
             &MainWindow::onNewPackRequested);
+    connect(modpacks_dialog_.get(),
+            &ModpacksDialog::renamePackRequested,
+            this,
+            &MainWindow::onRenamePackRequested);
+    connect(modpacks_dialog_.get(),
+            &ModpacksDialog::removePackRequested,
+            this,
+            &MainWindow::onRemovePackRequested);
+    connect(modpacks_dialog_.get(),
+            &ModpacksDialog::setPackNotesRequested,
+            this,
+            &MainWindow::onSetPackNotesRequested);
+    connect(modpacks_dialog_.get(),
+            &ModpacksDialog::setPackModsRequested,
+            this,
+            &MainWindow::onSetPackModsRequested);
   }
   emit getPackInfo(currentApp());
   modpacks_dialog_->show();
@@ -3359,10 +3380,10 @@ void MainWindow::onShowModpacks()
   modpacks_dialog_->activateWindow();
 }
 
-void MainWindow::onGetPackInfo(QStringList all_packs, QStringList active_packs)
+void MainWindow::onGetPackInfo(QString json)
 {
   if(modpacks_dialog_)
-    modpacks_dialog_->setPacks(all_packs, active_packs);
+    modpacks_dialog_->setPackData(json);
 }
 
 void MainWindow::onPackToggled(QString pack_name, bool active)
@@ -3380,9 +3401,47 @@ void MainWindow::onNewPackRequested(QString pack_name)
 {
   if(currentApp() < 0)
     return;
-  emit addManualTag(currentApp(), pack_name);
+  emit addPack(currentApp(), pack_name, QString());
   // Re-request the pack list so the new (empty) pack appears in the dialog.
   emit getPackInfo(currentApp());
+}
+
+void MainWindow::onRenamePackRequested(QString old_name, QString new_name)
+{
+  if(currentApp() < 0)
+    return;
+  emit renamePack(currentApp(), old_name, new_name);
+  emit getPackInfo(currentApp());
+}
+
+void MainWindow::onRemovePackRequested(QString pack_name)
+{
+  if(currentApp() < 0)
+    return;
+  emit removePack(currentApp(), pack_name);
+  emit getPackInfo(currentApp());
+  // Removing an active pack recomputes the enabled set/order; refresh the mod views.
+  emit getDeployerInfo(currentApp(), currentDeployer());
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onSetPackNotesRequested(QString pack_name, QString notes)
+{
+  if(currentApp() < 0)
+    return;
+  emit setPackNotes(currentApp(), pack_name, notes);
+  emit getPackInfo(currentApp());
+}
+
+void MainWindow::onSetPackModsRequested(QString pack_name, QList<int> mod_ids)
+{
+  if(currentApp() < 0)
+    return;
+  emit setPackMods(currentApp(), pack_name, mod_ids);
+  emit getPackInfo(currentApp());
+  // Membership/order changes to an active pack affect the deployed set; refresh the views.
+  emit getDeployerInfo(currentApp(), currentDeployer());
+  emit getModInfo(currentApp());
 }
 
 void MainWindow::onDuplicateProfileButtonClicked()

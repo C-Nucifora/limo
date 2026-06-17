@@ -361,11 +361,11 @@ TEST_CASE("Modpacks deploy the union of active packs", "[app][packs]")
   ModdedApplication app(DATA_DIR / "staging", "test");
   setupThreeMods(app);
 
-  // A pack is a manual tag; mods may belong to several (overlap is allowed).
-  app.addManualTag("PackA");
-  app.addManualTag("PackB");
-  app.addTagsToMods({ "PackA" }, { 0, 1 });
-  app.addTagsToMods({ "PackB" }, { 1, 2 });
+  // First-class packs; mods may belong to several (overlap is allowed).
+  app.addPack("PackA");
+  app.addPack("PackB");
+  app.setPackMods("PackA", { 0, 1 });
+  app.setPackMods("PackB", { 1, 2 });
 
   REQUIRE(app.getPackNames().size() == 2);
   REQUIRE(app.getActivePacks().empty());
@@ -405,8 +405,8 @@ TEST_CASE("Pack state is per profile and duplicated profiles inherit it", "[app]
   resetStagingDir();
   ModdedApplication app(DATA_DIR / "staging", "test");
   setupThreeMods(app);
-  app.addManualTag("PackA");
-  app.addTagsToMods({ "PackA" }, { 0 });
+  app.addPack("PackA");
+  app.setPackMods("PackA", { 0 });
   app.setPackActive("PackA", true);
 
   // Duplicate the current profile (source = 0): the copy inherits its active packs.
@@ -422,5 +422,72 @@ TEST_CASE("Pack state is per profile and duplicated profiles inherit it", "[app]
   // The original profile is unaffected.
   app.setProfile(0);
   REQUIRE(app.packIsActive("PackA"));
+}
+
+// fork #242: returns the mod-id load order of the given deployer (skipping structural/
+// separator entries, which carry negative ids).
+static std::vector<int> deployerOrder(ModdedApplication& app, int deployer)
+{
+  std::vector<int> ids;
+  for(const auto& entry : app.getLoadorder(deployer)->getTraversalItems())
+  {
+    const int id = entry.lock()->id;
+    if(id >= 0)
+      ids.push_back(id);
+  }
+  return ids;
+}
+
+TEST_CASE("Active packs order the load order by pack priority then in-pack order", "[app][packs]")
+{
+  resetStagingDir();
+  ModdedApplication app(DATA_DIR / "staging", "test");
+  setupThreeMods(app);
+
+  // PackHi (higher priority, added first) orders [2, 0]; PackLo orders [1].
+  app.addPack("PackHi");
+  app.addPack("PackLo");
+  app.setPackMods("PackHi", { 2, 0 });
+  app.setPackMods("PackLo", { 1 });
+
+  app.setPackActive("PackHi", true);
+  app.setPackActive("PackLo", true);
+
+  // Deploy order = PackHi's mods (2, 0) then PackLo's (1).
+  REQUIRE(deployerOrder(app, 0) == std::vector<int>{ 2, 0, 1 });
+
+  // A mod shared by both packs keeps its higher-priority position.
+  app.setPackMods("PackLo", { 1, 2 });
+  REQUIRE(deployerOrder(app, 0) == std::vector<int>{ 2, 0, 1 });
+}
+
+TEST_CASE("Packs are first-class: create, notes, rename, remove", "[app][packs]")
+{
+  resetStagingDir();
+  ModdedApplication app(DATA_DIR / "staging", "test");
+  setupThreeMods(app);
+
+  app.addPack("Racing", "fast cars");
+  app.addPack("Racing"); // duplicate name is ignored
+  REQUIRE(app.getPacks().size() == 1);
+  REQUIRE(app.getPacks()[0].notes == "fast cars");
+
+  app.setPackMods("Racing", { 0, 2 });
+  app.setPackActive("Racing", true);
+  app.renamePack("Racing", "Track Day");
+  // Active state and membership survive the rename.
+  REQUIRE(app.packIsActive("Track Day"));
+  REQUIRE_FALSE(app.packIsActive("Racing"));
+  REQUIRE(app.getPacks()[0].mod_ids == std::vector<int>{ 0, 2 });
+
+  // Persists across reload as a first-class pack (not a tag).
+  ModdedApplication reloaded(DATA_DIR / "staging", "test");
+  REQUIRE(reloaded.getPacks().size() == 1);
+  REQUIRE(reloaded.getPacks()[0].name == "Track Day");
+  REQUIRE(reloaded.packIsActive("Track Day"));
+
+  reloaded.removePack("Track Day");
+  REQUIRE(reloaded.getPacks().empty());
+  REQUIRE_FALSE(reloaded.packIsActive("Track Day"));
 }
 

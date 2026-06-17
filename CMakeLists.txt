@@ -205,6 +205,8 @@ set(CORE_SOURCES
         src/core/nexus/mod.cpp
         src/core/nexus/mod.h
         src/core/parseerror.h
+        src/core/pack.cpp
+        src/core/pack.h
         src/core/pathutils.cpp
         src/core/pathutils.h
         src/core/plugindeployer.cpp

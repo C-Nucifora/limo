@@ -381,6 +381,13 @@ public:
    */
   virtual void sortModsByConflicts(std::optional<ProgressNode*> progress_node = {});
   /*!
+   * \brief fork #242: Reorders the current profile's load order so the given mod ids come first,
+   * in the given order, followed by any remaining mods in their existing relative order. Mod ids
+   * not present in this deployer are ignored. Flattens the load order (like sortModsByConflicts).
+   * \param ordered_mod_ids Desired leading order of mod ids.
+   */
+  virtual void setLoadorderByModIds(const std::vector<int>& ordered_mod_ids);
+  /*!
    * \brief Getter for the conflict groups of the current profile.
    * \return The conflict groups.
    */

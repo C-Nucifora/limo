@@ -6,19 +6,24 @@
 #pragma once
 
 #include <QDialog>
+#include <QList>
+#include <QMap>
+#include <QString>
 #include <QStringList>
 
 
 class QListWidget;
 class QListWidgetItem;
 class QLabel;
+class QPushButton;
 
 /*!
- * \brief fork #232: Lets the user toggle "modpacks" on and off for the active profile.
+ * \brief fork #232/#242: Manages first-class modpacks for the active profile.
  *
- * A pack is a manual tag; any number can be active at once and the deployed (enabled) set is
- * the union of all active packs' mods. Toggling a checkbox here activates/deactivates a pack;
- * mod membership is managed through the normal tag UI (a mod can be in several packs).
+ * A pack is a named, ordered set of mods (distinct from tags). Any number can be active at once;
+ * the deployed set is the union of the active packs' mods, ordered by pack priority then in-pack
+ * order. This dialog lets the user create/rename/delete packs, edit their notes and membership
+ * (with ordering), and toggle which are active.
  */
 class ModpacksDialog : public QDialog
 {
@@ -29,29 +34,69 @@ public:
   explicit ModpacksDialog(QWidget* parent = nullptr);
 
   /*!
-   * \brief Populates the pack list, checking the packs that are currently active.
-   * \param all_packs    Names of every available pack (manual tag).
-   * \param active_packs Names of the packs active in the current profile.
+   * \brief Populates the dialog from a JSON payload describing the app's packs and mods.
+   *
+   * Expected shape: {"active":["name",...], "packs":[{"name","notes","mods":[id,...]}],
+   * "mods":[{"id","name"}]}.
+   * \param json The pack/mod payload.
    */
-  void setPacks(const QStringList& all_packs, const QStringList& active_packs);
+  void setPackData(const QString& json);
 
 signals:
   /*! \brief Emitted when the user toggles a pack on or off. */
   void packToggled(QString pack_name, bool active);
-  /*! \brief Emitted when the user asks to create a new (empty) pack. */
+  /*! \brief Emitted to create a new, empty pack. */
   void newPackRequested(QString pack_name);
+  /*! \brief Emitted to rename a pack. */
+  void renamePackRequested(QString old_name, QString new_name);
+  /*! \brief Emitted to remove a pack. */
+  void removePackRequested(QString pack_name);
+  /*! \brief Emitted to set a pack's notes. */
+  void setPackNotesRequested(QString pack_name, QString notes);
+  /*! \brief Emitted to set a pack's ordered member mod ids. */
+  void setPackModsRequested(QString pack_name, QList<int> mod_ids);
 
 private slots:
-  /*! \brief Forwards a checkbox change as a packToggled signal (suppressed while populating). */
-  void onItemChanged(QListWidgetItem* item);
-  /*! \brief Prompts for a name and requests creation of a new pack. */
+  void onPackItemChanged(QListWidgetItem* item);
+  void onPackSelectionChanged();
   void onNewPackClicked();
+  void onRenamePackClicked();
+  void onRemovePackClicked();
+  void onEditNotesClicked();
+  void onAddModsClicked();
+  void onRemoveModClicked();
+  void onMoveModUpClicked();
+  void onMoveModDownClicked();
 
 private:
-  /*! \brief Checkable list of packs. */
-  QListWidget* list_ = nullptr;
-  /*! \brief Shown when there are no packs yet. */
-  QLabel* empty_label_ = nullptr;
-  /*! \brief True while setPacks() repopulates, to suppress spurious itemChanged signals. */
+  /*! \brief Name of the currently selected pack, or empty. */
+  QString selectedPack() const;
+  /*! \brief Rebuilds the member list for the selected pack. */
+  void refreshMembers();
+  /*! \brief Emits setPackModsRequested for the selected pack from the member list. */
+  void commitMembers();
+
+  QListWidget* pack_list_ = nullptr;
+  QListWidget* member_list_ = nullptr;
+  QLabel* notes_label_ = nullptr;
+  QPushButton* rename_button_ = nullptr;
+  QPushButton* remove_button_ = nullptr;
+  QPushButton* notes_button_ = nullptr;
+  QPushButton* add_mods_button_ = nullptr;
+  QPushButton* remove_mod_button_ = nullptr;
+  QPushButton* up_button_ = nullptr;
+  QPushButton* down_button_ = nullptr;
+
+  /*! \brief True while setPackData repopulates, to suppress itemChanged signals. */
   bool updating_ = false;
+  /*! \brief Pack names in priority order. */
+  QStringList pack_order_;
+  /*! \brief Active pack names. */
+  QStringList active_;
+  /*! \brief Pack name → notes. */
+  QMap<QString, QString> pack_notes_;
+  /*! \brief Pack name → ordered member mod ids. */
+  QMap<QString, QList<int>> pack_mods_;
+  /*! \brief Mod id → display name (all app mods). */
+  QMap<int, QString> mod_names_;
 };

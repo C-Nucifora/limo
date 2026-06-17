@@ -581,13 +581,17 @@ void ModdedApplication::resizeActivePacks()
     active_packs_per_profile_.resize(profile_names_.size());
 }
 
+std::vector<Pack> ModdedApplication::getPacks() const
+{
+  return packs_;
+}
+
 std::vector<std::string> ModdedApplication::getPackNames() const
 {
-  // A pack is just a manual tag; expose every manual tag as a candidate pack.
   std::vector<std::string> names;
-  names.reserve(manual_tags_.size());
-  for(const auto& tag : manual_tags_)
-    names.push_back(tag.getName());
+  names.reserve(packs_.size());
+  for(const auto& pack : packs_)
+    names.push_back(pack.name);
   return names;
 }
 
@@ -604,6 +608,71 @@ bool ModdedApplication::packIsActive(const std::string& pack_name) const
   if(current_profile_ < 0 || current_profile_ >= static_cast<int>(active_packs_per_profile_.size()))
     return false;
   return active_packs_per_profile_[current_profile_].contains(pack_name);
+}
+
+void ModdedApplication::addPack(const std::string& name, const std::string& notes)
+{
+  if(name.empty())
+    return;
+  for(const auto& pack : packs_)
+    if(pack.name == name)
+      return; // name already taken
+  packs_.push_back(Pack{ name, notes, {} });
+  updateSettings(true);
+}
+
+void ModdedApplication::removePack(const std::string& name)
+{
+  std::erase_if(packs_, [&name](const Pack& pack) { return pack.name == name; });
+  for(auto& active : active_packs_per_profile_)
+    active.erase(name);
+  applyActivePacks(); // recompute enabled/order without this pack (also persists)
+}
+
+void ModdedApplication::renamePack(const std::string& old_name, const std::string& new_name)
+{
+  if(new_name.empty() || old_name == new_name)
+    return;
+  for(const auto& pack : packs_)
+    if(pack.name == new_name)
+      return; // target name already taken
+  bool found = false;
+  for(auto& pack : packs_)
+    if(pack.name == old_name)
+    {
+      pack.name = new_name;
+      found = true;
+      break;
+    }
+  if(!found)
+    return;
+  for(auto& active : active_packs_per_profile_)
+    if(active.erase(old_name) > 0)
+      active.insert(new_name);
+  updateSettings(true);
+}
+
+void ModdedApplication::setPackNotes(const std::string& name, const std::string& notes)
+{
+  for(auto& pack : packs_)
+    if(pack.name == name)
+    {
+      pack.notes = notes;
+      updateSettings(true);
+      return;
+    }
+}
+
+void ModdedApplication::setPackMods(const std::string& name,
+                                    const std::vector<int>& ordered_mod_ids)
+{
+  for(auto& pack : packs_)
+    if(pack.name == name)
+    {
+      pack.mod_ids = ordered_mod_ids;
+      break;
+    }
+  applyActivePacks(); // membership/order may have changed for an active pack (also persists)
 }
 
 void ModdedApplication::setPackActive(const std::string& pack_name, bool active)
@@ -625,23 +694,16 @@ void ModdedApplication::applyActivePacks()
   if(current_profile_ < 0 || current_profile_ >= static_cast<int>(active_packs_per_profile_.size()))
     return;
   const auto& active = active_packs_per_profile_[current_profile_];
-  // With no pack active, leave the manual enabled-state untouched (so the feature is opt-in and
-  // never silently disables a user's manually-curated set). Still persist the active-pack state.
+  // With no pack active, leave the manual enabled-state and order untouched (the feature is
+  // opt-in and never silently disables or reorders a user's manually-curated set). Still
+  // persist the active-pack state.
   if(active.empty())
   {
     updateSettings(true);
     return;
   }
-  // Union of every mod belonging to at least one active pack.
-  std::set<int> enabled_ids;
-  for(const auto& tag : manual_tags_)
-  {
-    if(!active.contains(tag.getName()))
-      continue;
-    for(int mod_id : tag.getMods())
-      enabled_ids.insert(mod_id);
-  }
-  // Apply enabled = (mod in union) across all non-autonomous deployers for the current profile.
+  const std::set<int> enabled_ids = pack_util::enabledSet(packs_, active);
+  const std::vector<int> order = pack_util::deployOrder(packs_, active);
   for(const auto& mod : installed_mods_)
   {
     const bool status = enabled_ids.contains(mod.id);
@@ -652,6 +714,13 @@ void ModdedApplication::applyActivePacks()
       if(deployer->hasMod(mod.id))
         deployer->setModStatus(mod.id, status);
     }
+  }
+  // Reorder each non-autonomous deployer so the enabled mods follow pack priority, then each
+  // pack's internal order.
+  for(const auto& deployer : deployers_)
+  {
+    if(!deployer->isAutonomous())
+      deployer->setLoadorderByModIds(order);
   }
   updateSettings(true);
 }
@@ -1946,9 +2015,6 @@ void ModdedApplication::removeManualTag(const std::string& tag_name, bool update
   auto iter = str::find(manual_tags_, tag_name);
   if(iter != manual_tags_.end())
     manual_tags_.erase(iter);
-  // fork #232: a removed tag can no longer be an active pack in any profile.
-  for(auto& active : active_packs_per_profile_)
-    active.erase(tag_name);
   if(update_map)
     updateManualTagMap();
   updateSettings(true);
@@ -1968,12 +2034,6 @@ void ModdedApplication::changeManualTagName(const std::string& old_name,
                   old_name,
                   new_name));
   old_iter->setName(new_name);
-  // fork #232: carry an active pack's name across the rename in every profile.
-  for(auto& active : active_packs_per_profile_)
-  {
-    if(active.erase(old_name) > 0)
-      active.insert(new_name);
-  }
   if(update_map)
     updateManualTagMap();
   updateSettings(true);
@@ -3271,6 +3331,17 @@ void ModdedApplication::updateSettings(bool write)
   for(int i = 0; i < manual_tags_.size(); i++)
     json_settings_["manual_tags"][i] = manual_tags_[i].toJson();
 
+  // fork #242: persist first-class modpacks (name, notes, ordered mod ids).
+  json_settings_["packs"] = Json::Value(Json::arrayValue);
+  for(int i = 0; i < (int)packs_.size(); i++)
+  {
+    json_settings_["packs"][i]["name"] = packs_[i].name;
+    json_settings_["packs"][i]["notes"] = packs_[i].notes;
+    json_settings_["packs"][i]["mods"] = Json::Value(Json::arrayValue);
+    for(int j = 0; j < (int)packs_[i].mod_ids.size(); j++)
+      json_settings_["packs"][i]["mods"][j] = packs_[i].mod_ids[j];
+  }
+
   for(int i = 0; i < auto_tags_.size(); i++)
   {
     if(!auto_tags_[i].getExpression().empty())
@@ -3390,6 +3461,7 @@ void ModdedApplication::updateState(bool read)
   app_versions_.clear();
   manual_tags_.clear();
   manual_tag_map_.clear();
+  packs_.clear(); // fork #242
   active_packs_per_profile_.clear(); // fork #232
   auto_tags_.clear();
   auto_tag_map_.clear();
@@ -3624,6 +3696,38 @@ void ModdedApplication::updateState(bool read)
       manual_tags_.emplace_back(tag_entry);
     }
     updateManualTagMap();
+  }
+
+  // fork #242: load first-class packs, or migrate from the Option A tag-backed state.
+  if(json_settings_.isMember("packs"))
+  {
+    for(const auto& pack_entry : json_settings_["packs"])
+    {
+      Pack pack;
+      pack.name = pack_entry["name"].asString();
+      pack.notes = pack_entry.get("notes", "").asString();
+      if(pack_entry.isMember("mods"))
+        for(const auto& mod_id : pack_entry["mods"])
+          pack.mod_ids.push_back(mod_id.asInt());
+      if(!pack.name.empty())
+        packs_.push_back(pack);
+    }
+  }
+  else
+  {
+    // Option A used manual tags as packs, tracked only by the names in each profile's active
+    // set. Recreate first-class packs from those tags so existing setups keep working with the
+    // same membership and active state.
+    std::set<std::string> referenced;
+    for(const auto& active : active_packs_per_profile_)
+      referenced.insert(active.begin(), active.end());
+    for(const std::string& name : referenced)
+    {
+      auto tag = str::find_if(manual_tags_,
+                              [&name](const ManualTag& t) { return t.getName() == name; });
+      if(tag != manual_tags_.end())
+        packs_.push_back(Pack{ name, "", tag->getMods() });
+    }
   }
 
   if(json_settings_.isMember("auto_tags"))
