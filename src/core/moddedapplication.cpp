@@ -1,5 +1,6 @@
 #include "moddedapplication.h"
 #include <limits>
+#include "archivenormalizer.h" // fork #240
 #include "core/deployerinfo.h"
 #include "cyberpunkredmod.h"
 #include "cyberpunksetup.h"
@@ -170,6 +171,11 @@ void ModdedApplication::installMod(const ImportModInfo& info)
                                            info.installer,
                                            info.root_level,
                                            info.files);
+  // fork #240: re-root an inconsistently-packed archive by relocating the installed files under
+  // the detected prefix (e.g. a bare Assetto Corsa car -> content/cars/). Only for extracted
+  // mods; a no_extract archive stays a single opaque file.
+  if(!info.install_prefix.empty() && !(info.installer_flags & Installer::no_extract))
+    relocateUnderPrefix(staging_dir_ / std::to_string(mod_id), info.install_prefix);
   const auto time_now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
   installed_mods_.emplace_back(mod_id,
                                info.name,
@@ -1188,6 +1194,41 @@ std::vector<std::string> ModdedApplication::getProfileNames() const
 long ModdedApplication::getSteamAppId() const
 {
   return steam_app_id_;
+}
+
+void ModdedApplication::relocateUnderPrefix(const sfs::path& mod_dir, const std::string& prefix)
+{
+  std::error_code ec;
+  if(!sfs::is_directory(mod_dir, ec))
+    return;
+  // Snapshot the current top-level entries before creating the prefix directory, so the new
+  // prefix dirs are not themselves swept into the move.
+  std::vector<sfs::path> entries;
+  for(const auto& entry : sfs::directory_iterator(mod_dir, ec))
+    entries.push_back(entry.path());
+  if(entries.empty())
+    return;
+  const sfs::path target = mod_dir / prefix;
+  sfs::create_directories(target, ec);
+  if(ec)
+  {
+    Log::error(std::format(
+      "Mod normalization: could not create '{}': {}", target.string(), ec.message()));
+    return;
+  }
+  for(const auto& entry : entries)
+  {
+    const sfs::path dest = target / entry.filename();
+    sfs::rename(entry, dest, ec);
+    if(ec)
+    {
+      // A rename can fail across mount boundaries; fall back to a recursive copy + remove.
+      ec.clear();
+      sfs::copy(
+        entry, dest, sfs::copy_options::recursive | sfs::copy_options::overwrite_existing, ec);
+      sfs::remove_all(entry, ec);
+    }
+  }
 }
 
 void ModdedApplication::editProfile(int profile, const EditProfileInfo& info)

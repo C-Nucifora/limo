@@ -2146,6 +2146,7 @@ bool MainWindow::versionIsLessOrEqual(QString current_version, QString target_ve
 void MainWindow::initRootLevelConditions()
 {
   root_level_conditions_.clear();
+  archive_root_anchors_.clear(); // fork #240
   if(app_info_.steam_app_id == -1)
     return;
 
@@ -2189,6 +2190,17 @@ void MainWindow::initRootLevelConditions()
   {
     Log::debug("Failed to read from app settings file at: " + config_path.string());
     return;
+  }
+
+  // fork #240: archive root anchors (marker→prefix) re-root inconsistently-packed archives.
+  if(json.isMember(JSON_ARCHIVE_ANCHORS_KEY) && json[JSON_ARCHIVE_ANCHORS_KEY].isArray())
+  {
+    for(const auto& anchor : json[JSON_ARCHIVE_ANCHORS_KEY])
+    {
+      if(anchor.isMember("marker") && anchor.isMember("prefix"))
+        archive_root_anchors_.push_back(
+          { anchor["marker"].asString(), anchor["prefix"].asString() });
+    }
   }
 
   if(!json.isMember(JSON_ROOT_LEVEL_KEY))
@@ -3019,7 +3031,8 @@ void MainWindow::onExtractionComplete(ImportModInfo info)
                                                      app_info_.deployer_is_case_invariant,
                                                      ui->info_version_label->text(),
                                                      info,
-                                                     root_level_conditions_);
+                                                     root_level_conditions_,
+                                                     archive_root_anchors_);
   if(was_successful)
   {
     // Default the install options from the game's preset (e.g. drop-in archive games

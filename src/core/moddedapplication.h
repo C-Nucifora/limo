@@ -1356,6 +1356,13 @@ private:
   void replaceMod(const ImportModInfo& info);
   /*! \brief Updates manual_tag_map_ with the information contained in manual_tags_. */
   void updateManualTagMap();
+  /*!
+   * \brief fork #240: Moves every top-level entry of a freshly-installed mod directory under the
+   * given archive-relative prefix (e.g. "content/cars"), re-rooting the mod. No-op on failure.
+   * \param mod_dir Staging directory of the installed mod.
+   * \param prefix  Archive-relative prefix to relocate the files under.
+   */
+  void relocateUnderPrefix(const std::filesystem::path& mod_dir, const std::string& prefix);
   /*! \brief fork #232: Keeps active_packs_per_profile_ sized to the number of profiles. */
   void resizeActivePacks();
   /*!

@@ -14,6 +14,7 @@ if(NOT Catch2_FOUND)
 endif()
 
 set(TEST_SOURCES
+        test_archivenormalizer.cpp
         test_backupmanager.cpp
         test_bg3deployer.cpp
         test_cryptography.cpp

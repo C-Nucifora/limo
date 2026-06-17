@@ -163,6 +163,8 @@ private:
   static inline const QString deploy_mode_copy = "Copy";
   /*! \brief JSON key for the root level conditions in the per steam app config file. */
   static inline constexpr char JSON_ROOT_LEVEL_KEY[] = "root_level_conditions";
+  /*! \brief fork #240: JSON key for archive root anchors in the per steam app config file. */
+  static inline constexpr char JSON_ARCHIVE_ANCHORS_KEY[] = "archive_root_anchors";
   /*! \brief True if the button used to reorder load orders is being pressed. */
   bool move_button_pressed_ = false;
   /*! \brief Stores the row containing the currently held down move button for load orders. */
@@ -492,6 +494,9 @@ private:
   AppInfo app_info_;
   /*! \brief Used to detect root levels during mod installation for the current app. */
   std::vector<RootLevelCondition> root_level_conditions_;
+  /*! \brief fork #240: archive root anchors (marker→prefix) for the current app, used to
+   *  re-root inconsistently-packed archives at install. */
+  std::vector<archive_normalizer::Anchor> archive_root_anchors_;
   /*!
    * \brief If true: display the application list sorted alphabetically by name.
    * The underlying app IDs are unaffected; app_combo_id_map_ translates display

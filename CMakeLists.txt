@@ -102,6 +102,8 @@ find_package(ZLIB REQUIRED)
 # Separated for tests
 set(CORE_SOURCES
         src/core/appinfo.h
+        src/core/archivenormalizer.cpp
+        src/core/archivenormalizer.h
         src/core/autotag.cpp
         src/core/autotag.h
         src/core/backupmanager.cpp

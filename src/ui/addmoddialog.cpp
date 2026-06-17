@@ -190,8 +190,11 @@ bool AddModDialog::setupDialog(const QStringList& deployers,
                                const std::vector<bool>& case_invariant_deployers,
                                const QString& app_version,
                                const ImportModInfo& info,
-                               const std::vector<RootLevelCondition>& root_level_conditions)
+                               const std::vector<RootLevelCondition>& root_level_conditions,
+                               const std::vector<archive_normalizer::Anchor>& archive_anchors)
 {
+  archive_anchors_ = archive_anchors; // fork #240
+  mod_file_paths_.clear();
   groups_.clear();
   const auto& mod_infos = mod_list_model_->getModInfo();
   for(const auto& mod_info : mod_infos)
@@ -381,8 +384,12 @@ bool AddModDialog::setupDialog(const QStringList& deployers,
     auto mod_file_paths = Installer::getArchiveFileNames(info.current_path);
     directory_tree_depth_ = 0;
     for(const auto& [path, is_directory] : mod_file_paths)
+    {
       directory_tree_depth_ =
         std::max(addTreeNode(ui->content_tree, path, is_directory), directory_tree_depth_);
+      if(!is_directory) // fork #240: keep the file list to compute the install prefix on accept
+        mod_file_paths_.push_back(path.string());
+    }
     ui->root_level_box->setMaximum(std::max(directory_tree_depth_ - 1, 0));
     ui->root_level_box->setValue(std::min(std::max(0, root_level), directory_tree_depth_ - 1));
   }
@@ -543,6 +550,10 @@ void AddModDialog::on_buttonBox_accepted()
   import_mod_info_.target_group_id = group;
   import_mod_info_.installer_flags = options;
   import_mod_info_.root_level = ui->root_level_box->value();
+  // fork #240: re-root inconsistently-packed archives (e.g. a bare Assetto Corsa car) by
+  // prepending the preset-declared prefix when a marker file is not already under it.
+  import_mod_info_.install_prefix = archive_normalizer::contentPrefix(
+    mod_file_paths_, import_mod_info_.root_level, archive_anchors_);
   import_mod_info_.files = {};
   import_mod_info_.replace_mod = replace_mod;
   if(Installer::INSTALLER_TYPES[ui->installer_box->currentIndex()] == Installer::FOMODINSTALLER)

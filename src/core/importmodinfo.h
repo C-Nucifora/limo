@@ -94,6 +94,11 @@ struct ImportModInfo
   int installer_flags = 0;
   /*! \brief If > 0: Remove path components with depth < root_level. */
   int root_level = 0;
+  /*!
+   * \brief fork #240: If non-empty, the installed (root-stripped) files are relocated under this
+   * archive-relative prefix (e.g. "content/cars"), re-rooting inconsistently-packed archives.
+   */
+  std::string install_prefix = "";
   /*! \brief Contains pairs of source and destination paths for installation files. */
   std::vector<std::pair<std::filesystem::path, std::filesystem::path>> files{};
   /*! \brief If true: The newly installed mod will replace the mod specified in group. */
