@@ -19,6 +19,8 @@ namespace Ui
 class AddAppDialog;
 }
 
+class QListWidgetItem;
+
 /*!
  * \brief Dialog for creating and editing \ref ModdedApplication "applications".
  */
@@ -242,6 +244,14 @@ public:
    */
   void openSteamImport();
   /*!
+   * \brief Pre-selects the bundled preset for the given Steam app id in the preset gallery
+   * and template combo, and pre-fills the application name from it. Used by the empty-state
+   * showcase so a first-run user can configure a known game in a click. No-op if no preset
+   * for that id is bundled. The dialog must already be in add mode. (issue #234)
+   * \param app_id Steam app id (the preset file stem) to pre-select.
+   */
+  void selectPreset(const QString& app_id);
+  /*!
    * \brief Initializes this dialog to allow editing of an existing
    * \ref ModdedApplication "application".
    * \param name Current name of the edited \ref ModdedApplication "application".
@@ -311,6 +321,16 @@ private slots:
   void onIconPathDialogComplete(const QString& path);
   /*! \brief Applies the currently selected GOG game template. (issue #74 / limo-app/limo#51) */
   void on_gog_apply_button_clicked();
+  /*!
+   * \brief Selects the clicked gallery tile's preset in the template combo and pre-fills the
+   * application name from it (if not already entered). (issue #234)
+   */
+  void on_preset_gallery_itemClicked(QListWidgetItem* item);
+  /*!
+   * \brief Selects the double-clicked gallery tile's preset and immediately applies it,
+   * as if the user clicked the tile then "Apply Template". (issue #234)
+   */
+  void on_preset_gallery_itemDoubleClicked(QListWidgetItem* item);
   /*! \brief Shows a file dialog for the GOG prefix directory. */
   void on_gog_prefix_picker_button_clicked();
   /*!

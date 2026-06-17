@@ -895,6 +895,12 @@ private slots:
   void onAddAppButtonClicked();
   /*! \brief Opens the Add-App dialog directly into the Steam "scan for games" import flow. */
   void onScanForGamesClicked();
+  /*!
+   * \brief Opens the Add-App dialog in add mode with the given preset pre-selected, used by
+   * the empty-state showcase tiles. (issue #234)
+   * \param app_id Steam app id (preset file stem) to pre-select.
+   */
+  void onShowcasePresetClicked(const QString& app_id);
   /*! \brief Updates the currently active ModdedApplication. */
   void on_app_selection_box_currentIndexChanged(int index);
   /*! \brief Shows a dialog to add a new Deployer. */

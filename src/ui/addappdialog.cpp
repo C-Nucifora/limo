@@ -11,6 +11,9 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QIcon>
+#include <QListWidget>
+#include <QListWidgetItem>
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QStandardPaths>
@@ -966,6 +969,7 @@ void AddAppDialog::onIconPathDialogComplete(const QString& path)
 void AddAppDialog::populateGogTemplateCombo()
 {
   ui->gog_template_combo->clear();
+  ui->preset_gallery->clear();
   gog_template_paths_.clear();
 
   // fork #204: scan both the user game-config dir and the bundled dir (user first, so a
@@ -1015,10 +1019,20 @@ void AddAppDialog::populateGogTemplateCombo()
   }
   std::sort(entries.begin(), entries.end(),
             [](const auto& a, const auto& b) { return a.first < b.first; });
+  // fork #234: fill the combo and the visual gallery in lockstep so a gallery tile's stored
+  // index maps directly to a combo entry / gog_template_paths_ slot. Presets carry no cover
+  // art, so tiles use a generic game icon (absent on headless themes — text-only is fine).
+  const QIcon tile_icon = QIcon::fromTheme("applications-games", QIcon::fromTheme("input-gaming"));
   for(const auto& [name, path] : entries)
   {
+    const int index = gog_template_paths_.size();
     ui->gog_template_combo->addItem(name);
     gog_template_paths_.append(path);
+
+    auto* tile = new QListWidgetItem(tile_icon, name, ui->preset_gallery);
+    tile->setData(Qt::UserRole, index);
+    tile->setToolTip(name);
+    tile->setTextAlignment(Qt::AlignHCenter | Qt::AlignTop);
   }
   Log::debug(std::format("GOG template combo populated with {} entries", entries.size()));
 }
@@ -1246,6 +1260,55 @@ void AddAppDialog::on_gog_apply_button_clicked()
 
   ui->import_checkbox->setVisible(!deployers_.empty());
   ui->import_tags_checkbox->setVisible(!auto_tags_.empty());
+}
+
+void AddAppDialog::on_preset_gallery_itemClicked(QListWidgetItem* item)
+{
+  if(item == nullptr)
+    return;
+  const int idx = item->data(Qt::UserRole).toInt();
+  if(idx < 0 || idx >= gog_template_paths_.size())
+    return;
+  ui->gog_template_combo->setCurrentIndex(idx);
+  // One-click convenience: prefill the application name from the preset if the user has not
+  // typed one, so a single click sets up a recognizable game. (issue #234)
+  if(ui->name_field->text().trimmed().isEmpty())
+    ui->name_field->setText(item->text());
+}
+
+void AddAppDialog::on_preset_gallery_itemDoubleClicked(QListWidgetItem* item)
+{
+  on_preset_gallery_itemClicked(item);
+  on_gog_apply_button_clicked();
+}
+
+void AddAppDialog::selectPreset(const QString& app_id)
+{
+  if(app_id.isEmpty())
+    return;
+  // Match the preset whose file stem equals the requested Steam app id.
+  const std::string wanted = app_id.toStdString();
+  for(int i = 0; i < gog_template_paths_.size(); i++)
+  {
+    if(sfs::path(gog_template_paths_.at(i).toStdString()).stem().string() != wanted)
+      continue;
+    ui->gog_template_combo->setCurrentIndex(i);
+    // Mirror the selection into the gallery (tiles store their index in Qt::UserRole) and
+    // prefill the name so the showcase entry point lands on a ready-to-confirm game.
+    for(int row = 0; row < ui->preset_gallery->count(); row++)
+    {
+      QListWidgetItem* tile = ui->preset_gallery->item(row);
+      if(tile->data(Qt::UserRole).toInt() == i)
+      {
+        ui->preset_gallery->setCurrentItem(tile);
+        ui->preset_gallery->scrollToItem(tile);
+        if(ui->name_field->text().trimmed().isEmpty())
+          ui->name_field->setText(tile->text());
+        break;
+      }
+    }
+    return;
+  }
 }
 
 void AddAppDialog::on_gog_prefix_picker_button_clicked()

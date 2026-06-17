@@ -265,11 +265,56 @@ void MainWindow::setupEmptyStateOverlay()
   scan_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
   connect(scan_button, &QPushButton::clicked, this, &MainWindow::onScanForGamesClicked);
 
+  // fork #234: showcase a few common bundled presets as one-click tiles. Each opens the
+  // Add-App dialog with that game's preset pre-selected. Only tiles for games Limo actually
+  // ships a preset for are shown, so the row stays honest even if the bundle changes.
+  static const std::vector<std::pair<const char*, const char*>> showcase_presets{
+    { "489830", "Skyrim SE" },     { "377160", "Fallout 4" },
+    { "292030", "The Witcher 3" }, { "1091500", "Cyberpunk 2077" },
+    { "413150", "Stardew Valley" }, { "22380", "Fallout: New Vegas" }
+  };
+  auto* showcase_caption = new QLabel(tr("Or set up a popular game:"), empty_state_overlay_);
+  showcase_caption->setAlignment(Qt::AlignCenter);
+  auto* showcase_row = new QWidget(empty_state_overlay_);
+  auto* showcase_layout = new QHBoxLayout(showcase_row);
+  showcase_layout->setAlignment(Qt::AlignCenter);
+  const QIcon showcase_icon =
+    QIcon::fromTheme("applications-games", QIcon::fromTheme("input-gaming"));
+  int showcase_count = 0;
+  for(const auto& [app_id, label] : showcase_presets)
+  {
+    if(!AddAppDialog::hasGameConfig(app_id))
+      continue;
+    auto* tile = new QToolButton(showcase_row);
+    tile->setText(tr(label));
+    tile->setIcon(showcase_icon);
+    tile->setIconSize(QSize(32, 32));
+    tile->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    tile->setAutoRaise(true);
+    tile->setCursor(Qt::PointingHandCursor);
+    tile->setToolTip(tr("Add %1 using its bundled preset").arg(tr(label)));
+    const QString id = QString::fromUtf8(app_id);
+    connect(tile, &QToolButton::clicked, this, [this, id]() { onShowcasePresetClicked(id); });
+    showcase_layout->addWidget(tile);
+    showcase_count++;
+  }
+
   layout->addStretch();
   layout->addWidget(title, 0, Qt::AlignCenter);
   layout->addWidget(hint, 0, Qt::AlignCenter);
   layout->addWidget(empty_state_button_, 0, Qt::AlignCenter);
   layout->addWidget(scan_button, 0, Qt::AlignCenter);
+  if(showcase_count > 0)
+  {
+    layout->addSpacing(8);
+    layout->addWidget(showcase_caption, 0, Qt::AlignCenter);
+    layout->addWidget(showcase_row, 0, Qt::AlignCenter);
+  }
+  else
+  {
+    showcase_caption->hide();
+    showcase_row->hide();
+  }
   layout->addStretch();
 
   empty_state_overlay_->hide();
@@ -3148,6 +3193,14 @@ void MainWindow::onScanForGamesClicked()
   // Jump straight into the Steam import scan, which lists installed games and flags the
   // ones Limo has a preset for.
   add_app_dialog_->openSteamImport();
+}
+
+void MainWindow::onShowcasePresetClicked(const QString& app_id)
+{
+  add_app_dialog_->setAddMode();
+  add_app_dialog_->selectPreset(app_id);
+  setBusyStatus(true, false);
+  add_app_dialog_->show();
 }
 
 
