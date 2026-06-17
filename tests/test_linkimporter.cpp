@@ -98,6 +98,34 @@ TEST_CASE("GitHub release with no assets at all fails gracefully", "[linkimporte
   REQUIRE_FALSE(result.error.empty());
 }
 
+TEST_CASE("GitHub direct-asset URL resolves to that exact asset without the API", "[linkimporter]")
+{
+  // A /releases/download/<tag>/<archive> URL already points at the exact file, so
+  // resolveGithub short-circuits to it directly (no network request).
+  const ResolvedLink result = LinkImporter::resolveGithub(
+    "https://github.com/owner/repo/releases/download/v1.4.0/CoolMod-1.4.0.zip");
+  REQUIRE(result.ok);
+  REQUIRE(result.download_url ==
+          "https://github.com/owner/repo/releases/download/v1.4.0/CoolMod-1.4.0.zip");
+  REQUIRE(result.file_name == "CoolMod-1.4.0.zip");
+  REQUIRE(result.mod_name == "repo");
+  REQUIRE(result.version == "v1.4.0");
+  // GitHub requires a User-Agent on the asset download; Limo's own UA is used.
+  REQUIRE(result.user_agent == LinkImporter::limo_user_agent);
+}
+
+TEST_CASE("GitHub release/tag and bare-repo URLs stay on the API path", "[linkimporter]")
+{
+  // These are still recognized as GitHub URLs and are NOT a direct /releases/download/
+  // asset, so they do not short-circuit and instead go through the release API as before.
+  REQUIRE(LinkImporter::isGithubUrl("https://github.com/owner/repo"));
+  REQUIRE(LinkImporter::isGithubUrl("https://github.com/owner/repo/releases/tag/v1.4.0"));
+  // A /releases/download/ URL whose final segment is not an archive likewise stays on the
+  // API path rather than short-circuiting to a non-archive file.
+  REQUIRE(LinkImporter::isGithubUrl(
+    "https://github.com/owner/repo/releases/download/v1.4.0/notes.txt"));
+}
+
 TEST_CASE("Disabled ModHub import resolves to an instructive error", "[linkimporter]")
 {
   const ResolvedLink result = LinkImporter::resolve(
