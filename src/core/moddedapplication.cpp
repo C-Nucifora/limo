@@ -763,10 +763,16 @@ void ModdedApplication::applyActivePacks()
     }
   }
   // Reorder each non-autonomous deployer so the enabled mods follow pack priority, then each
-  // pack's internal order.
+  // pack's internal order. Skip deployers that contain none of the ordered mods so activating a
+  // pack doesn't needlessly flatten an unrelated deployer's load order (its separators get pushed
+  // to the end on rebuild).
   for(const auto& deployer : deployers_)
   {
-    if(!deployer->isAutonomous())
+    if(deployer->isAutonomous())
+      continue;
+    const bool contains_ordered_mod =
+      std::any_of(order.begin(), order.end(), [&](int id) { return deployer->hasMod(id); });
+    if(contains_ordered_mod)
       deployer->setLoadorderByModIds(order);
   }
   updateSettings(true);
