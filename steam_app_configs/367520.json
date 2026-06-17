@@ -1,0 +1,12 @@
+{
+  "name": "Hollow Knight",
+  "deployers":
+  [
+    {
+      "type": "Case Matching Deployer",
+      "name": "Mods",
+      "target_dir": "$STEAM_INSTALL_PATH$/hollow_knight_Data/Managed/Mods",
+      "deploy_mode": "hard link"
+    }
+  ]
+}
