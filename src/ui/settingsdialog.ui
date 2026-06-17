@@ -531,6 +531,16 @@
         </layout>
        </item>
        <item>
+        <widget class="QCheckBox" name="experimental_modhub_cb">
+         <property name="toolTip">
+          <string>Experimental: lets &quot;Import Mod from URL&quot; download Farming Simulator ModHub links directly (scrapes the mod page; fragile and may break). The robust path is always to download the .zip in your browser and import the file.</string>
+         </property>
+         <property name="text">
+          <string>Enable experimental ModHub link import</string>
+         </property>
+        </widget>
+       </item>
+       <item>
         <spacer name="verticalSpacer_4">
          <property name="orientation">
           <enum>Qt::Vertical</enum>

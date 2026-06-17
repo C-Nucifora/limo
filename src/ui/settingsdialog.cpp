@@ -105,6 +105,9 @@ void SettingsDialog::init()
   }
   // fork #140
   ui->download_speed_limit_box->setValue(settings.value("download_speed_limit_kbps", 0).toInt());
+  // fork #233: experimental ModHub paste-a-link importer (off by default).
+  ui->experimental_modhub_cb->setChecked(
+    settings.value("experimental_modhub_import", false).toBool());
 
   settings.beginGroup("nexus");
   ui->premium_user_label->setText(
@@ -183,6 +186,7 @@ void SettingsDialog::on_buttonBox_accepted()
 
   // fork #140
   settings.setValue("download_speed_limit_kbps", ui->download_speed_limit_box->value());
+  settings.setValue("experimental_modhub_import", ui->experimental_modhub_cb->isChecked());
 
   log_on_error_ = ui->show_error_cb->isChecked();
   settings.setValue("log_on_error", log_on_error_);

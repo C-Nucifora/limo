@@ -18,6 +18,7 @@
 #include "core/cryptography.h"
 #include "core/deployerfactory.h"
 #include "core/installer.h"
+#include "core/remote/linkimporter.h"
 #include "deployerlistview.h"
 #include "deploypreviewdialog.h" // fork feature #49: deploy dry-run / preview
 #include "deployverifydialog.h" // fork #53
@@ -35,6 +36,7 @@
 #include "versionboxdelegate.h"
 #include <QCheckBox>
 #include <QDesktopServices>
+#include <QApplication>
 #include <QInputDialog>
 #include <QFile>
 #include <QFileDialog>
@@ -265,11 +267,56 @@ void MainWindow::setupEmptyStateOverlay()
   scan_button->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Fixed);
   connect(scan_button, &QPushButton::clicked, this, &MainWindow::onScanForGamesClicked);
 
+  // fork #234: showcase a few common bundled presets as one-click tiles. Each opens the
+  // Add-App dialog with that game's preset pre-selected. Only tiles for games Limo actually
+  // ships a preset for are shown, so the row stays honest even if the bundle changes.
+  static const std::vector<std::pair<const char*, const char*>> showcase_presets{
+    { "489830", "Skyrim SE" },     { "377160", "Fallout 4" },
+    { "292030", "The Witcher 3" }, { "1091500", "Cyberpunk 2077" },
+    { "413150", "Stardew Valley" }, { "22380", "Fallout: New Vegas" }
+  };
+  auto* showcase_caption = new QLabel(tr("Or set up a popular game:"), empty_state_overlay_);
+  showcase_caption->setAlignment(Qt::AlignCenter);
+  auto* showcase_row = new QWidget(empty_state_overlay_);
+  auto* showcase_layout = new QHBoxLayout(showcase_row);
+  showcase_layout->setAlignment(Qt::AlignCenter);
+  const QIcon showcase_icon =
+    QIcon::fromTheme("applications-games", QIcon::fromTheme("input-gaming"));
+  int showcase_count = 0;
+  for(const auto& [app_id, label] : showcase_presets)
+  {
+    if(!AddAppDialog::hasGameConfig(app_id))
+      continue;
+    auto* tile = new QToolButton(showcase_row);
+    tile->setText(tr(label));
+    tile->setIcon(showcase_icon);
+    tile->setIconSize(QSize(32, 32));
+    tile->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+    tile->setAutoRaise(true);
+    tile->setCursor(Qt::PointingHandCursor);
+    tile->setToolTip(tr("Add %1 using its bundled preset").arg(tr(label)));
+    const QString id = QString::fromUtf8(app_id);
+    connect(tile, &QToolButton::clicked, this, [this, id]() { onShowcasePresetClicked(id); });
+    showcase_layout->addWidget(tile);
+    showcase_count++;
+  }
+
   layout->addStretch();
   layout->addWidget(title, 0, Qt::AlignCenter);
   layout->addWidget(hint, 0, Qt::AlignCenter);
   layout->addWidget(empty_state_button_, 0, Qt::AlignCenter);
   layout->addWidget(scan_button, 0, Qt::AlignCenter);
+  if(showcase_count > 0)
+  {
+    layout->addSpacing(8);
+    layout->addWidget(showcase_caption, 0, Qt::AlignCenter);
+    layout->addWidget(showcase_row, 0, Qt::AlignCenter);
+  }
+  else
+  {
+    showcase_caption->hide();
+    showcase_row->hide();
+  }
   layout->addStretch();
 
   empty_state_overlay_->hide();
@@ -488,6 +535,15 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::addProfile);
   connect(this, &MainWindow::removeProfile,
           app_manager_, &ApplicationManager::removeProfile);
+  // fork #232: modpacks plumbing.
+  connect(this, &MainWindow::setPackActive,
+          app_manager_, &ApplicationManager::setPackActive);
+  connect(this, &MainWindow::getPackInfo,
+          app_manager_, &ApplicationManager::getPackInfo);
+  connect(app_manager_, &ApplicationManager::sendPackInfo,
+          this, &MainWindow::onGetPackInfo);
+  connect(this, &MainWindow::addManualTag,
+          app_manager_, &ApplicationManager::addManualTag);
   connect(this, &MainWindow::getProfileNames,
           app_manager_, &ApplicationManager::getProfileNames);
   connect(app_manager_, &ApplicationManager::sendProfileNames,
@@ -1000,6 +1056,12 @@ void MainWindow::setupMenus()
   // fork #197: import a Wabbajack modlist and queue its Nexus downloads.
   QAction* wabbajack_action = tools_menu->addAction(tr("Import Wabbajack Modlist..."));
   connect(wabbajack_action, &QAction::triggered, this, &MainWindow::onImportWabbajack);
+  // fork #233: paste-a-link mod importer (GitHub Releases; FS ModHub when enabled).
+  QAction* url_import_action = tools_menu->addAction(tr("Import Mod from URL..."));
+  connect(url_import_action, &QAction::triggered, this, &MainWindow::onImportModFromUrl);
+  // fork #232: toggleable modpacks (multiple active at once; union deploys).
+  QAction* modpacks_action = tools_menu->addAction(tr("Modpacks..."));
+  connect(modpacks_action, &QAction::triggered, this, &MainWindow::onShowModpacks);
   // fork #49: dry-run deployment preview.
   QAction* deploy_preview_action = tools_menu->addAction(tr("Preview Deployment Changes"));
   connect(deploy_preview_action, &QAction::triggered, this, &MainWindow::onShowDeploymentPreview);
@@ -1420,9 +1482,19 @@ void MainWindow::setupButtons()
   edit_profile_action_->setText("Edit");
   edit_profile_action_->setIcon(QIcon::fromTheme("editor"));
   connect(edit_profile_action_, &QAction::triggered, this, &MainWindow::onEditProfileButtonClicked);
+  // fork #232: duplicate the current profile (inherits its load order, enabled set and packs)
+  // for fast per-map / per-save setups.
+  QAction* duplicate_profile_action = new QAction(this);
+  duplicate_profile_action->setToolTip("Duplicate the current profile");
+  duplicate_profile_action->setText("Duplicate");
+  duplicate_profile_action->setIcon(QIcon::fromTheme("edit-copy"));
+  connect(duplicate_profile_action,
+          &QAction::triggered,
+          this,
+          &MainWindow::onDuplicateProfileButtonClicked);
   QMenu* profile_menu = new QMenu(this);
-  profile_menu->addActions(
-    QList<QAction*>{ add_profile_action_, remove_profile_action_, edit_profile_action_ });
+  profile_menu->addActions(QList<QAction*>{
+    add_profile_action_, duplicate_profile_action, remove_profile_action_, edit_profile_action_ });
   ui->profile_tool_button->setDefaultAction(add_profile_action_);
   ui->profile_tool_button->setMenu(profile_menu);
 
@@ -1498,7 +1570,10 @@ void MainWindow::importMod()
   setBusyStatus(true);
   if(info.action_type == ImportModInfo::download)
   {
-    if(!initNexusApiKey())
+    // fork #233/#114: a pre-resolved direct download (paste-a-link importer, OMM repository)
+    // never touches the Nexus API, so don't gate it on a Nexus API key.
+    const bool needs_nexus_key = info.remote_download_url.empty();
+    if(needs_nexus_key && !initNexusApiKey())
     {
       mod_import_queue_.pop();
       setBusyStatus(false);
@@ -2941,6 +3016,10 @@ void MainWindow::onExtractionComplete(ImportModInfo info)
                                                      root_level_conditions_);
   if(was_successful)
   {
+    // Default the install options from the game's preset (e.g. drop-in archive games
+    // default to "no extract" so their .zip mods deploy whole). #230.
+    add_mod_dialog_->setDefaultInstallFlags(
+      AddAppDialog::presetInstallFlags(std::to_string(app_info_.steam_app_id)));
     setBusyStatus(true, false);
     add_mod_dialog_->show();
   }
@@ -3144,6 +3223,147 @@ void MainWindow::onScanForGamesClicked()
   // Jump straight into the Steam import scan, which lists installed games and flags the
   // ones Limo has a preset for.
   add_app_dialog_->openSteamImport();
+}
+
+void MainWindow::onShowcasePresetClicked(const QString& app_id)
+{
+  add_app_dialog_->setAddMode();
+  add_app_dialog_->selectPreset(app_id);
+  setBusyStatus(true, false);
+  add_app_dialog_->show();
+}
+
+void MainWindow::onImportModFromUrl()
+{
+  if(currentApp() < 0)
+  {
+    QMessageBox::information(
+      this,
+      tr("No application selected"),
+      tr("Add or select an application first, then import a mod into it."));
+    return;
+  }
+  const bool allow_modhub =
+    QSettings(QCoreApplication::applicationName()).value("experimental_modhub_import", false).toBool();
+
+  bool ok = false;
+  const QString url =
+    QInputDialog::getText(
+      this,
+      tr("Import Mod from URL"),
+      tr("Paste a GitHub release/repository URL, or a Farming Simulator ModHub mod-page URL.\n"
+         "(ModHub link import is experimental and must be enabled under Settings → NexusMods.)"),
+      QLineEdit::Normal,
+      QString(),
+      &ok)
+      .trimmed();
+  if(!ok || url.isEmpty())
+    return;
+
+  // Resolving fetches one page/release; brief and gentle (no crawling). The download itself
+  // runs on the worker thread via the normal import queue.
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  const remote::ResolvedLink resolved =
+    remote::LinkImporter::resolve(url.toStdString(), allow_modhub);
+  QApplication::restoreOverrideCursor();
+
+  if(!resolved.ok)
+  {
+    QMessageBox::warning(
+      this, tr("Could not import from URL"), QString::fromStdString(resolved.error));
+    return;
+  }
+
+  ImportModInfo import_info;
+  import_info.app_id = currentApp();
+  import_info.action_type = ImportModInfo::download;
+  import_info.remote_type = ImportModInfo::local;
+  import_info.remote_source = url.toStdString();
+  import_info.remote_download_url = resolved.download_url;
+  import_info.remote_file_name = resolved.file_name;
+  import_info.download_user_agent = resolved.user_agent;
+  import_info.download_referer = resolved.referer;
+  if(!resolved.mod_name.empty())
+    import_info.name_overwrite = resolved.mod_name;
+  if(!resolved.version.empty())
+  {
+    import_info.remote_file_version = resolved.version;
+    import_info.version_overwrite = resolved.version;
+  }
+
+  const bool was_empty = mod_import_queue_.empty();
+  mod_import_queue_.push(import_info);
+  setStatusMessage(
+    tr("Queued download: %1").arg(QString::fromStdString(resolved.file_name)));
+  if(was_empty)
+    importMod();
+}
+
+void MainWindow::onShowModpacks()
+{
+  if(currentApp() < 0)
+  {
+    QMessageBox::information(
+      this,
+      tr("No application selected"),
+      tr("Add or select an application first, then manage its modpacks."));
+    return;
+  }
+  if(!modpacks_dialog_)
+  {
+    modpacks_dialog_ = std::make_unique<ModpacksDialog>(this);
+    connect(
+      modpacks_dialog_.get(), &ModpacksDialog::packToggled, this, &MainWindow::onPackToggled);
+    connect(modpacks_dialog_.get(),
+            &ModpacksDialog::newPackRequested,
+            this,
+            &MainWindow::onNewPackRequested);
+  }
+  emit getPackInfo(currentApp());
+  modpacks_dialog_->show();
+  modpacks_dialog_->raise();
+  modpacks_dialog_->activateWindow();
+}
+
+void MainWindow::onGetPackInfo(QStringList all_packs, QStringList active_packs)
+{
+  if(modpacks_dialog_)
+    modpacks_dialog_->setPacks(all_packs, active_packs);
+}
+
+void MainWindow::onPackToggled(QString pack_name, bool active)
+{
+  if(currentApp() < 0)
+    return;
+  emit setPackActive(currentApp(), pack_name, active);
+  // Refresh both panels so the recomputed (union) enabled set is reflected. These are queued
+  // to the worker thread after setPackActive, so they observe the updated state.
+  emit getDeployerInfo(currentApp(), currentDeployer());
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onNewPackRequested(QString pack_name)
+{
+  if(currentApp() < 0)
+    return;
+  emit addManualTag(currentApp(), pack_name);
+  // Re-request the pack list so the new (empty) pack appears in the dialog.
+  emit getPackInfo(currentApp());
+}
+
+void MainWindow::onDuplicateProfileButtonClicked()
+{
+  if(currentApp() < 0)
+    return;
+  const int source = ui->profile_selection_box->currentIndex();
+  if(source < 0)
+    return;
+  EditProfileInfo info;
+  info.name = ui->profile_selection_box->currentText().toStdString() + " (copy)";
+  info.app_version = "";
+  info.source = source;
+  // Reuse the standard add-profile path (emits addProfile + refreshes the profile list).
+  onProfileAdded(currentApp(), info);
 }
 
 

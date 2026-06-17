@@ -567,6 +567,89 @@ void ModdedApplication::setModStatusAcrossDeployers(int source_deployer, int mod
   updateSettings(true);
 }
 
+void ModdedApplication::resizeActivePacks()
+{
+  // Keep one active-pack set per profile; profiles added before this feature existed (or via
+  // paths that bypass addProfile) simply get an empty set here.
+  if(active_packs_per_profile_.size() != profile_names_.size())
+    active_packs_per_profile_.resize(profile_names_.size());
+}
+
+std::vector<std::string> ModdedApplication::getPackNames() const
+{
+  // A pack is just a manual tag; expose every manual tag as a candidate pack.
+  std::vector<std::string> names;
+  names.reserve(manual_tags_.size());
+  for(const auto& tag : manual_tags_)
+    names.push_back(tag.getName());
+  return names;
+}
+
+std::vector<std::string> ModdedApplication::getActivePacks() const
+{
+  if(current_profile_ < 0 || current_profile_ >= static_cast<int>(active_packs_per_profile_.size()))
+    return {};
+  const auto& active = active_packs_per_profile_[current_profile_];
+  return { active.begin(), active.end() };
+}
+
+bool ModdedApplication::packIsActive(const std::string& pack_name) const
+{
+  if(current_profile_ < 0 || current_profile_ >= static_cast<int>(active_packs_per_profile_.size()))
+    return false;
+  return active_packs_per_profile_[current_profile_].contains(pack_name);
+}
+
+void ModdedApplication::setPackActive(const std::string& pack_name, bool active)
+{
+  resizeActivePacks();
+  if(current_profile_ < 0 || current_profile_ >= static_cast<int>(active_packs_per_profile_.size()))
+    return;
+  auto& active_set = active_packs_per_profile_[current_profile_];
+  if(active)
+    active_set.insert(pack_name);
+  else
+    active_set.erase(pack_name);
+  applyActivePacks();
+}
+
+void ModdedApplication::applyActivePacks()
+{
+  resizeActivePacks();
+  if(current_profile_ < 0 || current_profile_ >= static_cast<int>(active_packs_per_profile_.size()))
+    return;
+  const auto& active = active_packs_per_profile_[current_profile_];
+  // With no pack active, leave the manual enabled-state untouched (so the feature is opt-in and
+  // never silently disables a user's manually-curated set). Still persist the active-pack state.
+  if(active.empty())
+  {
+    updateSettings(true);
+    return;
+  }
+  // Union of every mod belonging to at least one active pack.
+  std::set<int> enabled_ids;
+  for(const auto& tag : manual_tags_)
+  {
+    if(!active.contains(tag.getName()))
+      continue;
+    for(int mod_id : tag.getMods())
+      enabled_ids.insert(mod_id);
+  }
+  // Apply enabled = (mod in union) across all non-autonomous deployers for the current profile.
+  for(const auto& mod : installed_mods_)
+  {
+    const bool status = enabled_ids.contains(mod.id);
+    for(const auto& deployer : deployers_)
+    {
+      if(deployer->isAutonomous())
+        continue;
+      if(deployer->hasMod(mod.id))
+        deployer->setModStatus(mod.id, status);
+    }
+  }
+  updateSettings(true);
+}
+
 void ModdedApplication::addDeployer(const EditDeployerInfo& info)
 {
   std::string source_dir = staging_dir_;
@@ -1069,6 +1152,12 @@ void ModdedApplication::addProfile(const EditProfileInfo& info)
   for(const auto& deployer : deployers_)
     deployer->addProfile(info.source);
   bak_man_.addProfile(info.source);
+  // fork #232: a duplicated profile (source != -1) inherits the source's active packs; a
+  // fresh profile starts with none.
+  resizeActivePacks();
+  if(info.source >= 0 && info.source < static_cast<int>(active_packs_per_profile_.size()) &&
+     !active_packs_per_profile_.empty())
+    active_packs_per_profile_.back() = active_packs_per_profile_[info.source];
   updateSettings(true);
 }
 
@@ -1080,6 +1169,9 @@ void ModdedApplication::removeProfile(int profile)
     deployer->removeProfile(profile);
   profile_names_.erase(profile_names_.begin() + profile);
   app_versions_.erase(app_versions_.begin() + profile);
+  // fork #232: drop the removed profile's active-pack set.
+  if(profile < static_cast<int>(active_packs_per_profile_.size()))
+    active_packs_per_profile_.erase(active_packs_per_profile_.begin() + profile);
   bak_man_.removeProfile(profile);
   if(profile == current_profile_)
     setProfile(0);
@@ -1808,6 +1900,9 @@ void ModdedApplication::removeManualTag(const std::string& tag_name, bool update
   auto iter = str::find(manual_tags_, tag_name);
   if(iter != manual_tags_.end())
     manual_tags_.erase(iter);
+  // fork #232: a removed tag can no longer be an active pack in any profile.
+  for(auto& active : active_packs_per_profile_)
+    active.erase(tag_name);
   if(update_map)
     updateManualTagMap();
   updateSettings(true);
@@ -1827,6 +1922,12 @@ void ModdedApplication::changeManualTagName(const std::string& old_name,
                   old_name,
                   new_name));
   old_iter->setName(new_name);
+  // fork #232: carry an active pack's name across the rename in every profile.
+  for(auto& active : active_packs_per_profile_)
+  {
+    if(active.erase(old_name) > 0)
+      active.insert(new_name);
+  }
   if(update_map)
     updateManualTagMap();
   updateSettings(true);
@@ -3055,6 +3156,15 @@ void ModdedApplication::updateSettings(bool write)
   for(int i = 0; i < app_versions_.size(); i++)
     json_settings_["profiles"][i]["app_version"] = app_versions_[i];
 
+  // fork #232: persist each profile's active modpacks (manual-tag names).
+  for(int i = 0; i < (int)active_packs_per_profile_.size() && i < (int)profile_names_.size(); i++)
+  {
+    json_settings_["profiles"][i]["active_packs"] = Json::Value(Json::arrayValue);
+    int j = 0;
+    for(const auto& pack_name : active_packs_per_profile_[i])
+      json_settings_["profiles"][i]["active_packs"][j++] = pack_name;
+  }
+
   for(int i = 0; i < installed_mods_.size(); i++)
   {
     json_settings_["installed_mods"][i] = installed_mods_[i].toJson();
@@ -3234,6 +3344,7 @@ void ModdedApplication::updateState(bool read)
   app_versions_.clear();
   manual_tags_.clear();
   manual_tag_map_.clear();
+  active_packs_per_profile_.clear(); // fork #232
   auto_tags_.clear();
   auto_tag_map_.clear();
   installer_map_.clear();
@@ -3273,6 +3384,12 @@ void ModdedApplication::updateState(bool read)
   {
     profile_names_.push_back(profiles[i]["name"].asString());
     app_versions_.push_back(profiles[i]["app_version"].asString());
+    // fork #232: restore this profile's active modpacks (absent in older configs).
+    std::set<std::string> active_packs;
+    if(profiles[i].isMember("active_packs"))
+      for(const auto& pack_name : profiles[i]["active_packs"])
+        active_packs.insert(pack_name.asString());
+    active_packs_per_profile_.push_back(active_packs);
   }
 
   // Restore the previously active profile. This is read before the deployer

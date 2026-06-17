@@ -211,6 +211,8 @@ set(CORE_SOURCES
         src/core/progressnode.h
         src/core/remote/ommrepository.cpp
         src/core/remote/ommrepository.h
+        src/core/remote/linkimporter.cpp
+        src/core/remote/linkimporter.h
         src/core/reversedeployer.cpp
         src/core/reversedeployer.h
         src/core/tag.cpp
@@ -443,6 +445,8 @@ set(PROJECT_SOURCES
         src/ui/modlistproxymodel.h
         src/ui/modlistview.cpp
         src/ui/modlistview.h
+        src/ui/modpacksdialog.cpp
+        src/ui/modpacksdialog.h
         src/ui/modnamedelegate.cpp
         src/ui/modnamedelegate.h
         src/ui/movemoddialog.cpp

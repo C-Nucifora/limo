@@ -11,6 +11,7 @@
 #include "rootlevelcondition.h"
 #include "ui/fomoddialog.h"
 #include <QButtonGroup>
+#include <QCheckBox>
 #include <QCompleter>
 #include <QDialog>
 #include <QFrame>
@@ -66,6 +67,12 @@ public:
                    const ImportModInfo& info,
                    const std::vector<RootLevelCondition>& root_level_conditions);
   /*!
+   * \brief Pre-selects installer options from a game preset's default flags (e.g. drop-in
+   * archive games default to "no extract"). Call before showing the dialog; pass 0 to clear.
+   * \param flags Bitmask of \ref Installer::Flag values.
+   */
+  void setDefaultInstallFlags(int flags);
+  /*!
    * \brief Closes the dialog and emits a signal indicating installation has been canceled.
    * \param event The close even sent upon closing the dialog.
    */
@@ -78,6 +85,8 @@ private:
   Ui::AddModDialog* ui;
   /*! \brief Holds radio button groups used to select installation options. */
   QList<QButtonGroup*> option_groups_;
+  /*! \brief Standalone toggle for the no-extract installer flag (deploy the archive as-is). */
+  QCheckBox* no_extract_check_ = nullptr;
   /*! \brief Used to color tree nodes which will not be removed. */
   const QColor COLOR_KEEP_{ 0x2ca02c };
   /*! \brief Used to color tree nodes which will be removed. */

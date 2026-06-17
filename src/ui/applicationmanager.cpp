@@ -37,6 +37,15 @@ bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
   // Security: a malicious/compromised CDN could return a URL whose last path segment is empty
   // or "..", redirecting the write outside the download directory. Use the basename only.
   sfs::path file_name = sfs::path(match[1].str()).filename();
+  // fork #233/#114: for pre-resolved direct downloads (paste-a-link importer, OMM repository)
+  // the URL's last segment may not be a usable archive name — e.g. GitHub's .../zipball/<tag>.
+  // Prefer the file name the resolver supplied, still sanitized down to a bare basename.
+  if(info.remote_type != ImportModInfo::nexus && !info.remote_file_name.empty())
+  {
+    const sfs::path resolved_name = sfs::path(info.remote_file_name).filename();
+    if(!resolved_name.empty() && resolved_name != "..")
+      file_name = resolved_name;
+  }
   if(file_name.empty() || file_name == "..")
     throw std::runtime_error(
       std::format("Invalid file name in download URL \"{}\"", info.remote_download_url));
@@ -71,9 +80,17 @@ bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
   const int download_limit_kbps = download_settings.value("download_speed_limit_kbps", 0).toInt();
   const cpr::LimitRate limit_rate(
     download_limit_kbps > 0 ? static_cast<std::int64_t>(download_limit_kbps) * 1024 : 0, 0);
+  // fork #233: the paste-a-link importer may require a browser User-Agent and a Referer
+  // (ModHub's CDN enforces hotlink protection). These are empty for ordinary downloads.
+  cpr::Header download_header;
+  if(!info.download_user_agent.empty())
+    download_header["User-Agent"] = info.download_user_agent;
+  if(!info.download_referer.empty())
+    download_header["Referer"] = info.download_referer;
   cpr::Response response = cpr::Download(
     fstream,
     cpr::Url(info.remote_download_url),
+    download_header,
     limit_rate,
     cpr::ProgressCallback(
       [app_mgr, &message_sent, &file_name, &download_start, progress_callback](
@@ -854,6 +871,25 @@ void ApplicationManager::setProfile(int app_id, int profile)
     handleExceptions<&ModdedApplication::setProfile>(app_id, profile);
 }
 
+void ApplicationManager::setPackActive(int app_id, QString pack, bool active)
+{
+  if(appIndexIsValid(app_id, false))
+    handleExceptions<&ModdedApplication::setPackActive>(app_id, pack.toStdString(), active);
+}
+
+void ApplicationManager::getPackInfo(int app_id)
+{
+  if(!appIndexIsValid(app_id, false))
+    return;
+  QStringList all_packs;
+  QStringList active_packs;
+  for(const auto& name : apps_[app_id].getPackNames())
+    all_packs << QString::fromStdString(name);
+  for(const auto& name : apps_[app_id].getActivePacks())
+    active_packs << QString::fromStdString(name);
+  emit sendPackInfo(all_packs, active_packs);
+}
+
 void ApplicationManager::addProfile(int app_id, EditProfileInfo info)
 {
   if(appIndexIsValid(app_id))
@@ -1454,6 +1490,9 @@ void ApplicationManager::downloadMod(ImportModInfo info)
       item.remote_request_url = info.remote_request_url;
       item.remote_mod_id = info.remote_mod_id;
       item.remote_file_id = info.remote_file_id;
+      item.remote_download_url = info.remote_download_url;
+      item.download_user_agent = info.download_user_agent;
+      item.download_referer = info.download_referer;
       item.version_overwrite = info.version_overwrite;
       item.target_group_id = info.target_group_id;
       item.name = info.remote_file_name.empty()
@@ -1490,51 +1529,58 @@ void ApplicationManager::downloadMod(ImportModInfo info)
     return;
   }
 
-  if(info.remote_request_url.empty())
+  // fork #233 / #114: a pre-resolved direct download (paste-a-link importer, OMM repository)
+  // already carries its final URL, file name and any required headers. Skip the Nexus-specific
+  // URL resolution + metadata lookup entirely so non-Nexus sources are not forced through the
+  // Nexus API. Ordinary Nexus downloads never pre-set remote_download_url, so this is additive.
+  if(info.remote_download_url.empty())
   {
-    auto download_url = handleExceptionsForFunction(
-      static_cast<std::string (*)(const std::string&, long)>(nexus::Api::getDownloadUrl),
-      info.remote_source,
-      info.remote_file_id);
-    if(!download_url)
+    if(info.remote_request_url.empty())
+    {
+      auto download_url = handleExceptionsForFunction(
+        static_cast<std::string (*)(const std::string&, long)>(nexus::Api::getDownloadUrl),
+        info.remote_source,
+        info.remote_file_id);
+      if(!download_url)
+      {
+        fail(DownloadQueueItem::failed);
+        emit downloadFailed();
+        return;
+      }
+      info.remote_download_url = *download_url;
+    }
+    else
+    {
+      auto download_url = handleExceptionsForFunction(
+        static_cast<std::string (*)(const std::string&)>(nexus::Api::getDownloadUrl),
+        info.remote_request_url);
+      if(!download_url)
+      {
+        fail(DownloadQueueItem::failed);
+        emit downloadFailed();
+        return;
+      }
+      info.remote_download_url = *download_url;
+    }
+    info.remote_download_url = QUrl(info.remote_download_url.c_str()).toEncoded().toStdString();
+
+    auto init_successful = handleExceptionsForFunction(nexus::Api::initModInfo, info);
+    if(!init_successful || !(*init_successful))
     {
       fail(DownloadQueueItem::failed);
       emit downloadFailed();
       return;
     }
-    info.remote_download_url = *download_url;
-  }
-  else
-  {
-    auto download_url = handleExceptionsForFunction(
-      static_cast<std::string (*)(const std::string&)>(nexus::Api::getDownloadUrl),
-      info.remote_request_url);
-    if(!download_url)
+
+    // fork #8: now that the remote file name is known, refresh the queue item's name.
     {
-      fail(DownloadQueueItem::failed);
-      emit downloadFailed();
-      return;
+      std::lock_guard<std::mutex> lock(download_queue_mutex_);
+      for(auto& it : download_queue_)
+        if(it.id == queue_id && !info.remote_file_name.empty())
+          it.name = info.remote_file_name;
+      saveDownloadQueueLocked();
+      emitDownloadQueueLocked();
     }
-    info.remote_download_url = *download_url;
-  }
-  info.remote_download_url = QUrl(info.remote_download_url.c_str()).toEncoded().toStdString();
-
-  auto init_successful = handleExceptionsForFunction(nexus::Api::initModInfo, info);
-  if(!init_successful || !(*init_successful))
-  {
-    fail(DownloadQueueItem::failed);
-    emit downloadFailed();
-    return;
-  }
-
-  // fork #8: now that the remote file name is known, refresh the queue item's name.
-  {
-    std::lock_guard<std::mutex> lock(download_queue_mutex_);
-    for(auto& it : download_queue_)
-      if(it.id == queue_id && !info.remote_file_name.empty())
-        it.name = info.remote_file_name;
-    saveDownloadQueueLocked();
-    emitDownloadQueueLocked();
   }
 
   info.target_path = apps_[info.app_id].getDownloadDir();
@@ -1607,6 +1653,9 @@ void ApplicationManager::saveDownloadQueueLocked()
       entry["remote_request_url"] = item.remote_request_url;
       entry["remote_mod_id"] = (Json::Int64)item.remote_mod_id;
       entry["remote_file_id"] = (Json::Int64)item.remote_file_id;
+      entry["remote_download_url"] = item.remote_download_url;
+      entry["download_user_agent"] = item.download_user_agent;
+      entry["download_referer"] = item.download_referer;
       entry["target_path"] = item.target_path;
       entry["name"] = item.name;
       entry["version_overwrite"] = item.version_overwrite;
@@ -1658,6 +1707,9 @@ void ApplicationManager::loadDownloadQueue()
       item.remote_request_url = entry.get("remote_request_url", "").asString();
       item.remote_mod_id = entry.get("remote_mod_id", -1).asInt64();
       item.remote_file_id = entry.get("remote_file_id", -1).asInt64();
+      item.remote_download_url = entry.get("remote_download_url", "").asString();
+      item.download_user_agent = entry.get("download_user_agent", "").asString();
+      item.download_referer = entry.get("download_referer", "").asString();
       item.target_path = entry.get("target_path", "").asString();
       item.name = entry.get("name", "").asString();
       item.version_overwrite = entry.get("version_overwrite", "").asString();
@@ -1764,9 +1816,14 @@ ImportModInfo ApplicationManager::importInfoForItem(const DownloadQueueItem& ite
   info.remote_request_url = item.remote_request_url;
   info.remote_mod_id = item.remote_mod_id;
   info.remote_file_id = item.remote_file_id;
+  info.remote_download_url = item.remote_download_url;
+  info.download_user_agent = item.download_user_agent;
+  info.download_referer = item.download_referer;
   info.version_overwrite = item.version_overwrite;
   info.target_group_id = item.target_group_id;
-  info.remote_type = ImportModInfo::nexus;
+  // fork #233/#114: a persisted direct-download item retries from its stored URL, not Nexus.
+  info.remote_type =
+    item.remote_download_url.empty() ? ImportModInfo::nexus : ImportModInfo::local;
   return info;
 }
 

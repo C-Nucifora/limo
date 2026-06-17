@@ -220,6 +220,28 @@ public:
    */
   void setModStatusAcrossDeployers(int source_deployer, int mod_id, bool status);
   /*!
+   * \brief fork #232: Returns the names of all packs usable as modpacks. A pack is a manual
+   * tag; assigning a mod to a pack is just tagging it, so a mod can belong to several packs.
+   */
+  std::vector<std::string> getPackNames() const;
+  /*!
+   * \brief fork #232: Returns the names of the packs active in the currently selected profile.
+   */
+  std::vector<std::string> getActivePacks() const;
+  /*!
+   * \brief fork #232: Whether the named pack is active in the currently selected profile.
+   */
+  bool packIsActive(const std::string& pack_name) const;
+  /*!
+   * \brief fork #232: Activates or deactivates a modpack in the current profile, then
+   * recomputes every mod's enabled state as the union of all active packs' members across all
+   * non-autonomous deployers. While at least one pack is active a mod is enabled iff it belongs
+   * to an active pack; with no pack active the manual enabled-state is left untouched.
+   * \param pack_name Name of the pack (manual tag) to toggle.
+   * \param active    Whether the pack should be active.
+   */
+  void setPackActive(const std::string& pack_name, bool active);
+  /*!
    * \brief Adds a new Deployer of given type.
    * \param info Contains all data needed to create a deployer, e.g. its name.
    */
@@ -1207,6 +1229,8 @@ private:
   std::vector<ManualTag> manual_tags_;
   /*! \brief Maps mod ids to a vector of manual tags associated with that mod. */
   std::map<int, std::vector<std::string>> manual_tag_map_;
+  /*! \brief fork #232: For every profile, the set of active modpack (manual-tag) names. */
+  std::vector<std::set<std::string>> active_packs_per_profile_;
   /*! \brief Contains all known auto tags. */
   std::vector<AutoTag> auto_tags_;
   /*! \brief Maps mod ids to a vector of auto tags associated with that mod. */
@@ -1330,6 +1354,14 @@ private:
   void replaceMod(const ImportModInfo& info);
   /*! \brief Updates manual_tag_map_ with the information contained in manual_tags_. */
   void updateManualTagMap();
+  /*! \brief fork #232: Keeps active_packs_per_profile_ sized to the number of profiles. */
+  void resizeActivePacks();
+  /*!
+   * \brief fork #232: Recomputes the enabled state of every mod from the active packs of the
+   * current profile (enabled = member of at least one active pack), applied across all
+   * non-autonomous deployers. No-op (beyond persistence) when no pack is active. Persists.
+   */
+  void applyActivePacks();
   /*! \brief Updates auto_tag_map_ with the information contained in auto_tags_. */
   void updateAutoTagMap();
   /*!
