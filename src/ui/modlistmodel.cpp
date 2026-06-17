@@ -272,6 +272,8 @@ QVariant ModListModel::data(const QModelIndex& index, int role) const
     return active_mods_.at(row).mod.remote_source.c_str();
   if(role == has_update_role)
     return modHasUpdate(row);
+  if(role == is_update_ignored_role)
+    return active_mods_.at(row).is_update_ignored;
   if(role == mod_size_role)
   {
     QVariant var;
@@ -433,6 +435,8 @@ void ModListModel::setModColors(const std::map<int, std::string>& colors)
 
 bool ModListModel::modHasUpdate(int row) const
 {
+  if(active_mods_.at(row).is_update_ignored)
+    return false;
   const auto& mod = active_mods_.at(row).mod;
   if(!mod.pinned_version.empty())
     return false;

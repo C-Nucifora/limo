@@ -691,6 +691,19 @@ void ApplicationManager::mergeMods(int app_id,
   emit completedOperations("Mods merged");
 }
 
+void ApplicationManager::setUpdateIgnored(int app_id, int mod_id, bool ignored)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::setUpdateIgnored>(app_id, mod_id, ignored);
+}
+
+void ApplicationManager::exportModArchive(int app_id, int mod_id, std::filesystem::path target)
+{
+  if(appIndexIsValid(app_id))
+    handleExceptions<&ModdedApplication::exportModArchive>(app_id, mod_id, target);
+  emit completedOperations("Mod exported");
+}
+
 void ApplicationManager::commitChanges(int app_id, int deployer)
 {
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))

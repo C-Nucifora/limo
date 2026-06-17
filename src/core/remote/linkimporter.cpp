@@ -227,6 +227,31 @@ remote::ResolvedLink remote::LinkImporter::resolveGithub(const std::string& url,
   if(repo.size() > 4 && repo.compare(repo.size() - 4, 4, ".git") == 0)
     repo = repo.substr(0, repo.size() - 4);
 
+  // A direct asset URL (/releases/download/<tag>/<asset>) already points at the exact
+  // file. When the final path segment looks like an archive, short-circuit and download
+  // it as-is rather than re-querying the API (which would resolve /releases/latest and
+  // could pick a different release/asset).
+  static const std::regex download_regex(
+    R"(/releases/download/([^/\s?#]+)/([^/\s?#]+))", std::regex::icase);
+  std::smatch download_match;
+  if(std::regex_search(url, download_match, download_regex))
+  {
+    const std::string tag = download_match[1].str();
+    const std::string asset = download_match[2].str();
+    if(isArchiveName(asset))
+    {
+      ResolvedLink result;
+      result.ok = true;
+      result.download_url = url;
+      result.file_name = asset;
+      result.mod_name = repo;
+      result.version = tag;
+      // GitHub requires a User-Agent; the asset CDN accepts Limo's.
+      result.user_agent = limo_user_agent;
+      return result;
+    }
+  }
+
   static const std::regex tag_regex(R"(/releases/tag/([^/\s?#]+))", std::regex::icase);
   std::smatch tag_match;
   std::string api_url;

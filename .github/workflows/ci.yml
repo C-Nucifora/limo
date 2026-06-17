@@ -65,12 +65,10 @@ jobs:
         run: cmake --build build -j"$(nproc)"
 
   # Build the test suite (LOOT off, so no libloot dependency) and run ctest.
-  # Non-blocking: some tree-loadorder tests are known to be mid-refactor, and we
-  # don't want that to gate merges yet. The `build` job above is the gate.
+  # Blocking: the suite passes with LOOT off, so a test regression gates merges.
   test:
-    name: Tests (ctest, LOOT off, best-effort)
+    name: Tests (ctest, LOOT off)
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 

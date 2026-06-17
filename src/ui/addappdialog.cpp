@@ -1275,7 +1275,34 @@ void AddAppDialog::on_gog_apply_button_clicked()
   const QString prefix_path = ui->gog_prefix_field->text().trimmed();
   const QString config_path = gog_template_paths_.at(idx);
 
-  // steam_app_id_ remains -1 for GOG installs; that is intentional.
+  // If this template is a bundled Steam preset (its file stem is a numeric Steam app id), adopt
+  // that id so per-game behaviours keyed on steam_app_id_ — root-level auto-detection, archive
+  // root normalization, and preset default install flags — are applied. The gallery path
+  // previously left steam_app_id_ = -1, silently producing a weaker setup than Steam import.
+  // True GOG templates (non-numeric stems) keep steam_app_id_ = -1.
+  const std::string stem = sfs::path(config_path.toStdString()).stem().string();
+  bool is_numeric_stem = !stem.empty();
+  for(const char c : stem)
+  {
+    if(c < '0' || c > '9')
+    {
+      is_numeric_stem = false;
+      break;
+    }
+  }
+  if(is_numeric_stem)
+  {
+    try
+    {
+      steam_app_id_ = std::stol(stem);
+    }
+    catch(...)
+    {
+      steam_app_id_ = -1;
+    }
+  }
+  else
+    steam_app_id_ = -1;
   initConfigForGog(install_path, prefix_path, config_path);
 
   ui->import_checkbox->setVisible(!deployers_.empty());

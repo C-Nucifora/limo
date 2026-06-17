@@ -585,6 +585,10 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::setModCategory);
   connect(this, &MainWindow::mergeMods, // fork #148
           app_manager_, &ApplicationManager::mergeMods);
+  connect(this, &MainWindow::setUpdateIgnored,
+          app_manager_, &ApplicationManager::setUpdateIgnored);
+  connect(this, &MainWindow::exportModArchive,
+          app_manager_, &ApplicationManager::exportModArchive);
   connect(this, &MainWindow::updateModFromLocal, // fork #66
           app_manager_, &ApplicationManager::updateModFromLocal);
   connect(this, &MainWindow::refreshReverseDeployers, // fork #81
@@ -944,6 +948,14 @@ void MainWindow::setupMenus()
   update_from_local_action_->setToolTip(
     "Replace this mod's files from a local archive, keeping its name, tags, load order and rules");
   connect(update_from_local_action_, &QAction::triggered, this, &MainWindow::onUpdateModFromLocal);
+  ignore_updates_action_ = new QAction("Ignore Updates", this);
+  ignore_updates_action_->setCheckable(true);
+  ignore_updates_action_->setToolTip(
+    "Suppress update notifications for the selected mod(s) until toggled off");
+  connect(ignore_updates_action_, &QAction::triggered, this, &MainWindow::onIgnoreUpdates);
+  export_archive_action_ = new QAction("Export Archive...", this);
+  export_archive_action_->setToolTip("Export this mod's staged files to a zip archive");
+  connect(export_archive_action_, &QAction::triggered, this, &MainWindow::onExportModArchive);
   QList<QAction*> mod_list_actions{ ui->actionadd_to_deployer,      ui->actionAdd_to_Group,
                                     ui->actionbrowse_mod_files,     ui->actionRemove_from_Group,
                                     ui->actionRemove_Mods,          ui->actionRemove_Other_Versions,
@@ -956,7 +968,8 @@ void MainWindow::setupMenus()
                                     set_color_action_,               clear_color_action_,
                                     edit_config_action_,             set_category_action_,
                                     merge_mods_action_,              preview_files_action_,
-                                    update_from_local_action_ };
+                                    update_from_local_action_,       ignore_updates_action_,
+                                    export_archive_action_ };
   std::sort(mod_list_actions.begin(), mod_list_actions.end(), sort_actions);
   mod_list_menu_->addActions(mod_list_actions);
 
@@ -2598,6 +2611,10 @@ void MainWindow::onModListContextMenu(QPoint pos)
     pin_version_action_->setVisible(false);
     unpin_version_action_->setVisible(false);
     mod_rules_action_->setVisible(false);
+    ignore_updates_action_->setVisible(true);
+    ignore_updates_action_->setChecked(
+      !indices.empty() && indices.front().data(ModListModel::is_update_ignored_role).toBool());
+    export_archive_action_->setVisible(false);
   }
   else
   {
@@ -2630,6 +2647,9 @@ void MainWindow::onModListContextMenu(QPoint pos)
     const bool is_pinned = idx.data(ModListModel::mod_pinned_role).toBool();
     pin_version_action_->setVisible(!is_pinned);
     unpin_version_action_->setVisible(is_pinned);
+    ignore_updates_action_->setVisible(true);
+    ignore_updates_action_->setChecked(idx.data(ModListModel::is_update_ignored_role).toBool());
+    export_archive_action_->setVisible(true);
   }
   mod_list_menu_->exec(ui->mod_list->mapToGlobal(pos));
 }
@@ -3498,7 +3518,8 @@ void MainWindow::onFsServerDownloadRequested(QList<QStringList> mods)
     info.remote_source = mod[1].toStdString();
     info.remote_download_url = mod[1].toStdString();
     info.remote_file_name = mod[0].toStdString();
-    info.name_overwrite = mod[0].toStdString();
+    // Use the archive's stem (without the .zip extension) as the displayed mod name.
+    info.name_overwrite = std::filesystem::path(mod[0].toStdString()).stem().string();
     mod_import_queue_.push(info);
   }
   setStatusMessage(tr("Queued %1 server mod download(s).").arg(mods.size()));
@@ -4960,6 +4981,49 @@ void MainWindow::onMergeMods()
   setBusyStatus(true);
   emit mergeMods(currentApp(), mod_ids, target);
   emit getModInfo(currentApp());
+}
+
+void MainWindow::onIgnoreUpdates()
+{
+  const auto mod_ids = ui->mod_list->getSelectedModIds();
+  if(mod_ids.empty())
+    return;
+  // The checkable action has already toggled; its new state is the desired value for all selected.
+  const bool ignored = ignore_updates_action_->isChecked();
+  Log::info(std::format("{} update notifications for {} mod{}.",
+                        ignored ? "Ignoring" : "Unignoring",
+                        mod_ids.size(),
+                        mod_ids.size() == 1 ? "" : "s"));
+  for(const int mod_id : mod_ids)
+    emit setUpdateIgnored(currentApp(), mod_id, ignored);
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onExportModArchive()
+{
+  const auto mod_ids = ui->mod_list->getSelectedModIds();
+  if(mod_ids.size() != 1)
+  {
+    QMessageBox::information(this, "Export Archive", "Select exactly one mod to export.");
+    return;
+  }
+  const int mod_id = mod_ids[0];
+  QString default_name = "mod.zip";
+  for(const auto& info : mod_list_model_->getModInfo())
+  {
+    if(info.mod.id == mod_id)
+    {
+      default_name = QString::fromStdString(info.mod.name) + ".zip";
+      break;
+    }
+  }
+  const QString target = QFileDialog::getSaveFileName(
+    this, "Export Mod Archive", default_name, "Zip archive (*.zip)");
+  if(target.isEmpty())
+    return;
+  setStatusMessage("Exporting mod archive");
+  setBusyStatus(true);
+  emit exportModArchive(currentApp(), mod_id, std::filesystem::path(target.toStdString()));
 }
 
 void MainWindow::onPreviewModFiles()

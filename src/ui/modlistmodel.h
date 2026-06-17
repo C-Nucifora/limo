@@ -98,6 +98,8 @@ public:
   static constexpr int mod_pinned_version_role = 279;
   /*! \brief fork #198: Role representing the free-text category of a mod. */
   static constexpr int category_role = 280;
+  /*! \brief Role representing whether update notifications are ignored for a mod. */
+  static constexpr int is_update_ignored_role = 281;
 
   /*!
    * \brief Represents the overall state of a mod as shown in the status column.

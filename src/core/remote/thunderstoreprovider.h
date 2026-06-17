@@ -106,6 +106,10 @@ public:
   bool requiresApiKey() const override { return false; }
 
 private:
+  // Grants the unit tests access to the static JSON parsers below without exposing
+  // them publicly or coupling them to the (network-only) public methods.
+  friend struct RemoteProviderTestAccess;
+
   /*! \brief Base URL for all Thunderstore API calls. */
   static constexpr const char* BASE_URL = "https://thunderstore.io";
   /*! \brief User-Agent header value sent with every request. */

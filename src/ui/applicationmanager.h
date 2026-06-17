@@ -913,6 +913,20 @@ public slots:
    * \param target_mod_id Id of the mod that receives all merged files and is kept.
    */
   void mergeMods(int app_id, std::vector<int> source_mod_ids, int target_mod_id);
+  /*!
+   * \brief Sets whether update notifications are ignored for the given mod.
+   * \param app_id App containing the mod.
+   * \param mod_id Target mod.
+   * \param ignored If true, update notifications for this mod stay suppressed until toggled off.
+   */
+  void setUpdateIgnored(int app_id, int mod_id, bool ignored);
+  /*!
+   * \brief Exports the staged files of the given mod to a zip archive.
+   * \param app_id App containing the mod.
+   * \param mod_id Target mod.
+   * \param target Destination archive path.
+   */
+  void exportModArchive(int app_id, int mod_id, std::filesystem::path target);
   void commitChanges(int app_id, int deployer);
   /*!
    * \brief Updates which \ref Deployer "deployer" should manage given mods.

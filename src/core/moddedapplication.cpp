@@ -487,6 +487,8 @@ void ModdedApplication::addModToDeployer(int deployer,
                                          bool update_conflicts,
                                          std::optional<ProgressNode*> progress_node)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   if(!deployers_[deployer]->isAutonomous())
   {
     const bool was_added = deployers_[deployer]->addMod(mod_id);
@@ -508,6 +510,8 @@ void ModdedApplication::removeNodeFromDeployer(int deployer,
                                               bool update_conflicts,
                                               std::optional<ProgressNode*> progress_node)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   if(!deployers_[deployer]->isAutonomous())
   {
     const bool was_removed = deployers_[deployer]->removeNode(node_ptr);
@@ -528,6 +532,8 @@ void ModdedApplication::removeModFromDeployer(int deployer,
                                               bool update_conflicts,
                                               std::optional<ProgressNode*> progress_node)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   if(!deployers_[deployer]->isAutonomous())
   {
     const bool was_removed = deployers_[deployer]->removeMod(mod_id);
@@ -579,6 +585,9 @@ void ModdedApplication::resizeActivePacks()
   // paths that bypass addProfile) simply get an empty set here.
   if(active_packs_per_profile_.size() != profile_names_.size())
     active_packs_per_profile_.resize(profile_names_.size());
+  // Keep the manual enabled-state snapshot sized to match; new entries start without a snapshot.
+  if(manual_enabled_snapshot_.size() != profile_names_.size())
+    manual_enabled_snapshot_.resize(profile_names_.size());
 }
 
 std::vector<Pack> ModdedApplication::getPacks() const
@@ -694,13 +703,51 @@ void ModdedApplication::applyActivePacks()
   if(current_profile_ < 0 || current_profile_ >= static_cast<int>(active_packs_per_profile_.size()))
     return;
   const auto& active = active_packs_per_profile_[current_profile_];
-  // With no pack active, leave the manual enabled-state and order untouched (the feature is
-  // opt-in and never silently disables or reorders a user's manually-curated set). Still
-  // persist the active-pack state.
+  auto& snapshot = manual_enabled_snapshot_[current_profile_];
   if(active.empty())
   {
+    // Last pack just deactivated (or none was ever active). If we hold a snapshot of the manual
+    // enabled-state taken when the first pack was activated, restore it so toggling packs on and
+    // back off is symmetric and never leaves the last pack's union enabled. Without a snapshot
+    // there was nothing active before, so the manual state is already correct and left untouched.
+    if(snapshot)
+    {
+      for(const auto& [depl, statuses] : *snapshot)
+      {
+        if(depl < 0 || depl >= static_cast<int>(deployers_.size()))
+          continue;
+        if(deployers_[depl]->isAutonomous())
+          continue;
+        for(const auto& [mod_id, status] : statuses)
+        {
+          if(deployers_[depl]->hasMod(mod_id))
+            deployers_[depl]->setModStatus(mod_id, status);
+        }
+      }
+      snapshot.reset();
+    }
     updateSettings(true);
     return;
+  }
+  // First pack just activated (active set transitioned empty -> non-empty): remember the current
+  // manual per-deployer enabled-state so it can be restored once the last pack is deactivated.
+  if(!snapshot)
+  {
+    std::map<int, std::map<int, bool>> manual_state;
+    for(int depl = 0; depl < static_cast<int>(deployers_.size()); depl++)
+    {
+      if(deployers_[depl]->isAutonomous())
+        continue;
+      for(const auto& mod : installed_mods_)
+      {
+        if(!deployers_[depl]->hasMod(mod.id))
+          continue;
+        const auto mod_status = deployers_[depl]->getModStatus(mod.id);
+        if(mod_status)
+          manual_state[depl][mod.id] = *mod_status;
+      }
+    }
+    snapshot = std::move(manual_state);
   }
   const std::set<int> enabled_ids = pack_util::enabledSet(packs_, active);
   const std::vector<int> order = pack_util::deployOrder(packs_, active);
@@ -880,6 +927,8 @@ std::vector<ModInfo> ModdedApplication::getModInfo() const
     // fork #198: carry the user-assigned category with the mod info.
     if(mod_category_map_.contains(mod.id))
       mod_info.back().category = mod_category_map_.at(mod.id);
+    // Carry whether update notifications are ignored for this mod.
+    mod_info.back().is_update_ignored = isUpdateIgnored(mod.id);
   }
   return mod_info;
 }
@@ -1247,6 +1296,9 @@ void ModdedApplication::removeProfile(int profile)
   // fork #232: drop the removed profile's active-pack set.
   if(profile < static_cast<int>(active_packs_per_profile_.size()))
     active_packs_per_profile_.erase(active_packs_per_profile_.begin() + profile);
+  // Keep the manual enabled-state snapshot vector parallel to the profile list.
+  if(profile < static_cast<int>(manual_enabled_snapshot_.size()))
+    manual_enabled_snapshot_.erase(manual_enabled_snapshot_.begin() + profile);
   bak_man_.removeProfile(profile);
   if(profile == current_profile_)
     setProfile(0);
@@ -1614,6 +1666,8 @@ int ModdedApplication::verifyStagingDir(sfs::path staging_dir)
 
 DeployerInfo ModdedApplication::getDeployerInfo(int deployer)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   auto root = std::make_shared<TreeItem<DeployerEntry>>(std::make_shared<DeployerEntry>(true, "Root"));
   if(!(deployers_[deployer]->isAutonomous()))
   {
@@ -2421,6 +2475,8 @@ bool ModdedApplication::isUpdateIgnored(int mod_id) const
 
 ExternalChangesInfo ModdedApplication::getExternalChanges(int deployer)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   ExternalChangesInfo info;
   ProgressNode node(progress_callback_);
   info.file_changes = deployers_[deployer]->getExternallyModifiedFiles({ &node });
@@ -2433,6 +2489,8 @@ void ModdedApplication::keepOrRevertFileModifications(
   int deployer,
   const FileChangeChoices& changes_to_keep) const
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   deployers_[deployer]->keepOrRevertFileModifications(changes_to_keep);
 }
 
@@ -2617,6 +2675,20 @@ void ModdedApplication::importInstanceInto(const sfs::path& bundle, const sfs::p
       if(tool.isObject() && tool.isMember("command") && !tool["command"].asString().empty())
       {
         tool["command"] = "";
+        stripped_tool_command = true;
+      }
+      // Tool arguments are appended to the command line that gets handed to the shell, so an
+      // untrusted bundle could smuggle commands through them (e.g. "; touch EVIL") even when the
+      // command itself is benign. Strip them for the same reason as the command above.
+      if(tool.isObject() && tool.isMember("arguments") && !tool["arguments"].asString().empty())
+      {
+        tool["arguments"] = "";
+        stripped_tool_command = true;
+      }
+      if(tool.isObject() && tool.isMember("protontricks_arguments") &&
+         !tool["protontricks_arguments"].asString().empty())
+      {
+        tool["protontricks_arguments"] = "";
         stripped_tool_command = true;
       }
     }
@@ -3007,6 +3079,8 @@ void ModdedApplication::deleteRestorePoint(int index)
 
 void ModdedApplication::updateIgnoredFiles(int deployer)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   if(deployers_[deployer]->getType() != DeployerFactory::REVERSEDEPLOYER)
   {
     log_(Log::LOG_DEBUG, "Ignored files can only be updated for ReverseDeployers.");
@@ -3018,6 +3092,8 @@ void ModdedApplication::updateIgnoredFiles(int deployer)
 
 void ModdedApplication::addModToIgnoreList(int deployer, int mod_id)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   if(deployers_[deployer]->getType() != DeployerFactory::REVERSEDEPLOYER)
   {
     log_(Log::LOG_DEBUG, "Ignored files can only be updated for ReverseDeployers.");
@@ -3042,6 +3118,8 @@ void ModdedApplication::refreshReverseDeployers()
 
 void ModdedApplication::applyModAction(int deployer, int action, int mod_id)
 {
+  if(deployer < 0 || deployer >= (int)deployers_.size())
+    throw std::runtime_error("Error: Invalid deployer index: " + std::to_string(deployer));
   deployers_[deployer]->applyModAction(action, mod_id);
   updateSettings(true);
 }
@@ -3271,6 +3349,27 @@ void ModdedApplication::updateSettings(bool write)
       json_settings_["profiles"][i]["active_packs"][j++] = pack_name;
   }
 
+  // Persist each profile's manual enabled-state snapshot (held only while packs are active) so the
+  // user's pre-pack enabled-state can still be restored after a restart. Stored as
+  // deployer index -> { mod id -> status }.
+  for(int i = 0; i < (int)manual_enabled_snapshot_.size() && i < (int)profile_names_.size(); i++)
+  {
+    if(!manual_enabled_snapshot_[i])
+    {
+      json_settings_["profiles"][i].removeMember("manual_enabled_snapshot");
+      continue;
+    }
+    Json::Value snapshot_json(Json::objectValue);
+    for(const auto& [depl, statuses] : *manual_enabled_snapshot_[i])
+    {
+      Json::Value statuses_json(Json::objectValue);
+      for(const auto& [mod_id, status] : statuses)
+        statuses_json[std::to_string(mod_id)] = status;
+      snapshot_json[std::to_string(depl)] = statuses_json;
+    }
+    json_settings_["profiles"][i]["manual_enabled_snapshot"] = snapshot_json;
+  }
+
   for(int i = 0; i < installed_mods_.size(); i++)
   {
     json_settings_["installed_mods"][i] = installed_mods_[i].toJson();
@@ -3463,6 +3562,7 @@ void ModdedApplication::updateState(bool read)
   manual_tag_map_.clear();
   packs_.clear(); // fork #242
   active_packs_per_profile_.clear(); // fork #232
+  manual_enabled_snapshot_.clear();
   auto_tags_.clear();
   auto_tag_map_.clear();
   installer_map_.clear();
@@ -3508,6 +3608,23 @@ void ModdedApplication::updateState(bool read)
       for(const auto& pack_name : profiles[i]["active_packs"])
         active_packs.insert(pack_name.asString());
     active_packs_per_profile_.push_back(active_packs);
+    // Restore the manual enabled-state snapshot taken while packs are active (absent in older
+    // configs and whenever no pack is active). Stored as deployer index -> { mod id -> status }.
+    std::optional<std::map<int, std::map<int, bool>>> snapshot;
+    if(profiles[i].isMember("manual_enabled_snapshot"))
+    {
+      std::map<int, std::map<int, bool>> manual_state;
+      const Json::Value& snapshot_json = profiles[i]["manual_enabled_snapshot"];
+      for(const auto& depl_key : snapshot_json.getMemberNames())
+      {
+        const int depl = std::stoi(depl_key);
+        const Json::Value& statuses = snapshot_json[depl_key];
+        for(const auto& mod_key : statuses.getMemberNames())
+          manual_state[depl][std::stoi(mod_key)] = statuses[mod_key].asBool();
+      }
+      snapshot = std::move(manual_state);
+    }
+    manual_enabled_snapshot_.push_back(std::move(snapshot));
   }
 
   // Restore the previously active profile. This is read before the deployer
