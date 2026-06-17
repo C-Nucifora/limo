@@ -18,6 +18,7 @@
 #include "core/cryptography.h"
 #include "core/deployerfactory.h"
 #include "core/installer.h"
+#include "core/remote/linkimporter.h"
 #include "deployerlistview.h"
 #include "deploypreviewdialog.h" // fork feature #49: deploy dry-run / preview
 #include "deployverifydialog.h" // fork #53
@@ -35,6 +36,7 @@
 #include "versionboxdelegate.h"
 #include <QCheckBox>
 #include <QDesktopServices>
+#include <QApplication>
 #include <QInputDialog>
 #include <QFile>
 #include <QFileDialog>
@@ -1045,6 +1047,9 @@ void MainWindow::setupMenus()
   // fork #197: import a Wabbajack modlist and queue its Nexus downloads.
   QAction* wabbajack_action = tools_menu->addAction(tr("Import Wabbajack Modlist..."));
   connect(wabbajack_action, &QAction::triggered, this, &MainWindow::onImportWabbajack);
+  // fork #233: paste-a-link mod importer (GitHub Releases; FS ModHub when enabled).
+  QAction* url_import_action = tools_menu->addAction(tr("Import Mod from URL..."));
+  connect(url_import_action, &QAction::triggered, this, &MainWindow::onImportModFromUrl);
   // fork #49: dry-run deployment preview.
   QAction* deploy_preview_action = tools_menu->addAction(tr("Preview Deployment Changes"));
   connect(deploy_preview_action, &QAction::triggered, this, &MainWindow::onShowDeploymentPreview);
@@ -1543,7 +1548,10 @@ void MainWindow::importMod()
   setBusyStatus(true);
   if(info.action_type == ImportModInfo::download)
   {
-    if(!initNexusApiKey())
+    // fork #233/#114: a pre-resolved direct download (paste-a-link importer, OMM repository)
+    // never touches the Nexus API, so don't gate it on a Nexus API key.
+    const bool needs_nexus_key = info.remote_download_url.empty();
+    if(needs_nexus_key && !initNexusApiKey())
     {
       mod_import_queue_.pop();
       setBusyStatus(false);
@@ -3201,6 +3209,72 @@ void MainWindow::onShowcasePresetClicked(const QString& app_id)
   add_app_dialog_->selectPreset(app_id);
   setBusyStatus(true, false);
   add_app_dialog_->show();
+}
+
+void MainWindow::onImportModFromUrl()
+{
+  if(currentApp() < 0)
+  {
+    QMessageBox::information(
+      this,
+      tr("No application selected"),
+      tr("Add or select an application first, then import a mod into it."));
+    return;
+  }
+  const bool allow_modhub =
+    QSettings(QCoreApplication::applicationName()).value("experimental_modhub_import", false).toBool();
+
+  bool ok = false;
+  const QString url =
+    QInputDialog::getText(
+      this,
+      tr("Import Mod from URL"),
+      tr("Paste a GitHub release/repository URL, or a Farming Simulator ModHub mod-page URL.\n"
+         "(ModHub link import is experimental and must be enabled under Settings → NexusMods.)"),
+      QLineEdit::Normal,
+      QString(),
+      &ok)
+      .trimmed();
+  if(!ok || url.isEmpty())
+    return;
+
+  // Resolving fetches one page/release; brief and gentle (no crawling). The download itself
+  // runs on the worker thread via the normal import queue.
+  QApplication::setOverrideCursor(Qt::WaitCursor);
+  const remote::ResolvedLink resolved =
+    remote::LinkImporter::resolve(url.toStdString(), allow_modhub);
+  QApplication::restoreOverrideCursor();
+
+  if(!resolved.ok)
+  {
+    QMessageBox::warning(
+      this, tr("Could not import from URL"), QString::fromStdString(resolved.error));
+    return;
+  }
+
+  ImportModInfo import_info;
+  import_info.app_id = currentApp();
+  import_info.action_type = ImportModInfo::download;
+  import_info.remote_type = ImportModInfo::local;
+  import_info.remote_source = url.toStdString();
+  import_info.remote_download_url = resolved.download_url;
+  import_info.remote_file_name = resolved.file_name;
+  import_info.download_user_agent = resolved.user_agent;
+  import_info.download_referer = resolved.referer;
+  if(!resolved.mod_name.empty())
+    import_info.name_overwrite = resolved.mod_name;
+  if(!resolved.version.empty())
+  {
+    import_info.remote_file_version = resolved.version;
+    import_info.version_overwrite = resolved.version;
+  }
+
+  const bool was_empty = mod_import_queue_.empty();
+  mod_import_queue_.push(import_info);
+  setStatusMessage(
+    tr("Queued download: %1").arg(QString::fromStdString(resolved.file_name)));
+  if(was_empty)
+    importMod();
 }
 
 

@@ -901,6 +901,12 @@ private slots:
    * \param app_id Steam app id (preset file stem) to pre-select.
    */
   void onShowcasePresetClicked(const QString& app_id);
+  /*!
+   * \brief Prompts for a mod-page URL (GitHub release/repo, or — when the experimental
+   * setting is on — a Farming Simulator ModHub link), resolves it to a direct download and
+   * queues it through the normal import flow. (issue #233)
+   */
+  void onImportModFromUrl();
   /*! \brief Updates the currently active ModdedApplication. */
   void on_app_selection_box_currentIndexChanged(int index);
   /*! \brief Shows a dialog to add a new Deployer. */

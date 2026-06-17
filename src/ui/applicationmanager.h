@@ -60,6 +60,15 @@ struct DownloadQueueItem
   long remote_mod_id = -1;
   /*! \brief Remote file id, if known. */
   long remote_file_id = -1;
+  /*!
+   * \brief Pre-resolved direct download URL (fork #114 OMM repos / fork #233 paste-a-link).
+   * When set, the download skips the Nexus URL resolution entirely.
+   */
+  std::string remote_download_url = "";
+  /*! \brief Optional User-Agent for the download (fork #233; empty = default). */
+  std::string download_user_agent = "";
+  /*! \brief Optional Referer for the download (fork #233; empty = none). */
+  std::string download_referer = "";
   /*! \brief Directory the file is downloaded into. */
   std::string target_path = "";
   /*! \brief Human readable display name (file name or mod name). */

@@ -8,6 +8,8 @@
 #include <chrono>
 #include <filesystem>
 #include <string>
+#include <utility>
+#include <vector>
 
 
 /*!
@@ -61,6 +63,16 @@ struct ImportModInfo
   std::string remote_file_version = "";
   /*! \brief URL used to download the mod. Note: This may only be valid for a limited time period. */
   std::string remote_download_url = "";
+  /*!
+   * \brief Optional User-Agent to send with the download request. Empty = default. Used by the
+   * paste-a-link importer (fork #233): ModHub's CDN rejects a non-browser User-Agent.
+   */
+  std::string download_user_agent = "";
+  /*!
+   * \brief Optional Referer to send with the download request. Empty = none. Used by the
+   * paste-a-link importer (fork #233) to satisfy ModHub's hotlink protection.
+   */
+  std::string download_referer = "";
   /*! \brief If !=-1: The mod should be added to this mods group after installation. */
   int target_group_id = -1;
   /*! \brief Id assigned to this mod by Limo. */

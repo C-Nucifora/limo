@@ -211,6 +211,8 @@ set(CORE_SOURCES
         src/core/progressnode.h
         src/core/remote/ommrepository.cpp
         src/core/remote/ommrepository.h
+        src/core/remote/linkimporter.cpp
+        src/core/remote/linkimporter.h
         src/core/reversedeployer.cpp
         src/core/reversedeployer.h
         src/core/tag.cpp
