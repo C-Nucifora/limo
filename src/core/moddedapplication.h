@@ -18,6 +18,7 @@
 #include "externalchangesinfo.h"
 #include "log.h"
 #include "manualtag.h"
+#include "pack.h" // fork #242
 #include "modinfo.h"
 #include "modrule.h"
 #include "nexus/api.h"
@@ -220,8 +221,11 @@ public:
    */
   void setModStatusAcrossDeployers(int source_deployer, int mod_id, bool status);
   /*!
-   * \brief fork #232: Returns the names of all packs usable as modpacks. A pack is a manual
-   * tag; assigning a mod to a pack is just tagging it, so a mod can belong to several packs.
+   * \brief fork #242: Returns all first-class modpacks, in priority order.
+   */
+  std::vector<Pack> getPacks() const;
+  /*!
+   * \brief fork #232/#242: Returns the names of all modpacks, in priority order.
    */
   std::vector<std::string> getPackNames() const;
   /*!
@@ -232,12 +236,23 @@ public:
    * \brief fork #232: Whether the named pack is active in the currently selected profile.
    */
   bool packIsActive(const std::string& pack_name) const;
+  /*! \brief fork #242: Creates a new, empty pack. No-op if the name already exists or is empty. */
+  void addPack(const std::string& name, const std::string& notes = "");
+  /*! \brief fork #242: Removes a pack and deactivates it in every profile. */
+  void removePack(const std::string& name);
+  /*! \brief fork #242: Renames a pack, carrying its active state across in every profile. */
+  void renamePack(const std::string& old_name, const std::string& new_name);
+  /*! \brief fork #242: Sets a pack's free-text notes. */
+  void setPackNotes(const std::string& name, const std::string& notes);
+  /*! \brief fork #242: Sets a pack's ordered member mod ids. */
+  void setPackMods(const std::string& name, const std::vector<int>& ordered_mod_ids);
   /*!
-   * \brief fork #232: Activates or deactivates a modpack in the current profile, then
-   * recomputes every mod's enabled state as the union of all active packs' members across all
-   * non-autonomous deployers. While at least one pack is active a mod is enabled iff it belongs
-   * to an active pack; with no pack active the manual enabled-state is left untouched.
-   * \param pack_name Name of the pack (manual tag) to toggle.
+   * \brief fork #232/#242: Activates or deactivates a modpack in the current profile, then
+   * recomputes every mod's enabled state as the union of all active packs' members and reorders
+   * the load order by pack priority then in-pack order, across all non-autonomous deployers.
+   * While at least one pack is active a mod is enabled iff it belongs to an active pack; with no
+   * pack active the manual enabled-state and order are left untouched.
+   * \param pack_name Name of the pack to toggle.
    * \param active    Whether the pack should be active.
    */
   void setPackActive(const std::string& pack_name, bool active);
@@ -1231,7 +1246,9 @@ private:
   std::vector<ManualTag> manual_tags_;
   /*! \brief Maps mod ids to a vector of manual tags associated with that mod. */
   std::map<int, std::vector<std::string>> manual_tag_map_;
-  /*! \brief fork #232: For every profile, the set of active modpack (manual-tag) names. */
+  /*! \brief fork #242: All first-class modpacks, in priority order. */
+  std::vector<Pack> packs_;
+  /*! \brief fork #232: For every profile, the set of active modpack names. */
   std::vector<std::set<std::string>> active_packs_per_profile_;
   /*! \brief Contains all known auto tags. */
   std::vector<AutoTag> auto_tags_;
@@ -1356,6 +1373,13 @@ private:
   void replaceMod(const ImportModInfo& info);
   /*! \brief Updates manual_tag_map_ with the information contained in manual_tags_. */
   void updateManualTagMap();
+  /*!
+   * \brief fork #240: Moves every top-level entry of a freshly-installed mod directory under the
+   * given archive-relative prefix (e.g. "content/cars"), re-rooting the mod. No-op on failure.
+   * \param mod_dir Staging directory of the installed mod.
+   * \param prefix  Archive-relative prefix to relocate the files under.
+   */
+  void relocateUnderPrefix(const std::filesystem::path& mod_dir, const std::string& prefix);
   /*! \brief fork #232: Keeps active_packs_per_profile_ sized to the number of profiles. */
   void resizeActivePacks();
   /*!

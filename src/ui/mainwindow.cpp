@@ -536,13 +536,18 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::addProfile);
   connect(this, &MainWindow::removeProfile,
           app_manager_, &ApplicationManager::removeProfile);
-  // fork #232: modpacks plumbing.
+  // fork #232/#242: modpacks plumbing.
   connect(this, &MainWindow::setPackActive,
           app_manager_, &ApplicationManager::setPackActive);
   connect(this, &MainWindow::getPackInfo,
           app_manager_, &ApplicationManager::getPackInfo);
   connect(app_manager_, &ApplicationManager::sendPackInfo,
           this, &MainWindow::onGetPackInfo);
+  connect(this, &MainWindow::addPack, app_manager_, &ApplicationManager::addPack);
+  connect(this, &MainWindow::removePack, app_manager_, &ApplicationManager::removePack);
+  connect(this, &MainWindow::renamePack, app_manager_, &ApplicationManager::renamePack);
+  connect(this, &MainWindow::setPackNotes, app_manager_, &ApplicationManager::setPackNotes);
+  connect(this, &MainWindow::setPackMods, app_manager_, &ApplicationManager::setPackMods);
   connect(this, &MainWindow::addManualTag,
           app_manager_, &ApplicationManager::addManualTag);
   // fork #236: existing-Steam-id lookup for batch-import dedupe.
@@ -1068,6 +1073,9 @@ void MainWindow::setupMenus()
   // fork #232: toggleable modpacks (multiple active at once; union deploys).
   QAction* modpacks_action = tools_menu->addAction(tr("Modpacks..."));
   connect(modpacks_action, &QAction::triggered, this, &MainWindow::onShowModpacks);
+  // fork #241: sync mods from a Farming Simulator dedicated server.
+  QAction* fs_server_action = tools_menu->addAction(tr("Farming Simulator Server Mods..."));
+  connect(fs_server_action, &QAction::triggered, this, &MainWindow::onShowFsServerMods);
   // fork #49: dry-run deployment preview.
   QAction* deploy_preview_action = tools_menu->addAction(tr("Preview Deployment Changes"));
   connect(deploy_preview_action, &QAction::triggered, this, &MainWindow::onShowDeploymentPreview);
@@ -2146,6 +2154,7 @@ bool MainWindow::versionIsLessOrEqual(QString current_version, QString target_ve
 void MainWindow::initRootLevelConditions()
 {
   root_level_conditions_.clear();
+  archive_root_anchors_.clear(); // fork #240
   if(app_info_.steam_app_id == -1)
     return;
 
@@ -2189,6 +2198,17 @@ void MainWindow::initRootLevelConditions()
   {
     Log::debug("Failed to read from app settings file at: " + config_path.string());
     return;
+  }
+
+  // fork #240: archive root anchors (marker→prefix) re-root inconsistently-packed archives.
+  if(json.isMember(JSON_ARCHIVE_ANCHORS_KEY) && json[JSON_ARCHIVE_ANCHORS_KEY].isArray())
+  {
+    for(const auto& anchor : json[JSON_ARCHIVE_ANCHORS_KEY])
+    {
+      if(anchor.isMember("marker") && anchor.isMember("prefix"))
+        archive_root_anchors_.push_back(
+          { anchor["marker"].asString(), anchor["prefix"].asString() });
+    }
   }
 
   if(!json.isMember(JSON_ROOT_LEVEL_KEY))
@@ -3019,7 +3039,8 @@ void MainWindow::onExtractionComplete(ImportModInfo info)
                                                      app_info_.deployer_is_case_invariant,
                                                      ui->info_version_label->text(),
                                                      info,
-                                                     root_level_conditions_);
+                                                     root_level_conditions_,
+                                                     archive_root_anchors_);
   if(was_successful)
   {
     // Default the install options from the game's preset (e.g. drop-in archive games
@@ -3258,8 +3279,11 @@ void MainWindow::onImportModFromUrl()
       tr("Add or select an application first, then import a mod into it."));
     return;
   }
-  const bool allow_modhub =
-    QSettings(QCoreApplication::applicationName()).value("experimental_modhub_import", false).toBool();
+  const QSettings url_settings(QCoreApplication::applicationName());
+  const bool allow_modhub = url_settings.value("experimental_modhub_import", false).toBool();
+  // issue #239: optional GitHub token to lift the importer's anonymous API rate limit.
+  const std::string github_token =
+    url_settings.value("github_token", "").toString().trimmed().toStdString();
 
   bool ok = false;
   const QString url =
@@ -3279,7 +3303,7 @@ void MainWindow::onImportModFromUrl()
   // runs on the worker thread via the normal import queue.
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const remote::ResolvedLink resolved =
-    remote::LinkImporter::resolve(url.toStdString(), allow_modhub);
+    remote::LinkImporter::resolve(url.toStdString(), allow_modhub, github_token);
   QApplication::restoreOverrideCursor();
 
   if(!resolved.ok)
@@ -3333,6 +3357,22 @@ void MainWindow::onShowModpacks()
             &ModpacksDialog::newPackRequested,
             this,
             &MainWindow::onNewPackRequested);
+    connect(modpacks_dialog_.get(),
+            &ModpacksDialog::renamePackRequested,
+            this,
+            &MainWindow::onRenamePackRequested);
+    connect(modpacks_dialog_.get(),
+            &ModpacksDialog::removePackRequested,
+            this,
+            &MainWindow::onRemovePackRequested);
+    connect(modpacks_dialog_.get(),
+            &ModpacksDialog::setPackNotesRequested,
+            this,
+            &MainWindow::onSetPackNotesRequested);
+    connect(modpacks_dialog_.get(),
+            &ModpacksDialog::setPackModsRequested,
+            this,
+            &MainWindow::onSetPackModsRequested);
   }
   emit getPackInfo(currentApp());
   modpacks_dialog_->show();
@@ -3340,10 +3380,10 @@ void MainWindow::onShowModpacks()
   modpacks_dialog_->activateWindow();
 }
 
-void MainWindow::onGetPackInfo(QStringList all_packs, QStringList active_packs)
+void MainWindow::onGetPackInfo(QString json)
 {
   if(modpacks_dialog_)
-    modpacks_dialog_->setPacks(all_packs, active_packs);
+    modpacks_dialog_->setPackData(json);
 }
 
 void MainWindow::onPackToggled(QString pack_name, bool active)
@@ -3361,9 +3401,47 @@ void MainWindow::onNewPackRequested(QString pack_name)
 {
   if(currentApp() < 0)
     return;
-  emit addManualTag(currentApp(), pack_name);
+  emit addPack(currentApp(), pack_name, QString());
   // Re-request the pack list so the new (empty) pack appears in the dialog.
   emit getPackInfo(currentApp());
+}
+
+void MainWindow::onRenamePackRequested(QString old_name, QString new_name)
+{
+  if(currentApp() < 0)
+    return;
+  emit renamePack(currentApp(), old_name, new_name);
+  emit getPackInfo(currentApp());
+}
+
+void MainWindow::onRemovePackRequested(QString pack_name)
+{
+  if(currentApp() < 0)
+    return;
+  emit removePack(currentApp(), pack_name);
+  emit getPackInfo(currentApp());
+  // Removing an active pack recomputes the enabled set/order; refresh the mod views.
+  emit getDeployerInfo(currentApp(), currentDeployer());
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onSetPackNotesRequested(QString pack_name, QString notes)
+{
+  if(currentApp() < 0)
+    return;
+  emit setPackNotes(currentApp(), pack_name, notes);
+  emit getPackInfo(currentApp());
+}
+
+void MainWindow::onSetPackModsRequested(QString pack_name, QList<int> mod_ids)
+{
+  if(currentApp() < 0)
+    return;
+  emit setPackMods(currentApp(), pack_name, mod_ids);
+  emit getPackInfo(currentApp());
+  // Membership/order changes to an active pack affect the deployed set; refresh the views.
+  emit getDeployerInfo(currentApp(), currentDeployer());
+  emit getModInfo(currentApp());
 }
 
 void MainWindow::onDuplicateProfileButtonClicked()
@@ -3379,6 +3457,53 @@ void MainWindow::onDuplicateProfileButtonClicked()
   info.source = source;
   // Reuse the standard add-profile path (emits addProfile + refreshes the profile list).
   onProfileAdded(currentApp(), info);
+}
+
+void MainWindow::onShowFsServerMods()
+{
+  if(currentApp() < 0)
+  {
+    QMessageBox::information(
+      this,
+      tr("No application selected"),
+      tr("Add or select a Farming Simulator application first, then sync its server mods."));
+    return;
+  }
+  if(!fs_server_mods_dialog_)
+  {
+    fs_server_mods_dialog_ = std::make_unique<FsServerModsDialog>(this);
+    connect(fs_server_mods_dialog_.get(),
+            &FsServerModsDialog::downloadRequested,
+            this,
+            &MainWindow::onFsServerDownloadRequested);
+  }
+  fs_server_mods_dialog_->show();
+  fs_server_mods_dialog_->raise();
+  fs_server_mods_dialog_->activateWindow();
+}
+
+void MainWindow::onFsServerDownloadRequested(QList<QStringList> mods)
+{
+  if(currentApp() < 0 || mods.isEmpty())
+    return;
+  const bool was_empty = mod_import_queue_.empty();
+  for(const QStringList& mod : mods)
+  {
+    if(mod.size() < 2)
+      continue;
+    ImportModInfo info;
+    info.app_id = currentApp();
+    info.action_type = ImportModInfo::download;
+    info.remote_type = ImportModInfo::local;
+    info.remote_source = mod[1].toStdString();
+    info.remote_download_url = mod[1].toStdString();
+    info.remote_file_name = mod[0].toStdString();
+    info.name_overwrite = mod[0].toStdString();
+    mod_import_queue_.push(info);
+  }
+  setStatusMessage(tr("Queued %1 server mod download(s).").arg(mods.size()));
+  if(was_empty && !mod_import_queue_.empty())
+    importMod();
 }
 
 

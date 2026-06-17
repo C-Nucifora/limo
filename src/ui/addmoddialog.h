@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include "../core/archivenormalizer.h" // fork #240
 #include "../core/importmodinfo.h"
 #include "deployerlistmodel.h"
 #include "modlistmodel.h"
@@ -65,7 +66,8 @@ public:
                    const std::vector<bool>& case_invariant_deployers,
                    const QString& app_version,
                    const ImportModInfo& info,
-                   const std::vector<RootLevelCondition>& root_level_conditions);
+                   const std::vector<RootLevelCondition>& root_level_conditions,
+                   const std::vector<archive_normalizer::Anchor>& archive_anchors = {});
   /*!
    * \brief Pre-selects installer options from a game preset's default flags (e.g. drop-in
    * archive games default to "no extract"). Call before showing the dialog; pass 0 to clear.
@@ -119,6 +121,11 @@ private:
   ImportModInfo import_mod_info_;
   /*! \brief Depth of the current directory tree. */
   int directory_tree_depth_;
+  /*! \brief fork #240: archive-relative file paths of the current mod, used to compute the
+   *  install prefix once the root level is known. */
+  std::vector<std::string> mod_file_paths_;
+  /*! \brief fork #240: marker→prefix anchors from the current app's preset, for re-rooting. */
+  std::vector<archive_normalizer::Anchor> archive_anchors_;
   /*! \brief Contains bools for every deployer indicating whether that deployer is autonomous. */
   std::vector<bool> autonomous_deployers_;
   /*!

@@ -14,14 +14,17 @@ if(NOT Catch2_FOUND)
 endif()
 
 set(TEST_SOURCES
+        test_archivenormalizer.cpp
         test_backupmanager.cpp
         test_bg3deployer.cpp
         test_cryptography.cpp
         test_deployer.cpp
         test_fomodinstaller.cpp
+        test_fsservermods.cpp
         test_installer.cpp
         test_linkimporter.cpp
         test_moddedapplication.cpp
+        test_pack.cpp
         test_reversedeployer.cpp
         test_tagconditionnode.cpp
         test_tool.cpp

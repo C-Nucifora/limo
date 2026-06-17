@@ -102,6 +102,8 @@ find_package(ZLIB REQUIRED)
 # Separated for tests
 set(CORE_SOURCES
         src/core/appinfo.h
+        src/core/archivenormalizer.cpp
+        src/core/archivenormalizer.h
         src/core/autotag.cpp
         src/core/autotag.h
         src/core/backupmanager.cpp
@@ -203,6 +205,8 @@ set(CORE_SOURCES
         src/core/nexus/mod.cpp
         src/core/nexus/mod.h
         src/core/parseerror.h
+        src/core/pack.cpp
+        src/core/pack.h
         src/core/pathutils.cpp
         src/core/pathutils.h
         src/core/plugindeployer.cpp
@@ -213,6 +217,8 @@ set(CORE_SOURCES
         src/core/remote/ommrepository.h
         src/core/remote/linkimporter.cpp
         src/core/remote/linkimporter.h
+        src/core/remote/fsservermods.cpp
+        src/core/remote/fsservermods.h
         src/core/reversedeployer.cpp
         src/core/reversedeployer.h
         src/core/tag.cpp
@@ -415,6 +421,8 @@ set(PROJECT_SOURCES
         src/ui/fomoddialog.ui
         src/ui/fomodradiobutton.cpp
         src/ui/fomodradiobutton.h
+        src/ui/fsservermodsdialog.cpp
+        src/ui/fsservermodsdialog.h
         src/ui/importfromsteamdialog.cpp
         src/ui/importfromsteamdialog.h
         src/ui/importfromsteamdialog.ui

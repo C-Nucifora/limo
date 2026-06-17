@@ -541,6 +541,33 @@
         </widget>
        </item>
        <item>
+        <layout class="QHBoxLayout" name="horizontalLayout_github_token">
+         <item>
+          <widget class="QLabel" name="github_token_label">
+           <property name="toolTip">
+            <string>Optional GitHub Personal Access Token. Used only by &quot;Import Mod from URL&quot; for GitHub releases, to lift the unauthenticated 60-request/hour API rate limit. Leave empty to use the API anonymously.</string>
+           </property>
+           <property name="text">
+            <string>GitHub token (optional):</string>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QLineEdit" name="github_token_field">
+           <property name="toolTip">
+            <string>Optional GitHub Personal Access Token (classic or fine-grained, no scopes required for public releases). Lifts the 60-request/hour anonymous rate limit on the URL importer.</string>
+           </property>
+           <property name="echoMode">
+            <enum>QLineEdit::PasswordEchoOnEdit</enum>
+           </property>
+           <property name="placeholderText">
+            <string>Leave empty to use GitHub anonymously</string>
+           </property>
+          </widget>
+         </item>
+        </layout>
+       </item>
+       <item>
         <spacer name="verticalSpacer_4">
          <property name="orientation">
           <enum>Qt::Vertical</enum>

@@ -5,6 +5,9 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QMessageBox>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSettings>
 #include <QUrl>
 #include <algorithm>
@@ -885,17 +888,72 @@ void ApplicationManager::setPackActive(int app_id, QString pack, bool active)
     handleExceptions<&ModdedApplication::setPackActive>(app_id, pack.toStdString(), active);
 }
 
+void ApplicationManager::addPack(int app_id, QString name, QString notes)
+{
+  if(appIndexIsValid(app_id, false))
+    handleExceptions<&ModdedApplication::addPack>(app_id, name.toStdString(), notes.toStdString());
+}
+
+void ApplicationManager::removePack(int app_id, QString name)
+{
+  if(appIndexIsValid(app_id, false))
+    handleExceptions<&ModdedApplication::removePack>(app_id, name.toStdString());
+}
+
+void ApplicationManager::renamePack(int app_id, QString old_name, QString new_name)
+{
+  if(appIndexIsValid(app_id, false))
+    handleExceptions<&ModdedApplication::renamePack>(
+      app_id, old_name.toStdString(), new_name.toStdString());
+}
+
+void ApplicationManager::setPackNotes(int app_id, QString name, QString notes)
+{
+  if(appIndexIsValid(app_id, false))
+    handleExceptions<&ModdedApplication::setPackNotes>(
+      app_id, name.toStdString(), notes.toStdString());
+}
+
+void ApplicationManager::setPackMods(int app_id, QString name, QList<int> mod_ids)
+{
+  if(!appIndexIsValid(app_id, false))
+    return;
+  std::vector<int> ids(mod_ids.begin(), mod_ids.end());
+  handleExceptions<&ModdedApplication::setPackMods>(app_id, name.toStdString(), ids);
+}
+
 void ApplicationManager::getPackInfo(int app_id)
 {
   if(!appIndexIsValid(app_id, false))
     return;
-  QStringList all_packs;
-  QStringList active_packs;
-  for(const auto& name : apps_[app_id].getPackNames())
-    all_packs << QString::fromStdString(name);
+  QJsonObject root;
+  QJsonArray active;
   for(const auto& name : apps_[app_id].getActivePacks())
-    active_packs << QString::fromStdString(name);
-  emit sendPackInfo(all_packs, active_packs);
+    active.append(QString::fromStdString(name));
+  root["active"] = active;
+  QJsonArray packs;
+  for(const Pack& pack : apps_[app_id].getPacks())
+  {
+    QJsonObject pack_obj;
+    pack_obj["name"] = QString::fromStdString(pack.name);
+    pack_obj["notes"] = QString::fromStdString(pack.notes);
+    QJsonArray mods;
+    for(int mod_id : pack.mod_ids)
+      mods.append(mod_id);
+    pack_obj["mods"] = mods;
+    packs.append(pack_obj);
+  }
+  root["packs"] = packs;
+  QJsonArray all_mods;
+  for(const ModInfo& mod_info : apps_[app_id].getModInfo())
+  {
+    QJsonObject mod_obj;
+    mod_obj["id"] = mod_info.mod.id;
+    mod_obj["name"] = QString::fromStdString(mod_info.mod.name);
+    all_mods.append(mod_obj);
+  }
+  root["mods"] = all_mods;
+  emit sendPackInfo(QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact)));
 }
 
 void ApplicationManager::addProfile(int app_id, EditProfileInfo info)

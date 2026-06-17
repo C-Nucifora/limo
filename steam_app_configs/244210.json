@@ -110,5 +110,10 @@
       "expression": "system",
       "level_offset": 0
     }
+  ],
+  "archive_root_anchors":
+  [
+    { "marker": "ui_car.json", "prefix": "content/cars" },
+    { "marker": "ui_track.json", "prefix": "content/tracks" }
   ]
 }

@@ -513,6 +513,37 @@ void Deployer::sortModsByConflicts(std::optional<ProgressNode*> progress_node)
   loadorders_[current_profile_] = new_loadorder;
 }
 
+void Deployer::setLoadorderByModIds(const std::vector<int>& ordered_mod_ids)
+{
+  auto new_loadorder = std::make_shared<TreeItem<DeployerEntry>>(
+    std::make_shared<DeployerEntry>(true, "Root"), nullptr);
+  std::set<int> placed;
+  // First, the requested mods in the requested order (only those this deployer actually has).
+  for(int mod_id : ordered_mod_ids)
+  {
+    if(placed.contains(mod_id))
+      continue;
+    auto iter = str::find_if(*loadorders_[current_profile_],
+                             [mod_id](auto entry) { return entry.lock()->id == mod_id; });
+    if(iter == loadorders_[current_profile_]->end())
+      continue;
+    new_loadorder->emplace_back(iter->lock());
+    placed.insert(mod_id);
+  }
+  // Then every remaining mod, preserving its current relative order.
+  for(auto iter = loadorders_[current_profile_]->begin();
+      iter != loadorders_[current_profile_]->end();
+      ++iter)
+  {
+    const int mod_id = iter->lock()->id;
+    if(placed.contains(mod_id))
+      continue;
+    new_loadorder->emplace_back(iter->lock());
+    placed.insert(mod_id);
+  }
+  loadorders_[current_profile_] = new_loadorder;
+}
+
 std::vector<std::vector<int>> Deployer::getConflictGroups() const
 {
   return conflict_groups_[current_profile_];
