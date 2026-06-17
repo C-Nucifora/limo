@@ -491,3 +491,98 @@ TEST_CASE("Packs are first-class: create, notes, rename, remove", "[app][packs]"
   REQUIRE_FALSE(reloaded.packIsActive("Track Day"));
 }
 
+TEST_CASE("Imported tool arguments are stripped", "[app][import]")
+{
+  // An imported instance bundle is untrusted input. A tool's "command", "arguments" and
+  // "protontricks_arguments" all end up on a shell command line, so a malicious bundle could
+  // smuggle commands through the argument fields (e.g. "; touch EVIL"). importInstanceInto must
+  // clear all of them; the user can re-add them after reviewing the imported instance.
+  resetStagingDir();
+  const sfs::path bundle_dir = DATA_DIR / "instance_bundle";
+  const sfs::path import_staging = DATA_DIR / "imported_staging";
+  sfs::remove_all(bundle_dir);
+  sfs::remove_all(import_staging);
+
+  ModdedApplication app(DATA_DIR / "staging", "test");
+  app.addTool({ "evil tool",
+                "",
+                "/bin/prog.exe",
+                true,
+                220,
+                "/tmp",
+                { { "VAR_1", "VAL_1" } },
+                "; touch EVIL",
+                "--protontricks ; touch EVIL2" });
+
+  sfs::create_directories(bundle_dir);
+  app.exportInstance(bundle_dir);
+  ModdedApplication::importInstanceInto(bundle_dir, import_staging);
+
+  ModdedApplication imported(import_staging, "imported");
+  const auto tools = imported.getTools();
+  REQUIRE(tools.size() == 1);
+  REQUIRE(tools[0].getName() == "evil tool");
+  REQUIRE(tools[0].getArguments().empty());
+  REQUIRE(tools[0].getProtontricksArguments().empty());
+
+  sfs::remove_all(bundle_dir);
+  sfs::remove_all(import_staging);
+}
+
+TEST_CASE("Invalid deployer index throws", "[app]")
+{
+  resetStagingDir();
+  ModdedApplication app(DATA_DIR / "staging", "test");
+  app.addDeployer(
+    { DeployerFactory::SIMPLEDEPLOYER, "depl0", DATA_DIR / "app", Deployer::hard_link });
+
+  // One deployer exists, so getNumDeployers() and -1 are both out of bounds.
+  for(const int deployer : { app.getNumDeployers(), -1 })
+  {
+    CHECK_THROWS_AS(app.addModToDeployer(deployer, 0), std::runtime_error);
+    CHECK_THROWS_AS(app.removeNodeFromDeployer(deployer, nullptr), std::runtime_error);
+    CHECK_THROWS_AS(app.removeModFromDeployer(deployer, 0), std::runtime_error);
+    CHECK_THROWS_AS(app.getDeployerInfo(deployer), std::runtime_error);
+    CHECK_THROWS_AS(app.getExternalChanges(deployer), std::runtime_error);
+    CHECK_THROWS_AS(app.keepOrRevertFileModifications(deployer, FileChangeChoices{}),
+                    std::runtime_error);
+    CHECK_THROWS_AS(app.updateIgnoredFiles(deployer), std::runtime_error);
+    CHECK_THROWS_AS(app.addModToIgnoreList(deployer, 0), std::runtime_error);
+    CHECK_THROWS_AS(app.applyModAction(deployer, 0, 0), std::runtime_error);
+  }
+}
+
+TEST_CASE("Deactivating the last pack restores manual enabled-state", "[app][modpacks]")
+{
+  resetStagingDir();
+  ModdedApplication app(DATA_DIR / "staging", "test");
+  setupThreeMods(app);
+
+  // Manual baseline: mod 1 disabled, mods 0 and 2 enabled.
+  app.setModStatus(0, 1, false);
+  REQUIRE(modEnabledInDeployer(app, 0, 0));
+  REQUIRE_FALSE(modEnabledInDeployer(app, 1, 0));
+  REQUIRE(modEnabledInDeployer(app, 2, 0));
+
+  // Activating the first pack snapshots the manual state and applies the pack's union ({0}):
+  // only mod 0 stays enabled, so mod 2 gets disabled by the pack.
+  app.addPack("PackA");
+  app.setPackMods("PackA", { 0 });
+  app.setPackActive("PackA", true);
+  REQUIRE(modEnabledInDeployer(app, 0, 0));
+  REQUIRE_FALSE(modEnabledInDeployer(app, 1, 0));
+  REQUIRE_FALSE(modEnabledInDeployer(app, 2, 0));
+
+  // Deactivating the last pack restores the snapshot instead of leaving the pack's union enabled.
+  app.setPackActive("PackA", false);
+  REQUIRE(modEnabledInDeployer(app, 0, 0));
+  REQUIRE_FALSE(modEnabledInDeployer(app, 1, 0));
+  REQUIRE(modEnabledInDeployer(app, 2, 0));
+
+  // The restored manual state survives a reload from disk.
+  ModdedApplication reloaded(DATA_DIR / "staging", "test");
+  REQUIRE(modEnabledInDeployer(reloaded, 0, 0));
+  REQUIRE_FALSE(modEnabledInDeployer(reloaded, 1, 0));
+  REQUIRE(modEnabledInDeployer(reloaded, 2, 0));
+}
+

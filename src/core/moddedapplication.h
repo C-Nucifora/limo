@@ -25,6 +25,8 @@
 #include "tool.h"
 #include <filesystem>
 #include <json/json.h>
+#include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -1250,6 +1252,16 @@ private:
   std::vector<Pack> packs_;
   /*! \brief fork #232: For every profile, the set of active modpack names. */
   std::vector<std::set<std::string>> active_packs_per_profile_;
+  /*!
+   * \brief For every profile: A snapshot of the manual per-deployer mod enabled-state taken when
+   * the profile's first modpack is activated (active set empty -> non-empty).
+   *
+   * Each entry maps a deployer index to a map of mod id -> enabled status. The snapshot is restored
+   * when the profile's last modpack is deactivated (non-empty -> empty), so toggling packs on and
+   * back off leaves the user's manually-curated enabled-state untouched. nullopt means no snapshot
+   * is currently held for that profile.
+   */
+  std::vector<std::optional<std::map<int, std::map<int, bool>>>> manual_enabled_snapshot_;
   /*! \brief Contains all known auto tags. */
   std::vector<AutoTag> auto_tags_;
   /*! \brief Maps mod ids to a vector of auto tags associated with that mod. */

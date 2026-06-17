@@ -36,6 +36,8 @@ struct ModInfo
   std::string color;
   /*! \brief fork #198: user-assigned free-text category. Empty = none. */
   std::string category;
+  /*! \brief If true: Update notifications for this mod are ignored. */
+  bool is_update_ignored = false;
 
   /*!
    * \brief Constructor. Simply initializes members.
