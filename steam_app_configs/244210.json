@@ -75,5 +75,40 @@
         }
       ]
     }
+  ],
+  "root_level_conditions":
+  [
+    {
+      "matcher_type": "regex",
+      "target_type": "directory",
+      "case_invariant": true,
+      "stop_on_branch": false,
+      "expression": "content",
+      "level_offset": 0
+    },
+    {
+      "matcher_type": "regex",
+      "target_type": "directory",
+      "case_invariant": true,
+      "stop_on_branch": false,
+      "expression": "apps",
+      "level_offset": 0
+    },
+    {
+      "matcher_type": "regex",
+      "target_type": "directory",
+      "case_invariant": true,
+      "stop_on_branch": false,
+      "expression": "extension",
+      "level_offset": 0
+    },
+    {
+      "matcher_type": "regex",
+      "target_type": "directory",
+      "case_invariant": true,
+      "stop_on_branch": false,
+      "expression": "system",
+      "level_offset": 0
+    }
   ]
 }
