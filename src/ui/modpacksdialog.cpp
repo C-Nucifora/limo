@@ -155,6 +155,12 @@ void ModpacksDialog::onPackSelectionChanged()
 
 void ModpacksDialog::refreshMembers()
 {
+  // Preserve the selected member across the rebuild so reorder/remove operations that round-trip
+  // through the backend (commitMembers -> setPackModsRequested -> getPackInfo -> setPackData)
+  // don't lose the user's place after every click.
+  int previously_selected = -1;
+  if(member_list_->currentItem() != nullptr)
+    previously_selected = member_list_->currentItem()->data(Qt::UserRole).toInt();
   member_list_->clear();
   const QString pack = selectedPack();
   if(pack.isEmpty())
@@ -164,6 +170,8 @@ void ModpacksDialog::refreshMembers()
     const QString name = mod_names_.value(id, tr("Mod %1").arg(id));
     auto* item = new QListWidgetItem(name, member_list_);
     item->setData(Qt::UserRole, id);
+    if(id == previously_selected)
+      member_list_->setCurrentItem(item);
   }
 }
 

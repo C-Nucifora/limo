@@ -908,6 +908,10 @@ void AddAppDialog::onAddAllSupported(const QList<QStringList>& games)
       folder = g[1];
     const sfs::path staging = sfs::path(root.toStdString()) / folder.toStdString();
     addImportedAppDirect(g[0], g[1], g[2], g[3], g[4], QString::fromStdString(staging.string()));
+    // Record the newly-added app id so a re-scan in the same dialog session (or a duplicate
+    // entry within this batch) is deduped rather than re-added. (fork #236 follow-up)
+    if(app_id_ok)
+      existing_steam_app_ids_.insert(g_app_id);
     added++;
   }
   Log::info("Batch import: added " + std::to_string(added) + " supported game(s), skipped " +

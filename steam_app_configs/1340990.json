@@ -1,0 +1,11 @@
+{
+    "name": "Rise of the Ronin",
+    "deployers": [
+        {
+            "type": "Case Matching Deployer",
+            "name": "Game Files",
+            "target_dir": "$STEAM_INSTALL_PATH$",
+            "deploy_mode": "hard link"
+        }
+    ]
+}

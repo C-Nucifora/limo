@@ -38,7 +38,8 @@ std::string baseName(const std::string& path)
 
 std::string archive_normalizer::contentPrefix(const std::vector<std::string>& archive_paths,
                                               int root_level,
-                                              const std::vector<Anchor>& anchors)
+                                              const std::vector<Anchor>& anchors,
+                                              const std::string& loose_root_folder)
 {
   for(const auto& anchor : anchors)
   {
@@ -57,6 +58,18 @@ std::string archive_normalizer::contentPrefix(const std::vector<std::string>& ar
       const std::string rooted_lower = toLower(rooted);
       if(rooted_lower.rfind(prefix_lower, 0) == 0)
         return "";
+      // If the marker sits directly at the archive root (no enclosing directory), the loose files
+      // would land directly under the prefix (e.g. content/cars/ui_car.json). Assetto Corsa and
+      // similar games require each item in its own subfolder, so wrap them in a folder named after
+      // the mod when one was supplied.
+      if(rooted.find('/') == std::string::npos && !loose_root_folder.empty())
+      {
+        std::string folder = loose_root_folder;
+        std::replace(folder.begin(), folder.end(), '/', '_');
+        std::replace(folder.begin(), folder.end(), '\\', '_');
+        if(!folder.empty())
+          return anchor.prefix + "/" + folder;
+      }
       return anchor.prefix;
     }
   }

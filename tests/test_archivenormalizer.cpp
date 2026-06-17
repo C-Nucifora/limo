@@ -56,3 +56,32 @@ TEST_CASE("No anchors means no change", "[normalizer]")
   const std::vector<std::string> paths{ "my_car/ui_car.json" };
   REQUIRE(contentPrefix(paths, 0, {}).empty());
 }
+
+TEST_CASE("Loose car files at the archive root are wrapped in a mod-named subfolder",
+          "[normalizer]")
+{
+  // ui_car.json and the rest sit directly at the root with no enclosing car folder. Without a
+  // wrap, relocateUnderPrefix would produce content/cars/ui_car.json (a broken AC install); with
+  // the mod name supplied they land under content/cars/<mod>/.
+  const std::vector<std::string> paths{ "ui_car.json", "body.kn5", "skins/red/skin.dds" };
+  REQUIRE(contentPrefix(paths, 0, AC_ANCHORS, "Lambo Huracan") == "content/cars/Lambo Huracan");
+}
+
+TEST_CASE("Loose-root wrap sanitizes path separators in the folder name", "[normalizer]")
+{
+  const std::vector<std::string> paths{ "ui_car.json", "body.kn5" };
+  REQUIRE(contentPrefix(paths, 0, AC_ANCHORS, "a/b\\c") == "content/cars/a_b_c");
+}
+
+TEST_CASE("A car already in its own folder is not double-wrapped", "[normalizer]")
+{
+  // The marker is one level deep (my_car/ui_car.json), so the mod name must NOT be appended.
+  const std::vector<std::string> paths{ "my_car/ui_car.json", "my_car/body.kn5" };
+  REQUIRE(contentPrefix(paths, 0, AC_ANCHORS, "Ignored Name") == "content/cars");
+}
+
+TEST_CASE("Loose root with no folder name falls back to the bare prefix", "[normalizer]")
+{
+  const std::vector<std::string> paths{ "ui_car.json", "body.kn5" };
+  REQUIRE(contentPrefix(paths, 0, AC_ANCHORS, "") == "content/cars");
+}
