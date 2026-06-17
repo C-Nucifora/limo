@@ -412,6 +412,8 @@ public:
    * \return The vector.
    */
   std::vector<std::string> getProfileNames() const;
+  /*! \brief fork #236: Returns this application's Steam app id, or -1 if it is not a Steam app. */
+  long getSteamAppId() const;
   /*!
    * \brief Used to set the name of a profile.
    * \param profile Target Profile

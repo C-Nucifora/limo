@@ -681,6 +681,12 @@ signals:
    */
   void sendApplicationNames(QStringList names, QStringList icon_paths, bool is_new);
   /*!
+   * \brief fork #236: Emitted in response to \ref getSteamAppIds with the Steam app ids of
+   * every existing application (-1 for non-Steam apps). Used to skip already-added games in
+   * the "Add all supported" batch import.
+   */
+  void sendSteamAppIds(QList<int> ids);
+  /*!
    *  \brief Emitted after potentially slow operations, e.g. installing a mod, are completed.
    *  \param message Status message to show in the main window.
    */
@@ -973,6 +979,10 @@ public slots:
    * "application".
    */
   void getApplicationNames(bool is_new);
+  /*!
+   * \brief fork #236: Emits \ref sendSteamAppIds with every existing application's Steam app id.
+   */
+  void getSteamAppIds();
   /*!
    * \brief Setter for a mod name.
    * \param app_id The target \ref ModdedApplication "application".

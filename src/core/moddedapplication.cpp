@@ -1185,6 +1185,11 @@ std::vector<std::string> ModdedApplication::getProfileNames() const
   return profile_names_;
 }
 
+long ModdedApplication::getSteamAppId() const
+{
+  return steam_app_id_;
+}
+
 void ModdedApplication::editProfile(int profile, const EditProfileInfo& info)
 {
   if(profile < 0 || profile >= profile_names_.size())

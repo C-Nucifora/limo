@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <QSet> // fork #236
 #include "addappdialog.h"
 #include "addbackupdialog.h"
 #include "addbackuptargetdialog.h"
@@ -503,6 +504,9 @@ private:
    * identity mapping (index == id). Rebuilt every time the combo is populated.
    */
   std::vector<int> app_combo_id_map_;
+  /*! \brief fork #236: Steam app ids of every existing application, to skip already-added games
+   *  in the "Add all supported" batch import. Refreshed via getSteamAppIds/onGetSteamAppIds. */
+  QSet<int> existing_steam_app_ids_;
   /*! \brief Menu action that toggles alphabetical sorting of the app list. */
   QAction* sort_apps_alpha_action_;
 
@@ -718,6 +722,9 @@ public slots:
    * \param is_new Indicates if this was called after adding a new application.
    */
   void onGetApplicationNames(QStringList names, QStringList icon_paths, bool is_new);
+  /*! \brief fork #236: Caches existing apps' Steam ids and forwards them to the Add-App dialog
+   *  so "Add all supported" can skip games that already have an application. */
+  void onGetSteamAppIds(QList<int> ids);
   /*!
    * \brief Updates the Deployer combo box with new deployer names.
    * \param names The new names.
@@ -1734,6 +1741,8 @@ signals:
   void getPackInfo(int app_id);
   /*! \brief fork #232: Creates a new manual tag, usable as a modpack. */
   void addManualTag(int app_id, QString tag_name);
+  /*! \brief fork #236: Requests the Steam app ids of all existing applications. */
+  void getSteamAppIds();
   /*!
    * \brief Creates a vector containing the names of all profiles of one
    * \ref ModdedApplication "application".

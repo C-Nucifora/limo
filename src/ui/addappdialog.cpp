@@ -843,6 +843,11 @@ void AddAppDialog::openSteamImport()
   on_import_button_clicked();
 }
 
+void AddAppDialog::setExistingSteamAppIds(const QSet<int>& ids)
+{
+  existing_steam_app_ids_ = ids;
+}
+
 void AddAppDialog::addImportedAppDirect(const QString& name,
                                         const QString& app_id,
                                         const QString& install_dir,
@@ -884,10 +889,19 @@ void AddAppDialog::onAddAllSupported(const QList<QStringList>& games)
   if(root.isEmpty())
     return;
   int added = 0;
+  int skipped = 0;
   for(const QStringList& g : games)
   {
     if(g.size() < 5)
       continue;
+    // fork #236: skip games Limo already manages (dedupe by Steam app id).
+    bool app_id_ok = false;
+    const int g_app_id = g[1].toInt(&app_id_ok);
+    if(app_id_ok && existing_steam_app_ids_.contains(g_app_id))
+    {
+      skipped++;
+      continue;
+    }
     QString folder = g[0];
     folder.replace(QRegularExpression("[^A-Za-z0-9._ -]"), "_");
     if(folder.trimmed().isEmpty())
@@ -896,7 +910,13 @@ void AddAppDialog::onAddAllSupported(const QList<QStringList>& games)
     addImportedAppDirect(g[0], g[1], g[2], g[3], g[4], QString::fromStdString(staging.string()));
     added++;
   }
-  Log::info("Batch import: added " + std::to_string(added) + " supported game(s).");
+  Log::info("Batch import: added " + std::to_string(added) + " supported game(s), skipped " +
+            std::to_string(skipped) + " already added.");
+  if(added == 0 && skipped > 0)
+    QMessageBox::information(
+      this,
+      "Nothing to add",
+      QString("All %1 supported game(s) are already added.").arg(skipped));
   batch_import_done_ = true;
 }
 
