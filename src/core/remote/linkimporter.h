@@ -76,15 +76,21 @@ public:
    * \param url         The pasted mod-page / repository URL.
    * \param allow_modhub Whether the experimental ModHub importer is enabled. When false,
    *        a ModHub URL resolves to an error that points at manual import + the setting.
+   * \param github_token Optional GitHub Personal Access Token; when non-empty it is sent on
+   *        GitHub API requests to lift the unauthenticated 60-req/hr rate limit. (issue #239)
    */
-  static ResolvedLink resolve(const std::string& url, bool allow_modhub);
+  static ResolvedLink resolve(const std::string& url,
+                              bool allow_modhub,
+                              const std::string& github_token = "");
 
   /*!
    * \brief Fetches and parses a GitHub repo/release URL into a direct asset download.
    * Picks the first archive asset of the chosen release, falling back to the source
    * zipball if the release publishes no archive assets.
+   * \param url          The GitHub repository / release URL.
+   * \param github_token Optional GitHub token; sent as a Bearer credential when non-empty.
    */
-  static ResolvedLink resolveGithub(const std::string& url);
+  static ResolvedLink resolveGithub(const std::string& url, const std::string& github_token = "");
   /*!
    * \brief Fetches a FS ModHub mod page (with a browser User-Agent) and scrapes the
    * direct CDN .zip link from it. Sets the User-Agent + Referer the download needs.

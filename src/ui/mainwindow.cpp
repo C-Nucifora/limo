@@ -3258,8 +3258,11 @@ void MainWindow::onImportModFromUrl()
       tr("Add or select an application first, then import a mod into it."));
     return;
   }
-  const bool allow_modhub =
-    QSettings(QCoreApplication::applicationName()).value("experimental_modhub_import", false).toBool();
+  const QSettings url_settings(QCoreApplication::applicationName());
+  const bool allow_modhub = url_settings.value("experimental_modhub_import", false).toBool();
+  // issue #239: optional GitHub token to lift the importer's anonymous API rate limit.
+  const std::string github_token =
+    url_settings.value("github_token", "").toString().trimmed().toStdString();
 
   bool ok = false;
   const QString url =
@@ -3279,7 +3282,7 @@ void MainWindow::onImportModFromUrl()
   // runs on the worker thread via the normal import queue.
   QApplication::setOverrideCursor(Qt::WaitCursor);
   const remote::ResolvedLink resolved =
-    remote::LinkImporter::resolve(url.toStdString(), allow_modhub);
+    remote::LinkImporter::resolve(url.toStdString(), allow_modhub, github_token);
   QApplication::restoreOverrideCursor();
 
   if(!resolved.ok)

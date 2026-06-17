@@ -108,6 +108,8 @@ void SettingsDialog::init()
   // fork #233: experimental ModHub paste-a-link importer (off by default).
   ui->experimental_modhub_cb->setChecked(
     settings.value("experimental_modhub_import", false).toBool());
+  // issue #239: optional GitHub token for the URL importer's rate limit.
+  ui->github_token_field->setText(settings.value("github_token", "").toString());
 
   settings.beginGroup("nexus");
   ui->premium_user_label->setText(
@@ -187,6 +189,7 @@ void SettingsDialog::on_buttonBox_accepted()
   // fork #140
   settings.setValue("download_speed_limit_kbps", ui->download_speed_limit_box->value());
   settings.setValue("experimental_modhub_import", ui->experimental_modhub_cb->isChecked());
+  settings.setValue("github_token", ui->github_token_field->text().trimmed());
 
   log_on_error_ = ui->show_error_cb->isChecked();
   settings.setValue("log_on_error", log_on_error_);

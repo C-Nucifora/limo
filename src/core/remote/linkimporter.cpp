@@ -73,10 +73,12 @@ bool remote::LinkImporter::isSupportedUrl(const std::string& url)
   return isGithubUrl(url) || isModHubUrl(url);
 }
 
-remote::ResolvedLink remote::LinkImporter::resolve(const std::string& url, bool allow_modhub)
+remote::ResolvedLink remote::LinkImporter::resolve(const std::string& url,
+                                                   bool allow_modhub,
+                                                   const std::string& github_token)
 {
   if(isGithubUrl(url))
-    return resolveGithub(url);
+    return resolveGithub(url, github_token);
   if(isModHubUrl(url))
   {
     if(!allow_modhub)
@@ -212,7 +214,8 @@ remote::ResolvedLink remote::LinkImporter::parseGithubReleaseJson(const std::str
                    "and import it instead.");
 }
 
-remote::ResolvedLink remote::LinkImporter::resolveGithub(const std::string& url)
+remote::ResolvedLink remote::LinkImporter::resolveGithub(const std::string& url,
+                                                         const std::string& github_token)
 {
   // Pull owner/repo (and optional release tag) out of the URL.
   static const std::regex repo_regex(R"(github\.com/([^/\s?#]+)/([^/\s?#]+))", std::regex::icase);
@@ -233,10 +236,13 @@ remote::ResolvedLink remote::LinkImporter::resolveGithub(const std::string& url)
   else
     api_url = std::format("https://api.github.com/repos/{}/{}/releases/latest", owner, repo);
 
-  cpr::Response response = cpr::Get(cpr::Url(api_url),
-                                    cpr::Header{ { "User-Agent", limo_user_agent },
-                                                { "Accept", "application/vnd.github+json" } },
-                                    cpr::Timeout{ kRequestTimeoutMs });
+  cpr::Header headers{ { "User-Agent", limo_user_agent },
+                       { "Accept", "application/vnd.github+json" } };
+  // issue #239: an optional token lifts the unauthenticated 60-req/hr GitHub API limit.
+  if(!github_token.empty())
+    headers["Authorization"] = "Bearer " + github_token;
+  cpr::Response response =
+    cpr::Get(cpr::Url(api_url), headers, cpr::Timeout{ kRequestTimeoutMs });
   if(response.status_code == 404)
     return makeError("No GitHub release found for that repository (it may have no published "
                      "releases). Download a file manually and import it instead.");
