@@ -553,7 +553,7 @@ void AddModDialog::on_buttonBox_accepted()
   // fork #240: re-root inconsistently-packed archives (e.g. a bare Assetto Corsa car) by
   // prepending the preset-declared prefix when a marker file is not already under it.
   import_mod_info_.install_prefix = archive_normalizer::contentPrefix(
-    mod_file_paths_, import_mod_info_.root_level, archive_anchors_);
+    mod_file_paths_, import_mod_info_.root_level, archive_anchors_, import_mod_info_.name);
   import_mod_info_.files = {};
   import_mod_info_.replace_mod = replace_mod;
   if(Installer::INSTALLER_TYPES[ui->installer_box->currentIndex()] == Installer::FOMODINSTALLER)

@@ -45,13 +45,21 @@ struct Anchor
  * (the archive is correctly rooted), otherwise the anchor's prefix. Returns an empty string if
  * no anchor's marker is present.
  *
+ * When the marker sits directly at the archive root (no enclosing directory), the content's
+ * loose files would otherwise land directly under the prefix (e.g. `content/cars/ui_car.json`).
+ * Games like Assetto Corsa require each item in its own subfolder, so if \p loose_root_folder is
+ * supplied it is appended to the prefix in that case (e.g. `content/cars/<loose_root_folder>`).
+ *
  * \param archive_paths Archive-relative file paths (forward-slash separated).
  * \param root_level    Number of leading directory components stripped at install.
  * \param anchors       Preset-declared marker→prefix anchors.
+ * \param loose_root_folder Subfolder name (typically the mod name) to wrap loose root-level
+ *        content in; ignored when the marker is already inside its own directory.
  * \return The prefix to prepend (e.g. "content/cars"), or "" for no change.
  */
 std::string contentPrefix(const std::vector<std::string>& archive_paths,
                           int root_level,
-                          const std::vector<Anchor>& anchors);
+                          const std::vector<Anchor>& anchors,
+                          const std::string& loose_root_folder = "");
 
 } // namespace archive_normalizer
