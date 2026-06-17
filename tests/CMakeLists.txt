@@ -25,6 +25,7 @@ set(TEST_SOURCES
         test_linkimporter.cpp
         test_moddedapplication.cpp
         test_pack.cpp
+        test_remoteproviders.cpp
         test_reversedeployer.cpp
         test_tagconditionnode.cpp
         test_tool.cpp

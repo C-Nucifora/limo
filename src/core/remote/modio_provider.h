@@ -136,6 +136,10 @@ public:
                              const std::string& file_id) override;
 
 private:
+  // Grants the unit tests access to the static JSON parsers below without exposing
+  // them publicly or coupling them to the (network-only) public methods.
+  friend struct RemoteProviderTestAccess;
+
   /*! \brief mod.io v1 API base URL. */
   static constexpr const char* BASE_URL = "https://api.mod.io/v1";
   /*! \brief User-Agent header value sent with every request. */
