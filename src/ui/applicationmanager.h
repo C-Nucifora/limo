@@ -648,6 +648,12 @@ signals:
    */
   void sendModInfo(std::vector<ModInfo> mod_info);
   /*!
+   * \brief fork #232: Emitted in response to \ref getPackInfo.
+   * \param all_packs    Names of every available pack (manual tag).
+   * \param active_packs Names of the packs active in the current profile.
+   */
+  void sendPackInfo(QStringList all_packs, QStringList active_packs);
+  /*!
    * \brief fork #145: Emitted in response to \ref requestPrunableArchives.
    * \param archives The prunable archive files.
    * \param total_size Total size to be freed, in bytes.
@@ -1039,6 +1045,20 @@ public slots:
    * \param profile The new profile.
    */
   void setProfile(int app_id, int profile);
+  /*!
+   * \brief fork #232: Activates or deactivates a modpack for the given application's current
+   * profile, recomputing the enabled set as the union of all active packs.
+   * \param app_id The target application.
+   * \param pack   Name of the pack (manual tag) to toggle.
+   * \param active Whether the pack should be active.
+   */
+  void setPackActive(int app_id, QString pack, bool active);
+  /*!
+   * \brief fork #232: Emits \ref sendPackInfo with the application's packs and the subset
+   * active in its current profile.
+   * \param app_id The target application.
+   */
+  void getPackInfo(int app_id);
   /*!
    * \brief Adds a new profile to one \ref ModdedApplication "application" and optionally
    * copies it's load order from an existing profile.

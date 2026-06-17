@@ -535,6 +535,15 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::addProfile);
   connect(this, &MainWindow::removeProfile,
           app_manager_, &ApplicationManager::removeProfile);
+  // fork #232: modpacks plumbing.
+  connect(this, &MainWindow::setPackActive,
+          app_manager_, &ApplicationManager::setPackActive);
+  connect(this, &MainWindow::getPackInfo,
+          app_manager_, &ApplicationManager::getPackInfo);
+  connect(app_manager_, &ApplicationManager::sendPackInfo,
+          this, &MainWindow::onGetPackInfo);
+  connect(this, &MainWindow::addManualTag,
+          app_manager_, &ApplicationManager::addManualTag);
   connect(this, &MainWindow::getProfileNames,
           app_manager_, &ApplicationManager::getProfileNames);
   connect(app_manager_, &ApplicationManager::sendProfileNames,
@@ -1050,6 +1059,9 @@ void MainWindow::setupMenus()
   // fork #233: paste-a-link mod importer (GitHub Releases; FS ModHub when enabled).
   QAction* url_import_action = tools_menu->addAction(tr("Import Mod from URL..."));
   connect(url_import_action, &QAction::triggered, this, &MainWindow::onImportModFromUrl);
+  // fork #232: toggleable modpacks (multiple active at once; union deploys).
+  QAction* modpacks_action = tools_menu->addAction(tr("Modpacks..."));
+  connect(modpacks_action, &QAction::triggered, this, &MainWindow::onShowModpacks);
   // fork #49: dry-run deployment preview.
   QAction* deploy_preview_action = tools_menu->addAction(tr("Preview Deployment Changes"));
   connect(deploy_preview_action, &QAction::triggered, this, &MainWindow::onShowDeploymentPreview);
@@ -1470,9 +1482,19 @@ void MainWindow::setupButtons()
   edit_profile_action_->setText("Edit");
   edit_profile_action_->setIcon(QIcon::fromTheme("editor"));
   connect(edit_profile_action_, &QAction::triggered, this, &MainWindow::onEditProfileButtonClicked);
+  // fork #232: duplicate the current profile (inherits its load order, enabled set and packs)
+  // for fast per-map / per-save setups.
+  QAction* duplicate_profile_action = new QAction(this);
+  duplicate_profile_action->setToolTip("Duplicate the current profile");
+  duplicate_profile_action->setText("Duplicate");
+  duplicate_profile_action->setIcon(QIcon::fromTheme("edit-copy"));
+  connect(duplicate_profile_action,
+          &QAction::triggered,
+          this,
+          &MainWindow::onDuplicateProfileButtonClicked);
   QMenu* profile_menu = new QMenu(this);
-  profile_menu->addActions(
-    QList<QAction*>{ add_profile_action_, remove_profile_action_, edit_profile_action_ });
+  profile_menu->addActions(QList<QAction*>{
+    add_profile_action_, duplicate_profile_action, remove_profile_action_, edit_profile_action_ });
   ui->profile_tool_button->setDefaultAction(add_profile_action_);
   ui->profile_tool_button->setMenu(profile_menu);
 
@@ -3275,6 +3297,73 @@ void MainWindow::onImportModFromUrl()
     tr("Queued download: %1").arg(QString::fromStdString(resolved.file_name)));
   if(was_empty)
     importMod();
+}
+
+void MainWindow::onShowModpacks()
+{
+  if(currentApp() < 0)
+  {
+    QMessageBox::information(
+      this,
+      tr("No application selected"),
+      tr("Add or select an application first, then manage its modpacks."));
+    return;
+  }
+  if(!modpacks_dialog_)
+  {
+    modpacks_dialog_ = std::make_unique<ModpacksDialog>(this);
+    connect(
+      modpacks_dialog_.get(), &ModpacksDialog::packToggled, this, &MainWindow::onPackToggled);
+    connect(modpacks_dialog_.get(),
+            &ModpacksDialog::newPackRequested,
+            this,
+            &MainWindow::onNewPackRequested);
+  }
+  emit getPackInfo(currentApp());
+  modpacks_dialog_->show();
+  modpacks_dialog_->raise();
+  modpacks_dialog_->activateWindow();
+}
+
+void MainWindow::onGetPackInfo(QStringList all_packs, QStringList active_packs)
+{
+  if(modpacks_dialog_)
+    modpacks_dialog_->setPacks(all_packs, active_packs);
+}
+
+void MainWindow::onPackToggled(QString pack_name, bool active)
+{
+  if(currentApp() < 0)
+    return;
+  emit setPackActive(currentApp(), pack_name, active);
+  // Refresh both panels so the recomputed (union) enabled set is reflected. These are queued
+  // to the worker thread after setPackActive, so they observe the updated state.
+  emit getDeployerInfo(currentApp(), currentDeployer());
+  emit getModInfo(currentApp());
+}
+
+void MainWindow::onNewPackRequested(QString pack_name)
+{
+  if(currentApp() < 0)
+    return;
+  emit addManualTag(currentApp(), pack_name);
+  // Re-request the pack list so the new (empty) pack appears in the dialog.
+  emit getPackInfo(currentApp());
+}
+
+void MainWindow::onDuplicateProfileButtonClicked()
+{
+  if(currentApp() < 0)
+    return;
+  const int source = ui->profile_selection_box->currentIndex();
+  if(source < 0)
+    return;
+  EditProfileInfo info;
+  info.name = ui->profile_selection_box->currentText().toStdString() + " (copy)";
+  info.app_version = "";
+  info.source = source;
+  // Reuse the standard add-profile path (emits addProfile + refreshes the profile list).
+  onProfileAdded(currentApp(), info);
 }
 
 

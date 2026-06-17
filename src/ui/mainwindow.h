@@ -37,6 +37,7 @@
 #include "nexusmoddialog.h"
 #include "overwritebackupdialog.h"
 #include "repositoriesdialog.h" // fork #114
+#include "modpacksdialog.h" // fork #232
 #include "savemanagerwidget.h" // fork #24
 #include "settingsdialog.h"
 #include "tablecelldelegate.h"
@@ -308,6 +309,8 @@ private:
   std::unique_ptr<OverwriteBackupDialog> overwrite_backup_dialog_;
   /*! \brief fork #114: Reusable dialog for managing OMM network mod repositories. */
   std::unique_ptr<RepositoriesDialog> repositories_dialog_;
+  /*! \brief fork #232: Reusable dialog for toggling modpacks. */
+  std::unique_ptr<ModpacksDialog> modpacks_dialog_;
   /*! \brief Reusable dialog for editing manual tags. */
   std::unique_ptr<EditManualTagsDialog> edit_manual_tags_dialog_;
   /*! \brief Reusable dialog for managing the manual tags assigned to a set of mods. */
@@ -907,6 +910,16 @@ private slots:
    * queues it through the normal import flow. (issue #233)
    */
   void onImportModFromUrl();
+  /*! \brief fork #232: Opens the Modpacks dialog and requests its current pack state. */
+  void onShowModpacks();
+  /*! \brief fork #232: Populates the open Modpacks dialog with the application's packs. */
+  void onGetPackInfo(QStringList all_packs, QStringList active_packs);
+  /*! \brief fork #232: Activates/deactivates a pack and refreshes the mod views. */
+  void onPackToggled(QString pack_name, bool active);
+  /*! \brief fork #232: Creates a new (empty) pack, then refreshes the Modpacks dialog. */
+  void onNewPackRequested(QString pack_name);
+  /*! \brief fork #232: Duplicates the current profile (inheriting its load order + packs). */
+  void onDuplicateProfileButtonClicked();
   /*! \brief Updates the currently active ModdedApplication. */
   void on_app_selection_box_currentIndexChanged(int index);
   /*! \brief Shows a dialog to add a new Deployer. */
@@ -1715,6 +1728,12 @@ signals:
    * \param profile The profile to be removed.
    */
   void removeProfile(int app_id, int profile);
+  /*! \brief fork #232: Activates/deactivates a modpack for the application's current profile. */
+  void setPackActive(int app_id, QString pack, bool active);
+  /*! \brief fork #232: Requests the application's packs and the subset active for its profile. */
+  void getPackInfo(int app_id);
+  /*! \brief fork #232: Creates a new manual tag, usable as a modpack. */
+  void addManualTag(int app_id, QString tag_name);
   /*!
    * \brief Creates a vector containing the names of all profiles of one
    * \ref ModdedApplication "application".

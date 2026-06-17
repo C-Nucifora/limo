@@ -445,6 +445,8 @@ set(PROJECT_SOURCES
         src/ui/modlistproxymodel.h
         src/ui/modlistview.cpp
         src/ui/modlistview.h
+        src/ui/modpacksdialog.cpp
+        src/ui/modpacksdialog.h
         src/ui/modnamedelegate.cpp
         src/ui/modnamedelegate.h
         src/ui/movemoddialog.cpp

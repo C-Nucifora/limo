@@ -321,3 +321,106 @@ TEST_CASE("Deploy hooks run and a failing hook does not abort deployment", "[app
   verifyDirsAreEqual(DATA_DIR / "app", DATA_DIR / "target" / "mod012", true);
 }
 
+// fork #232: returns whether the given mod is enabled in the given deployer.
+static bool modEnabledInDeployer(ModdedApplication& app, int mod_id, int deployer)
+{
+  for(const auto& mod_info : app.getModInfo())
+  {
+    if(mod_info.mod.id != mod_id)
+      continue;
+    for(size_t k = 0; k < mod_info.deployer_ids.size(); k++)
+      if(mod_info.deployer_ids[k] == deployer)
+        return mod_info.deployer_statuses[k];
+  }
+  return false;
+}
+
+// fork #232: install three mods into one deployer; returns the configured app.
+static void setupThreeMods(ModdedApplication& app)
+{
+  app.addDeployer(
+    { DeployerFactory::SIMPLEDEPLOYER, "depl0", DATA_DIR / "app", Deployer::hard_link });
+  ImportModInfo info;
+  info.installer = Installer::SIMPLEINSTALLER;
+  info.installer_flags = INSTALLER_FLAGS;
+  info.deployers = { 0 };
+  info.name = "mod 0";
+  info.current_path = DATA_DIR / "source" / "mod0.tar.gz";
+  app.installMod(info);
+  info.name = "mod 1";
+  info.current_path = DATA_DIR / "source" / "mod1.zip";
+  app.installMod(info);
+  info.name = "mod 2";
+  info.current_path = DATA_DIR / "source" / "mod2.tar.gz";
+  app.installMod(info);
+}
+
+TEST_CASE("Modpacks deploy the union of active packs", "[app][packs]")
+{
+  resetStagingDir();
+  ModdedApplication app(DATA_DIR / "staging", "test");
+  setupThreeMods(app);
+
+  // A pack is a manual tag; mods may belong to several (overlap is allowed).
+  app.addManualTag("PackA");
+  app.addManualTag("PackB");
+  app.addTagsToMods({ "PackA" }, { 0, 1 });
+  app.addTagsToMods({ "PackB" }, { 1, 2 });
+
+  REQUIRE(app.getPackNames().size() == 2);
+  REQUIRE(app.getActivePacks().empty());
+  REQUIRE_FALSE(app.packIsActive("PackA"));
+
+  // PackA on -> mods {0, 1} enabled, mod 2 disabled.
+  app.setPackActive("PackA", true);
+  REQUIRE(app.packIsActive("PackA"));
+  REQUIRE(app.getActivePacks().size() == 1);
+  REQUIRE(modEnabledInDeployer(app, 0, 0));
+  REQUIRE(modEnabledInDeployer(app, 1, 0));
+  REQUIRE_FALSE(modEnabledInDeployer(app, 2, 0));
+
+  // PackB also on -> union {0, 1, 2} all enabled.
+  app.setPackActive("PackB", true);
+  REQUIRE(modEnabledInDeployer(app, 0, 0));
+  REQUIRE(modEnabledInDeployer(app, 1, 0));
+  REQUIRE(modEnabledInDeployer(app, 2, 0));
+
+  // PackA off -> only PackB ({1, 2}) -> mod 0 disabled, mods 1 and 2 enabled.
+  app.setPackActive("PackA", false);
+  REQUIRE_FALSE(modEnabledInDeployer(app, 0, 0));
+  REQUIRE(modEnabledInDeployer(app, 1, 0));
+  REQUIRE(modEnabledInDeployer(app, 2, 0));
+
+  // State persists across a reload from disk.
+  ModdedApplication reloaded(DATA_DIR / "staging", "test");
+  REQUIRE(reloaded.packIsActive("PackB"));
+  REQUIRE_FALSE(reloaded.packIsActive("PackA"));
+  REQUIRE_FALSE(modEnabledInDeployer(reloaded, 0, 0));
+  REQUIRE(modEnabledInDeployer(reloaded, 1, 0));
+  REQUIRE(modEnabledInDeployer(reloaded, 2, 0));
+}
+
+TEST_CASE("Pack state is per profile and duplicated profiles inherit it", "[app][packs]")
+{
+  resetStagingDir();
+  ModdedApplication app(DATA_DIR / "staging", "test");
+  setupThreeMods(app);
+  app.addManualTag("PackA");
+  app.addTagsToMods({ "PackA" }, { 0 });
+  app.setPackActive("PackA", true);
+
+  // Duplicate the current profile (source = 0): the copy inherits its active packs.
+  app.addProfile(EditProfileInfo{ "Copy", "", 0 });
+  app.setProfile(1);
+  REQUIRE(app.packIsActive("PackA"));
+
+  // A fresh profile (source = -1) starts with no active packs.
+  app.addProfile(EditProfileInfo{ "Fresh", "", -1 });
+  app.setProfile(2);
+  REQUIRE_FALSE(app.packIsActive("PackA"));
+
+  // The original profile is unaffected.
+  app.setProfile(0);
+  REQUIRE(app.packIsActive("PackA"));
+}
+

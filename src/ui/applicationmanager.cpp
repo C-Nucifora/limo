@@ -871,6 +871,25 @@ void ApplicationManager::setProfile(int app_id, int profile)
     handleExceptions<&ModdedApplication::setProfile>(app_id, profile);
 }
 
+void ApplicationManager::setPackActive(int app_id, QString pack, bool active)
+{
+  if(appIndexIsValid(app_id, false))
+    handleExceptions<&ModdedApplication::setPackActive>(app_id, pack.toStdString(), active);
+}
+
+void ApplicationManager::getPackInfo(int app_id)
+{
+  if(!appIndexIsValid(app_id, false))
+    return;
+  QStringList all_packs;
+  QStringList active_packs;
+  for(const auto& name : apps_[app_id].getPackNames())
+    all_packs << QString::fromStdString(name);
+  for(const auto& name : apps_[app_id].getActivePacks())
+    active_packs << QString::fromStdString(name);
+  emit sendPackInfo(all_packs, active_packs);
+}
+
 void ApplicationManager::addProfile(int app_id, EditProfileInfo info)
 {
   if(appIndexIsValid(app_id))
