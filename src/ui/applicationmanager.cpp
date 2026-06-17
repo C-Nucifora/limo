@@ -781,6 +781,14 @@ void ApplicationManager::getApplicationNames(bool is_new)
   emit sendApplicationNames(names, icon_paths, is_new);
 }
 
+void ApplicationManager::getSteamAppIds()
+{
+  QList<int> ids;
+  for(const auto& app : apps_)
+    ids.append(static_cast<int>(app.getSteamAppId()));
+  emit sendSteamAppIds(ids);
+}
+
 void ApplicationManager::changeModName(int app_id, int mod_id, QString new_name)
 {
   if(appIndexIsValid(app_id))

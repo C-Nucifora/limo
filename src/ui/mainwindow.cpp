@@ -458,6 +458,7 @@ void MainWindow::setupConnections()
   qRegisterMetaType<std::vector<ModRule>>();
   qRegisterMetaType<std::vector<std::string>>();
   qRegisterMetaType<std::vector<std::vector<int>>>();
+  qRegisterMetaType<QList<int>>("QList<int>"); // fork #236
 
   connect(this, &MainWindow::getModInfo,
           app_manager_, &ApplicationManager::getModInfo);
@@ -544,6 +545,11 @@ void MainWindow::setupConnections()
           this, &MainWindow::onGetPackInfo);
   connect(this, &MainWindow::addManualTag,
           app_manager_, &ApplicationManager::addManualTag);
+  // fork #236: existing-Steam-id lookup for batch-import dedupe.
+  connect(this, &MainWindow::getSteamAppIds,
+          app_manager_, &ApplicationManager::getSteamAppIds);
+  connect(app_manager_, &ApplicationManager::sendSteamAppIds,
+          this, &MainWindow::onGetSteamAppIds);
   connect(this, &MainWindow::getProfileNames,
           app_manager_, &ApplicationManager::getProfileNames);
   connect(app_manager_, &ApplicationManager::sendProfileNames,
@@ -3211,6 +3217,7 @@ void MainWindow::on_deployer_add_separator_button_clicked()
 void MainWindow::onAddAppButtonClicked()
 {
   add_app_dialog_->setAddMode();
+  emit getSteamAppIds(); // fork #236: refresh dedupe set for "Add all supported"
   setBusyStatus(true, false);
   add_app_dialog_->show();
 }
@@ -3218,11 +3225,19 @@ void MainWindow::onAddAppButtonClicked()
 void MainWindow::onScanForGamesClicked()
 {
   add_app_dialog_->setAddMode();
+  emit getSteamAppIds(); // fork #236: refresh dedupe set for "Add all supported"
   setBusyStatus(true, false);
   add_app_dialog_->show();
   // Jump straight into the Steam import scan, which lists installed games and flags the
   // ones Limo has a preset for.
   add_app_dialog_->openSteamImport();
+}
+
+void MainWindow::onGetSteamAppIds(QList<int> ids)
+{
+  existing_steam_app_ids_ = QSet<int>(ids.begin(), ids.end());
+  if(add_app_dialog_)
+    add_app_dialog_->setExistingSteamAppIds(existing_steam_app_ids_);
 }
 
 void MainWindow::onShowcasePresetClicked(const QString& app_id)

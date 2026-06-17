@@ -9,6 +9,7 @@
 #include "../core/editdeployerinfo.h"
 #include "importfromsteamdialog.h"
 #include <QDialog>
+#include <QSet>
 #include <json/json.h>
 #include <filesystem>
 #include <vector>
@@ -117,6 +118,9 @@ private:
   /*! \brief Set by onAddAllSupported() so the dialog closes itself once the modal import
    *  sub-dialog returns (closing it mid-stack would be unsafe). */
   bool batch_import_done_ = false;
+  /*! \brief fork #236: Steam app ids of applications that already exist, so the "Add all
+   *  supported" batch import skips games Limo is already managing. */
+  QSet<int> existing_steam_app_ids_;
   /*!
    * \brief Creates one application from imported Steam data plus a staging directory, using
    * the game's preset for deployers/auto-tags. Emits applicationAdded(). Used by batch import.
@@ -243,6 +247,12 @@ public:
    * "Scan for games" entry point). The dialog must already be in add mode.
    */
   void openSteamImport();
+  /*!
+   * \brief fork #236: Sets the Steam app ids of applications that already exist so the
+   * "Add all supported" batch import skips games Limo is already managing.
+   * \param ids Steam app ids of existing applications.
+   */
+  void setExistingSteamAppIds(const QSet<int>& ids);
   /*!
    * \brief Pre-selects the bundled preset for the given Steam app id in the preset gallery
    * and template combo, and pre-fills the application name from it. Used by the empty-state
