@@ -255,6 +255,10 @@ private:
   QAction* set_category_action_ = nullptr;
   /*! \brief fork #148: Mod context action: merge the selected mods into one entry. */
   QAction* merge_mods_action_ = nullptr;
+  /*! \brief Mod context action: toggle ignoring update notifications for the selected mod(s). */
+  QAction* ignore_updates_action_ = nullptr;
+  /*! \brief Mod context action: export the selected mod's staged files to a zip archive. */
+  QAction* export_archive_action_ = nullptr;
   /*! \brief fork #209: Mod context action: preview a mod's asset files. */
   QAction* preview_files_action_ = nullptr;
   /*! \brief fork #66: Mod context action: update a mod's files from a local archive. */
@@ -1408,6 +1412,10 @@ private slots:
   void onOpenBsaBrowser();
   /*! \brief fork #148: Merges the selected mods into a chosen target mod. */
   void onMergeMods();
+  /*! \brief Toggles ignoring update notifications for the selected mod(s). */
+  void onIgnoreUpdates();
+  /*! \brief Exports the selected mod's staged files to a zip archive. */
+  void onExportModArchive();
   /*! \brief fork #209: Opens the asset preview dialog for the selected mod. */
   void onPreviewModFiles();
   /*! \brief fork #66: Picks an archive and replaces the selected mod's files from it. */
@@ -2084,6 +2092,10 @@ signals:
   void setModCategory(int app_id, int mod_id, QString category);
   /*! \brief fork #148: Merges the source mods into the target mod, removing the sources. */
   void mergeMods(int app_id, std::vector<int> source_mod_ids, int target_mod_id);
+  /*! \brief Sets whether update notifications are ignored for a mod. */
+  void setUpdateIgnored(int app_id, int mod_id, bool ignored);
+  /*! \brief Exports a mod's staged files to a zip archive. */
+  void exportModArchive(int app_id, int mod_id, std::filesystem::path target);
   /*! \brief fork #66: Replaces a mod's files from a local archive, keeping its config. */
   void updateModFromLocal(int app_id, int mod_id, std::filesystem::path source_archive);
   /*! \brief fork #54: Creates a named load-order restore point. */
