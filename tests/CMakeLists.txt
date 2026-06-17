@@ -20,6 +20,7 @@ set(TEST_SOURCES
         test_cryptography.cpp
         test_deployer.cpp
         test_fomodinstaller.cpp
+        test_fsservermods.cpp
         test_installer.cpp
         test_linkimporter.cpp
         test_moddedapplication.cpp

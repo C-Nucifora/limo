@@ -39,6 +39,7 @@
 #include "overwritebackupdialog.h"
 #include "repositoriesdialog.h" // fork #114
 #include "modpacksdialog.h" // fork #232
+#include "fsservermodsdialog.h" // fork #241
 #include "savemanagerwidget.h" // fork #24
 #include "settingsdialog.h"
 #include "tablecelldelegate.h"
@@ -314,6 +315,8 @@ private:
   std::unique_ptr<RepositoriesDialog> repositories_dialog_;
   /*! \brief fork #232: Reusable dialog for toggling modpacks. */
   std::unique_ptr<ModpacksDialog> modpacks_dialog_;
+  /*! \brief fork #241: Reusable dialog for syncing mods from a FS dedicated server. */
+  std::unique_ptr<FsServerModsDialog> fs_server_mods_dialog_;
   /*! \brief Reusable dialog for editing manual tags. */
   std::unique_ptr<EditManualTagsDialog> edit_manual_tags_dialog_;
   /*! \brief Reusable dialog for managing the manual tags assigned to a set of mods. */
@@ -924,6 +927,11 @@ private slots:
   void onImportModFromUrl();
   /*! \brief fork #232: Opens the Modpacks dialog and requests its current pack state. */
   void onShowModpacks();
+  /*! \brief fork #241: Opens the Farming Simulator dedicated-server mod sync dialog. */
+  void onShowFsServerMods();
+  /*! \brief fork #241: Queues the selected FS server mods for download.
+   *  \param mods One [file_name, download_url] entry per mod. */
+  void onFsServerDownloadRequested(QList<QStringList> mods);
   /*! \brief fork #232: Populates the open Modpacks dialog with the application's packs. */
   void onGetPackInfo(QStringList all_packs, QStringList active_packs);
   /*! \brief fork #232: Activates/deactivates a pack and refreshes the mod views. */

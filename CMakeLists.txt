@@ -215,6 +215,8 @@ set(CORE_SOURCES
         src/core/remote/ommrepository.h
         src/core/remote/linkimporter.cpp
         src/core/remote/linkimporter.h
+        src/core/remote/fsservermods.cpp
+        src/core/remote/fsservermods.h
         src/core/reversedeployer.cpp
         src/core/reversedeployer.h
         src/core/tag.cpp
@@ -417,6 +419,8 @@ set(PROJECT_SOURCES
         src/ui/fomoddialog.ui
         src/ui/fomodradiobutton.cpp
         src/ui/fomodradiobutton.h
+        src/ui/fsservermodsdialog.cpp
+        src/ui/fsservermodsdialog.h
         src/ui/importfromsteamdialog.cpp
         src/ui/importfromsteamdialog.h
         src/ui/importfromsteamdialog.ui

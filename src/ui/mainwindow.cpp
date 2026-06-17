@@ -1068,6 +1068,9 @@ void MainWindow::setupMenus()
   // fork #232: toggleable modpacks (multiple active at once; union deploys).
   QAction* modpacks_action = tools_menu->addAction(tr("Modpacks..."));
   connect(modpacks_action, &QAction::triggered, this, &MainWindow::onShowModpacks);
+  // fork #241: sync mods from a Farming Simulator dedicated server.
+  QAction* fs_server_action = tools_menu->addAction(tr("Farming Simulator Server Mods..."));
+  connect(fs_server_action, &QAction::triggered, this, &MainWindow::onShowFsServerMods);
   // fork #49: dry-run deployment preview.
   QAction* deploy_preview_action = tools_menu->addAction(tr("Preview Deployment Changes"));
   connect(deploy_preview_action, &QAction::triggered, this, &MainWindow::onShowDeploymentPreview);
@@ -3395,6 +3398,53 @@ void MainWindow::onDuplicateProfileButtonClicked()
   info.source = source;
   // Reuse the standard add-profile path (emits addProfile + refreshes the profile list).
   onProfileAdded(currentApp(), info);
+}
+
+void MainWindow::onShowFsServerMods()
+{
+  if(currentApp() < 0)
+  {
+    QMessageBox::information(
+      this,
+      tr("No application selected"),
+      tr("Add or select a Farming Simulator application first, then sync its server mods."));
+    return;
+  }
+  if(!fs_server_mods_dialog_)
+  {
+    fs_server_mods_dialog_ = std::make_unique<FsServerModsDialog>(this);
+    connect(fs_server_mods_dialog_.get(),
+            &FsServerModsDialog::downloadRequested,
+            this,
+            &MainWindow::onFsServerDownloadRequested);
+  }
+  fs_server_mods_dialog_->show();
+  fs_server_mods_dialog_->raise();
+  fs_server_mods_dialog_->activateWindow();
+}
+
+void MainWindow::onFsServerDownloadRequested(QList<QStringList> mods)
+{
+  if(currentApp() < 0 || mods.isEmpty())
+    return;
+  const bool was_empty = mod_import_queue_.empty();
+  for(const QStringList& mod : mods)
+  {
+    if(mod.size() < 2)
+      continue;
+    ImportModInfo info;
+    info.app_id = currentApp();
+    info.action_type = ImportModInfo::download;
+    info.remote_type = ImportModInfo::local;
+    info.remote_source = mod[1].toStdString();
+    info.remote_download_url = mod[1].toStdString();
+    info.remote_file_name = mod[0].toStdString();
+    info.name_overwrite = mod[0].toStdString();
+    mod_import_queue_.push(info);
+  }
+  setStatusMessage(tr("Queued %1 server mod download(s).").arg(mods.size()));
+  if(was_empty && !mod_import_queue_.empty())
+    importMod();
 }
 
 
