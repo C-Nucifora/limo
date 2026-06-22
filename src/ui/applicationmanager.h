@@ -209,6 +209,18 @@ public:
    * \return Vector of (mod_id, enabled) tuples.
    */
   std::vector<std::tuple<int, bool>> getCliLoadorder(int app_id, int deployer) const;
+  /*!
+   * \brief Returns the modpacks for the given application directly.
+   * \param app_id Target application.
+   * \return Vector of packs, or empty if app_id is invalid.
+   */
+  std::vector<Pack> getCliPacks(int app_id) const;
+  /*!
+   * \brief Returns the names of the currently active modpacks for the given application directly.
+   * \param app_id Target application.
+   * \return Names of active packs, or empty if app_id is invalid.
+   */
+  std::vector<std::string> getCliActivePacks(int app_id) const;
   // ---- End headless CLI helpers ------------------------------------------------
   /*!
    * \brief Enable or disable throwing exceptions.
