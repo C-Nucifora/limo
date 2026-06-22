@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -52,6 +53,34 @@ std::string decrypt(const std::string& cipher_text,
                     const std::string& key,
                     const std::string& nonce,
                     const std::string& tag);
+
+/*!
+ * \brief Encrypts a secret into a single self-describing, persistable token string.
+ *
+ * The secret is encrypted with AES-256-GCM under the per-installation key (the same
+ * "no master password" scheme used for the Nexus API key, see \ref installationKey()).
+ * The returned token bundles the cipher text, nonce and authentication tag in a
+ * versioned, hex-encoded form ("v1:<cipher>:<nonce>:<tag>") so callers can store a
+ * single opaque string (e.g. in a JSON config) instead of three separate binary blobs.
+ *
+ * Use this for at-rest secrets that have no separate master password (repository
+ * credentials, etc.). It replaces reversible base64 "obfuscation": recovering the
+ * plain text now also requires the owner-only installation key file.
+ * \param plain_text Secret to protect.
+ * \return The opaque token to persist.
+ * \throws CryptographyError If encryption fails.
+ */
+std::string encryptToToken(const std::string& plain_text);
+/*!
+ * \brief Recovers a secret previously produced by \ref encryptToToken().
+ *
+ * Decryption never has side effects (it will not generate a new installation key) and
+ * never throws: a malformed, tampered or undecryptable token yields std::nullopt so a
+ * single corrupt entry cannot break loading the rest of a config.
+ * \param token Token produced by \ref encryptToToken().
+ * \return The recovered secret, or std::nullopt if the token is invalid.
+ */
+std::optional<std::string> decryptFromToken(const std::string& token);
 
 /*!
  * \brief Sentinel value passed by callers to indicate that no master password was chosen.
