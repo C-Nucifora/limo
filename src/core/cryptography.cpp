@@ -129,17 +129,57 @@ std::string installationKey()
   return raw;
 }
 
+namespace
+{
 /*!
- * \brief Resolves the key actually used for AES operations.
+ * \brief Fixed application salt and work factor for password-based key derivation.
  *
- * An empty key or the legacy default_key sentinel both mean "no master password set" and are
- * mapped to the per-installation random key (see installationKey()).
+ * SECURITY (fork audit F013): a user-chosen master password used to be byte-repeated straight to a
+ * 32-byte AES key with no key-stretching, so a weak password offered almost no resistance to
+ * brute force. It is now stretched with PBKDF2-HMAC-SHA256.
+ *
+ * The salt is a fixed application constant rather than a per-encryption random value on purpose:
+ * the encrypted blob is stored as just (cipher, nonce, tag) with no room for a salt, and keeping it
+ * fixed means credentials stay portable across machines (see the portable-install feature). The
+ * iteration count is what actually defends a weak password; the residual trade-off (a fixed salt
+ * does not stop cross-machine rainbow tables) is acceptable for a local secret that is also behind
+ * 0600 file permissions. The installation-key path does not use this: that key is already 32 bytes
+ * of full-entropy randomness.
  */
-static std::string resolveKey(const std::string& key)
+constexpr unsigned char kdf_salt[] = { 0x4c, 0x69, 0x6d, 0x6f, 0x4b, 0x44, 0x46, 0x76,
+                                       0x31, 0x9a, 0x3e, 0xc7, 0x05, 0xb8, 0x21, 0x6f };
+constexpr int kdf_iterations = 200000;
+constexpr int aes_key_size = 32;
+
+/*! \brief Derives a 32-byte AES key from a master password using PBKDF2-HMAC-SHA256. */
+std::string deriveKeyFromPassword(const std::string& password)
+{
+  unsigned char out[aes_key_size];
+  if(PKCS5_PBKDF2_HMAC(password.data(),
+                       static_cast<int>(password.size()),
+                       kdf_salt,
+                       static_cast<int>(sizeof(kdf_salt)),
+                       kdf_iterations,
+                       EVP_sha256(),
+                       aes_key_size,
+                       out) != 1)
+    throwError("key derivation");
+  return std::string(reinterpret_cast<const char*>(out), aes_key_size);
+}
+
+/*!
+ * \brief Resolves the 32-byte key actually used for AES operations.
+ *
+ * An empty key or the legacy default_key sentinel both mean "no master password set" and map to
+ * the per-installation random key (already full entropy, used directly). Any other value is a
+ * user-chosen master password and is stretched with PBKDF2 (see \ref deriveKeyFromPassword).
+ */
+std::string resolveKey(const std::string& key)
 {
   if(key.empty() || key == default_key)
     return installationKey();
-  return key;
+  return deriveKeyFromPassword(key);
+}
 }
 
 std::tuple<std::string, std::string, std::string> encrypt(const std::string& plain_text,
@@ -389,6 +429,16 @@ std::string decrypt(const std::string& cipher_text,
     }
     return decryptWithKey(cipher_text, default_key, nonce, tag);
   }
-  return decryptWithKey(cipher_text, key, nonce, tag);
+  // A master password is set: try the current PBKDF2-derived key first, then fall back to the
+  // legacy byte-repeat scheme (fork audit F013) so API keys stored before key-stretching was added
+  // still decrypt. They are re-encrypted under PBKDF2 the next time the key or password changes.
+  try
+  {
+    return decryptWithKey(cipher_text, deriveKeyFromPassword(key), nonce, tag);
+  }
+  catch(const CryptographyError&)
+  {
+    return decryptWithKey(cipher_text, key, nonce, tag);
+  }
 }
 }

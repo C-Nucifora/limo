@@ -50,6 +50,24 @@ TEST_CASE("String are encrypted", "[crypto]")
                     CryptographyError);
 }
 
+TEST_CASE("Master-password encryption stretches the key with PBKDF2", "[crypto]")
+{
+  // fork audit F013: a master password is now run through PBKDF2 instead of being byte-repeated
+  // straight into the AES key. Encryption/decryption must still round-trip with the same password,
+  // and a wrong password must fail.
+  const std::string secret = "my-nexus-api-key-0123456789";
+  const std::string password = "correct horse battery staple";
+
+  const auto [cipher, nonce, tag] = cryptography::encrypt(secret, password);
+  REQUIRE(cipher != secret);
+  REQUIRE(cryptography::decrypt(cipher, password, nonce, tag) == secret);
+  REQUIRE_THROWS_AS(cryptography::decrypt(cipher, password + "x", nonce, tag), CryptographyError);
+
+  // Even a single-character password (very low entropy) must round-trip through the KDF.
+  const auto [c2, n2, t2] = cryptography::encrypt(secret, "x");
+  REQUIRE(cryptography::decrypt(c2, "x", n2, t2) == secret);
+}
+
 TEST_CASE("Secrets round-trip through an opaque encrypted token", "[crypto]")
 {
   // Isolate the per-installation key file in a temp config dir so the token's installation-key
