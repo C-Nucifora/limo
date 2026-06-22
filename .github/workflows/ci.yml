@@ -12,8 +12,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Pin cpr to a tagged release for reproducible, cacheable builds.
-  CPR_REF: "1.14.2"
+  # Pin cpr to an immutable commit SHA rather than a mutable tag (fork audit F092). This is the
+  # commit the 1.14.2 release tag points to; using the SHA prevents a moved/retagged release from
+  # silently changing the built dependency.
+  CPR_REF: "f091b2c061b307ee89b164c39976fc9202a1c79d" # cpr 1.14.2
   CPR_PREFIX: "/tmp/cpr-prefix"
 
 jobs:
@@ -21,7 +23,7 @@ jobs:
     name: Build (Qt6, LOOT/UNRAR off)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install system dependencies
         run: |
@@ -36,15 +38,19 @@ jobs:
       # image. A cache hit skips the clone/configure/build/install below.
       - name: Cache cpr prefix
         id: cache-cpr
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.CPR_PREFIX }}
-          key: cpr-${{ runner.os }}-ubuntu-24.04-${{ env.CPR_REF }}
+          key: cpr-${{ runner.os }}-ubuntu-24.04-gxx14-${{ env.CPR_REF }}
 
       - name: Build and install cpr from source
         if: steps.cache-cpr.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 --branch "$CPR_REF" https://github.com/libcpr/cpr /tmp/cpr
+          # Fetch the pinned commit directly (a SHA cannot be used with --branch).
+          git init /tmp/cpr
+          git -C /tmp/cpr remote add origin https://github.com/libcpr/cpr
+          git -C /tmp/cpr fetch --depth 1 origin "$CPR_REF"
+          git -C /tmp/cpr checkout --detach FETCH_HEAD
           cmake -S /tmp/cpr -B /tmp/cpr/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCPR_USE_SYSTEM_CURL=ON -DCPR_BUILD_TESTS=OFF \
@@ -70,7 +76,7 @@ jobs:
     name: Tests (ctest, LOOT off)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Install system dependencies
         run: |
@@ -84,15 +90,19 @@ jobs:
 
       - name: Cache cpr prefix
         id: cache-cpr
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.CPR_PREFIX }}
-          key: cpr-${{ runner.os }}-ubuntu-24.04-${{ env.CPR_REF }}
+          key: cpr-${{ runner.os }}-ubuntu-24.04-gxx14-${{ env.CPR_REF }}
 
       - name: Build and install cpr from source
         if: steps.cache-cpr.outputs.cache-hit != 'true'
         run: |
-          git clone --depth 1 --branch "$CPR_REF" https://github.com/libcpr/cpr /tmp/cpr
+          # Fetch the pinned commit directly (a SHA cannot be used with --branch).
+          git init /tmp/cpr
+          git -C /tmp/cpr remote add origin https://github.com/libcpr/cpr
+          git -C /tmp/cpr fetch --depth 1 origin "$CPR_REF"
+          git -C /tmp/cpr checkout --detach FETCH_HEAD
           cmake -S /tmp/cpr -B /tmp/cpr/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCPR_USE_SYSTEM_CURL=ON -DCPR_BUILD_TESTS=OFF \
