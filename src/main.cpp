@@ -15,6 +15,14 @@
  */
 
 #include "core/consts.h" // fork #22
+#include "core/deployer.h"
+#include "core/deployerfactory.h"
+#include "core/editapplicationinfo.h"
+#include "core/editdeployerinfo.h"
+#include "core/editprofileinfo.h"
+#include "core/installer.h"
+#include "core/pack.h"
+#include "core/tool.h"
 #include "ui/applicationmanager.h"
 #include "ui/ipcclient.h"
 #include "ui/mainwindow.h"
@@ -33,8 +41,11 @@
 #include <QStyleFactory>
 #include <QTranslator> // fork #22
 #include <algorithm>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <map>
+#include <optional>
 #include <regex>
 #include <string>
 #include <vector>
@@ -222,6 +233,12 @@ int parseId(const std::string& s)
     return -1;
   }
 }
+
+// Forward declarations for the option-parsing helpers (defined alongside the operation
+// subcommands further down) so earlier subcommands such as install can use them too.
+std::optional<std::string> takeOption(std::vector<std::string>& args, const std::string& flag);
+bool takeFlag(std::vector<std::string>& args, const std::string& flag);
+std::vector<int> parseIdList(const std::vector<std::string>& args, std::size_t from);
 
 // ---------------------------------------------------------------------------
 // JSON helpers
@@ -475,9 +492,137 @@ int cmdList(const std::vector<std::string>& sub_args, bool json_out)
       printProfiles(am, app_id);
     return 0;
   }
+  if(what == "tools")
+  {
+    const AppInfo info = am.getCliAppInfo(app_id);
+    if(json_out)
+    {
+      QJsonArray arr;
+      for(int i = 0; const Tool& tool : info.tools)
+      {
+        QJsonObject o;
+        o["id"] = i++;
+        o["name"] = QString::fromStdString(tool.getName());
+        o["command"] = QString::fromStdString(tool.getCommand(false));
+        arr.append(o);
+      }
+      std::cout << qs(QJsonDocument(arr).toJson(QJsonDocument::Indented)) << "\n";
+    }
+    else
+    {
+      for(int i = 0; const Tool& tool : info.tools)
+        std::cout << "[" << i++ << "] " << tool.getName() << "\n      " << tool.getCommand(false)
+                  << "\n";
+    }
+    return 0;
+  }
+  if(what == "tags")
+  {
+    const AppInfo info = am.getCliAppInfo(app_id);
+    if(json_out)
+    {
+      QJsonArray arr;
+      for(const auto& [name, count] : info.num_mods_per_manual_tag)
+      {
+        QJsonObject o;
+        o["name"] = QString::fromStdString(name);
+        o["type"] = "manual";
+        o["num_mods"] = count;
+        arr.append(o);
+      }
+      for(const auto& [name, count] : info.num_mods_per_auto_tag)
+      {
+        QJsonObject o;
+        o["name"] = QString::fromStdString(name);
+        o["type"] = "auto";
+        o["num_mods"] = count;
+        arr.append(o);
+      }
+      std::cout << qs(QJsonDocument(arr).toJson(QJsonDocument::Indented)) << "\n";
+    }
+    else
+    {
+      std::cout << "Manual tags:\n";
+      for(const auto& [name, count] : info.num_mods_per_manual_tag)
+        std::cout << "  " << name << " (" << count << " mod(s))\n";
+      std::cout << "Auto tags:\n";
+      for(const auto& [name, count] : info.num_mods_per_auto_tag)
+        std::cout << "  " << name << " (" << count << " mod(s))\n";
+    }
+    return 0;
+  }
+  if(what == "packs")
+  {
+    const std::vector<Pack> packs = am.getCliPacks(app_id);
+    const std::vector<std::string> active = am.getCliActivePacks(app_id);
+    const auto is_active = [&](const std::string& n)
+    { return std::find(active.begin(), active.end(), n) != active.end(); };
+    if(json_out)
+    {
+      QJsonArray arr;
+      for(const Pack& pack : packs)
+      {
+        QJsonObject o;
+        o["name"] = QString::fromStdString(pack.name);
+        o["notes"] = QString::fromStdString(pack.notes);
+        o["active"] = is_active(pack.name);
+        QJsonArray mods;
+        for(int id : pack.mod_ids)
+          mods.append(id);
+        o["mod_ids"] = mods;
+        arr.append(o);
+      }
+      std::cout << qs(QJsonDocument(arr).toJson(QJsonDocument::Indented)) << "\n";
+    }
+    else
+    {
+      for(const Pack& pack : packs)
+      {
+        std::cout << (is_active(pack.name) ? "[active] " : "[      ] ") << pack.name;
+        if(!pack.notes.empty())
+          std::cout << " - " << pack.notes;
+        std::cout << " (" << pack.mod_ids.size() << " mod(s))\n";
+      }
+    }
+    return 0;
+  }
+  if(what == "loadorder")
+  {
+    if(sub_args.size() < 3)
+      return cliError("Usage: limo list loadorder <app_id> <deployer_id>");
+    const int deployer_id = parseId(sub_args[2]);
+    if(deployer_id < 0)
+      return cliError("deployer_id must be a non-negative integer.");
+    const auto loadorder = am.getCliLoadorder(app_id, deployer_id);
+    // Build an id->name map from the mod info so the load order is human-readable.
+    std::map<int, std::string> names;
+    for(const auto& mi : am.getCliModInfo(app_id))
+      names[mi.mod.id] = mi.mod.name;
+    if(json_out)
+    {
+      QJsonArray arr;
+      for(int pos = 0; const auto& [mod_id, enabled] : loadorder)
+      {
+        QJsonObject o;
+        o["position"] = pos++;
+        o["id"] = mod_id;
+        o["name"] = QString::fromStdString(names.count(mod_id) ? names[mod_id] : "");
+        o["enabled"] = enabled;
+        arr.append(o);
+      }
+      std::cout << qs(QJsonDocument(arr).toJson(QJsonDocument::Indented)) << "\n";
+    }
+    else
+    {
+      for(int pos = 0; const auto& [mod_id, enabled] : loadorder)
+        std::cout << pos++ << ": [" << (enabled ? "x" : " ") << "] " << mod_id << " "
+                  << (names.count(mod_id) ? names[mod_id] : "") << "\n";
+    }
+    return 0;
+  }
 
   std::cerr << "Unknown list target '" << what << "'.\n"
-            << "Valid targets: apps, deployers, mods, profiles\n";
+            << "Valid targets: apps, deployers, mods, profiles, tools, tags, packs, loadorder\n";
   return 1;
 }
 
@@ -486,16 +631,21 @@ int cmdList(const std::vector<std::string>& sub_args, bool json_out)
 // ---------------------------------------------------------------------------
 
 /*!
- * \brief Handles: install <app_id> <archive> [--deployer <id>]
+ * \brief Handles: install <app_id> <archive> [--deployer <id>] [--name N] [--version V]
+ *        [--root-level L]
  * \param sub_args Positional args after "install".
  * \param deployer_id Optional deployer id (-1 = add to all deployers).
  * \return Exit code.
  */
-int cmdInstall(const std::vector<std::string>& sub_args, int deployer_id)
+int cmdInstall(std::vector<std::string> sub_args, int deployer_id)
 {
+  const auto name_opt = takeOption(sub_args, "--name");
+  const auto version_opt = takeOption(sub_args, "--version");
+  const auto root_level_opt = takeOption(sub_args, "--root-level");
   if(sub_args.size() < 2)
   {
-    std::cerr << "Usage: limo install <app_id> <archive> [--deployer <id>]\n";
+    std::cerr << "Usage: limo install <app_id> <archive> [--deployer <id>] [--name N] "
+                 "[--version V] [--root-level L]\n";
     return 1;
   }
 
@@ -520,6 +670,11 @@ int cmdInstall(const std::vector<std::string>& sub_args, int deployer_id)
   info.local_source = archive;
   info.current_path = archive;
   info.installer    = "Simple Installer";
+  // Default the display name to the archive's file-name stem so CLI-installed mods are not nameless.
+  info.name = name_opt.value_or(std::filesystem::path(archive).stem().string());
+  info.version = version_opt.value_or("1.0");
+  info.root_level = root_level_opt ? std::max(0, parseId(*root_level_opt)) : 0;
+  info.installer_flags = Installer::preserve_case | Installer::preserve_directories;
 
   // Determine deployers: either a specific one or all of them.
   if(deployer_id >= 0)
@@ -785,6 +940,560 @@ int cmdStatus(const std::vector<std::string>& sub_args, bool json_out)
 }
 
 // ---------------------------------------------------------------------------
+// Helpers shared by the operation subcommands below
+// ---------------------------------------------------------------------------
+
+/*! \brief Parses a deploy-mode token (hardlink/symlink/copy); std::nullopt if unrecognised. */
+std::optional<Deployer::DeployMode> parseDeployMode(const std::string& s)
+{
+  if(s == "hardlink" || s == "hard" || s == "hard_link")
+    return Deployer::hard_link;
+  if(s == "symlink" || s == "sym" || s == "sym_link")
+    return Deployer::sym_link;
+  if(s == "copy")
+    return Deployer::copy;
+  return std::nullopt;
+}
+
+/*! \brief If \p flag is present in \p args, removes it and the following token and returns it. */
+std::optional<std::string> takeOption(std::vector<std::string>& args, const std::string& flag)
+{
+  for(std::size_t i = 0; i < args.size(); i++)
+  {
+    if(args[i] == flag && i + 1 < args.size())
+    {
+      const std::string value = args[i + 1];
+      args.erase(args.begin() + i, args.begin() + i + 2);
+      return value;
+    }
+  }
+  return std::nullopt;
+}
+
+/*! \brief If \p flag is present in \p args, removes it and returns true. */
+bool takeFlag(std::vector<std::string>& args, const std::string& flag)
+{
+  const auto it = std::find(args.begin(), args.end(), flag);
+  if(it == args.end())
+    return false;
+  args.erase(it);
+  return true;
+}
+
+/*! \brief Parses a trailing list of non-negative ids beginning at index \p from. */
+std::vector<int> parseIdList(const std::vector<std::string>& args, std::size_t from)
+{
+  std::vector<int> ids;
+  for(std::size_t i = from; i < args.size(); i++)
+  {
+    const int v = parseId(args[i]);
+    if(v >= 0)
+      ids.push_back(v);
+  }
+  return ids;
+}
+
+/*!
+ * \brief Constructs and initialises an ApplicationManager and validates \p app_id.
+ * \return true on success; on failure prints an error and returns false.
+ */
+bool cliSetupApp(ApplicationManager& am, int app_id)
+{
+  am.enableExceptions(true);
+  am.init();
+  if(app_id < 0 || app_id >= am.getNumApplications())
+  {
+    cliError("app_id is out of range (have " + std::to_string(am.getNumApplications()) +
+             " application(s)).");
+    return false;
+  }
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommands: applications
+// ---------------------------------------------------------------------------
+
+/*! \brief Handles: add-app <name> --staging <dir> [--command C] [--icon P] [--version V]
+ *         [--steam-id N] */
+int cmdAddApp(std::vector<std::string> args)
+{
+  const auto staging = takeOption(args, "--staging");
+  const auto command = takeOption(args, "--command");
+  const auto icon = takeOption(args, "--icon");
+  const auto version = takeOption(args, "--version");
+  const auto steam_id = takeOption(args, "--steam-id");
+  if(args.empty())
+    return cliError("Usage: limo add-app <name> --staging <dir> [--command C] [--icon P] "
+                    "[--version V] [--steam-id N]");
+  if(!staging)
+    return cliError("add-app requires --staging <dir>.");
+
+  ApplicationManager am;
+  am.enableExceptions(true);
+  am.init();
+
+  EditApplicationInfo info;
+  info.name = args[0];
+  info.staging_dir = *staging;
+  info.command = command.value_or("");
+  info.icon_path = icon.value_or("");
+  info.app_version = version.value_or("");
+  info.steam_app_id = steam_id ? std::stol(*steam_id) : -1;
+  info.move_staging_dir = false;
+  am.addApplication(info);
+  std::cout << "Application '" << info.name << "' added as id " << (am.getNumApplications() - 1)
+            << ".\n";
+  return 0;
+}
+
+/*! \brief Handles: remove-app <app_id> [--cleanup] */
+int cmdRemoveApp(std::vector<std::string> args)
+{
+  const bool cleanup = takeFlag(args, "--cleanup");
+  if(args.empty())
+    return cliError("Usage: limo remove-app <app_id> [--cleanup]");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.removeApplication(app_id, cleanup);
+  std::cout << "Application " << app_id << " removed" << (cleanup ? " (with data cleanup)" : "")
+            << ".\n";
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommands: deployers
+// ---------------------------------------------------------------------------
+
+/*! \brief Handles: add-deployer <app_id> <type> <name> <target_dir> [--mode M] [--source-dir D] */
+int cmdAddDeployer(std::vector<std::string> args)
+{
+  const auto mode = takeOption(args, "--mode");
+  const auto source_dir = takeOption(args, "--source-dir");
+  if(args.size() < 4)
+    return cliError("Usage: limo add-deployer <app_id> <type> <name> <target_dir> "
+                    "[--mode hardlink|symlink|copy] [--source-dir D]");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+
+  EditDeployerInfo info;
+  info.type = args[1];
+  info.name = args[2];
+  info.target_dir = args[3];
+  info.source_dir = source_dir.value_or("");
+  Deployer::DeployMode deploy_mode = Deployer::hard_link;
+  if(mode)
+  {
+    const auto parsed = parseDeployMode(*mode);
+    if(!parsed)
+      return cliError("Unknown deploy mode '" + *mode + "' (use hardlink, symlink or copy).");
+    deploy_mode = *parsed;
+  }
+  info.deploy_mode = deploy_mode;
+  am.addDeployer(app_id, info);
+  std::cout << "Deployer '" << info.name << "' (" << info.type << ") added to application " << app_id
+            << ".\n";
+  return 0;
+}
+
+/*! \brief Handles: remove-deployer <app_id> <deployer_id> [--cleanup] */
+int cmdRemoveDeployer(std::vector<std::string> args)
+{
+  const bool cleanup = takeFlag(args, "--cleanup");
+  if(args.size() < 2)
+    return cliError("Usage: limo remove-deployer <app_id> <deployer_id> [--cleanup]");
+  const int app_id = parseId(args[0]);
+  const int deployer_id = parseId(args[1]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.removeDeployer(app_id, deployer_id, cleanup);
+  std::cout << "Deployer " << deployer_id << " removed from application " << app_id << ".\n";
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommands: profiles
+// ---------------------------------------------------------------------------
+
+/*! \brief Handles: add-profile <app_id> <name> [--version V] [--copy-from <profile_id>] */
+int cmdAddProfile(std::vector<std::string> args)
+{
+  const auto version = takeOption(args, "--version");
+  const auto copy_from = takeOption(args, "--copy-from");
+  if(args.size() < 2)
+    return cliError("Usage: limo add-profile <app_id> <name> [--version V] [--copy-from <id>]");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  EditProfileInfo info;
+  info.name = args[1];
+  info.app_version = version.value_or("");
+  info.source = copy_from ? parseId(*copy_from) : -1;
+  am.addProfile(app_id, info);
+  std::cout << "Profile '" << info.name << "' added to application " << app_id << ".\n";
+  return 0;
+}
+
+/*! \brief Handles: remove-profile <app_id> <profile_id> */
+int cmdRemoveProfile(const std::vector<std::string>& args)
+{
+  if(args.size() < 2)
+    return cliError("Usage: limo remove-profile <app_id> <profile_id>");
+  const int app_id = parseId(args[0]);
+  const int profile_id = parseId(args[1]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.removeProfile(app_id, profile_id);
+  std::cout << "Profile " << profile_id << " removed from application " << app_id << ".\n";
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommands: mod operations
+// ---------------------------------------------------------------------------
+
+/*! \brief Handles: rename-mod <app_id> <mod_id> <new_name> */
+int cmdRenameMod(const std::vector<std::string>& args)
+{
+  if(args.size() < 3)
+    return cliError("Usage: limo rename-mod <app_id> <mod_id> <new_name>");
+  const int app_id = parseId(args[0]);
+  const int mod_id = parseId(args[1]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.changeModName(app_id, mod_id, QString::fromStdString(args[2]));
+  std::cout << "Mod " << mod_id << " renamed to '" << args[2] << "'.\n";
+  return 0;
+}
+
+/*! \brief Handles: set-version <app_id> <mod_id> <version> */
+int cmdSetVersion(const std::vector<std::string>& args)
+{
+  if(args.size() < 3)
+    return cliError("Usage: limo set-version <app_id> <mod_id> <version>");
+  const int app_id = parseId(args[0]);
+  const int mod_id = parseId(args[1]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.changeModVersion(app_id, mod_id, QString::fromStdString(args[2]));
+  std::cout << "Mod " << mod_id << " version set to '" << args[2] << "'.\n";
+  return 0;
+}
+
+/*! \brief Handles: set-update-ignored <app_id> <mod_id> <0|1> */
+int cmdSetUpdateIgnored(const std::vector<std::string>& args)
+{
+  if(args.size() < 3)
+    return cliError("Usage: limo set-update-ignored <app_id> <mod_id> <0|1>");
+  const int app_id = parseId(args[0]);
+  const int mod_id = parseId(args[1]);
+  const bool ignored = args[2] == "1" || args[2] == "true";
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.setUpdateIgnored(app_id, mod_id, ignored);
+  std::cout << "Mod " << mod_id << " update-ignored set to " << (ignored ? "true" : "false")
+            << ".\n";
+  return 0;
+}
+
+/*! \brief Handles: export-mod <app_id> <mod_id> <target_path> */
+int cmdExportMod(const std::vector<std::string>& args)
+{
+  if(args.size() < 3)
+    return cliError("Usage: limo export-mod <app_id> <mod_id> <target_archive_path>");
+  const int app_id = parseId(args[0]);
+  const int mod_id = parseId(args[1]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.exportModArchive(app_id, mod_id, args[2]);
+  std::cout << "Mod " << mod_id << " exported to '" << args[2] << "'.\n";
+  return 0;
+}
+
+/*! \brief Handles: merge <app_id> <target_mod_id> <source_mod_id...> */
+int cmdMerge(const std::vector<std::string>& args)
+{
+  if(args.size() < 3)
+    return cliError("Usage: limo merge <app_id> <target_mod_id> <source_mod_id...>");
+  const int app_id = parseId(args[0]);
+  const int target = parseId(args[1]);
+  const std::vector<int> sources = parseIdList(args, 2);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.mergeMods(app_id, sources, target);
+  std::cout << "Merged " << sources.size() << " mod(s) into mod " << target << ".\n";
+  return 0;
+}
+
+/*! \brief Handles: sort <app_id> <deployer_id> */
+int cmdSort(const std::vector<std::string>& args)
+{
+  if(args.size() < 2)
+    return cliError("Usage: limo sort <app_id> <deployer_id>");
+  const int app_id = parseId(args[0]);
+  const int deployer_id = parseId(args[1]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.sortModsByConflicts(app_id, deployer_id);
+  std::cout << "Sorted mods by conflicts for deployer " << deployer_id << ".\n";
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommands: groups
+// ---------------------------------------------------------------------------
+
+/*! \brief Handles: create-group <app_id> <mod_id_1> <mod_id_2> */
+int cmdCreateGroup(const std::vector<std::string>& args)
+{
+  if(args.size() < 3)
+    return cliError("Usage: limo create-group <app_id> <mod_id_1> <mod_id_2>");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.createGroup(app_id, parseId(args[1]), parseId(args[2]));
+  std::cout << "Grouped mods " << args[1] << " and " << args[2] << ".\n";
+  return 0;
+}
+
+/*! \brief Handles: remove-from-group <app_id> <mod_id> */
+int cmdRemoveFromGroup(const std::vector<std::string>& args)
+{
+  if(args.size() < 2)
+    return cliError("Usage: limo remove-from-group <app_id> <mod_id>");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.removeModFromGroup(app_id, parseId(args[1]));
+  std::cout << "Mod " << args[1] << " removed from its group.\n";
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommands: tags
+// ---------------------------------------------------------------------------
+
+/*! \brief Handles: add-tag <app_id> <name> */
+int cmdAddTag(const std::vector<std::string>& args)
+{
+  if(args.size() < 2)
+    return cliError("Usage: limo add-tag <app_id> <name>");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.addManualTag(app_id, QString::fromStdString(args[1]));
+  std::cout << "Manual tag '" << args[1] << "' added.\n";
+  return 0;
+}
+
+/*! \brief Handles: remove-tag <app_id> <name> */
+int cmdRemoveTag(const std::vector<std::string>& args)
+{
+  if(args.size() < 2)
+    return cliError("Usage: limo remove-tag <app_id> <name>");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.removeManualTag(app_id, QString::fromStdString(args[1]));
+  std::cout << "Manual tag '" << args[1] << "' removed.\n";
+  return 0;
+}
+
+/*! \brief Handles: tag <app_id> <tag_name> <mod_id...> (or untag when \p add is false). */
+int cmdTagMods(const std::vector<std::string>& args, bool add)
+{
+  const std::string verb = add ? "tag" : "untag";
+  if(args.size() < 3)
+    return cliError("Usage: limo " + verb + " <app_id> <tag_name> <mod_id...>");
+  const int app_id = parseId(args[0]);
+  const std::vector<int> mod_ids = parseIdList(args, 2);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  const QStringList tags{ QString::fromStdString(args[1]) };
+  if(add)
+    am.addTagsToMods(app_id, tags, mod_ids);
+  else
+    am.removeTagsFromMods(app_id, tags, mod_ids);
+  std::cout << (add ? "Tagged " : "Untagged ") << mod_ids.size() << " mod(s) with '" << args[1]
+            << "'.\n";
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommands: modpacks
+// ---------------------------------------------------------------------------
+
+/*! \brief Handles: add-pack <app_id> <name> [notes...] */
+int cmdAddPack(const std::vector<std::string>& args)
+{
+  if(args.size() < 2)
+    return cliError("Usage: limo add-pack <app_id> <name> [notes...]");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  std::string notes;
+  for(std::size_t i = 2; i < args.size(); i++)
+    notes += (notes.empty() ? "" : " ") + args[i];
+  am.addPack(app_id, QString::fromStdString(args[1]), QString::fromStdString(notes));
+  std::cout << "Pack '" << args[1] << "' added.\n";
+  return 0;
+}
+
+/*! \brief Handles: remove-pack <app_id> <name> */
+int cmdRemovePack(const std::vector<std::string>& args)
+{
+  if(args.size() < 2)
+    return cliError("Usage: limo remove-pack <app_id> <name>");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.removePack(app_id, QString::fromStdString(args[1]));
+  std::cout << "Pack '" << args[1] << "' removed.\n";
+  return 0;
+}
+
+/*! \brief Handles: rename-pack <app_id> <old_name> <new_name> */
+int cmdRenamePack(const std::vector<std::string>& args)
+{
+  if(args.size() < 3)
+    return cliError("Usage: limo rename-pack <app_id> <old_name> <new_name>");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.renamePack(app_id, QString::fromStdString(args[1]), QString::fromStdString(args[2]));
+  std::cout << "Pack '" << args[1] << "' renamed to '" << args[2] << "'.\n";
+  return 0;
+}
+
+/*! \brief Handles: activate-pack/deactivate-pack <app_id> <name> */
+int cmdSetPackActive(const std::vector<std::string>& args, bool active)
+{
+  const std::string verb = active ? "activate-pack" : "deactivate-pack";
+  if(args.size() < 2)
+    return cliError("Usage: limo " + verb + " <app_id> <name>");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.setPackActive(app_id, QString::fromStdString(args[1]), active);
+  std::cout << "Pack '" << args[1] << "' " << (active ? "activated" : "deactivated") << ".\n";
+  return 0;
+}
+
+/*! \brief Handles: set-pack-mods <app_id> <name> <mod_id...> */
+int cmdSetPackMods(const std::vector<std::string>& args)
+{
+  if(args.size() < 2)
+    return cliError("Usage: limo set-pack-mods <app_id> <name> <mod_id...>");
+  const int app_id = parseId(args[0]);
+  const std::vector<int> mod_ids = parseIdList(args, 2);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  QList<int> qids;
+  for(int id : mod_ids)
+    qids.append(id);
+  am.setPackMods(app_id, QString::fromStdString(args[1]), qids);
+  std::cout << "Pack '" << args[1] << "' now contains " << mod_ids.size() << " mod(s).\n";
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommands: tools
+// ---------------------------------------------------------------------------
+
+/*! \brief Handles: add-tool <app_id> <name> <command...> */
+int cmdAddTool(const std::vector<std::string>& args)
+{
+  if(args.size() < 3)
+    return cliError("Usage: limo add-tool <app_id> <name> <command...>");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  std::string command;
+  for(std::size_t i = 2; i < args.size(); i++)
+    command += (command.empty() ? "" : " ") + args[i];
+  am.addTool(app_id, Tool(args[1], "", command));
+  std::cout << "Tool '" << args[1] << "' added.\n";
+  return 0;
+}
+
+/*! \brief Handles: remove-tool <app_id> <tool_id> */
+int cmdRemoveTool(const std::vector<std::string>& args)
+{
+  if(args.size() < 2)
+    return cliError("Usage: limo remove-tool <app_id> <tool_id>");
+  const int app_id = parseId(args[0]);
+  const int tool_id = parseId(args[1]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.removeTool(app_id, tool_id);
+  std::cout << "Tool " << tool_id << " removed.\n";
+  return 0;
+}
+
+/*! \brief Handles: run-tool <app_id> <tool_id> */
+int cmdRunTool(const std::vector<std::string>& args)
+{
+  if(args.size() < 2)
+    return cliError("Usage: limo run-tool <app_id> <tool_id>");
+  const int app_id = parseId(args[0]);
+  const int tool_id = parseId(args[1]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  const AppInfo info = am.getCliAppInfo(app_id);
+  if(tool_id < 0 || tool_id >= static_cast<int>(info.tools.size()))
+    return cliError("tool_id is out of range (have " + std::to_string(info.tools.size()) +
+                    " tool(s)).");
+  const bool is_flatpak = std::filesystem::exists("/.flatpak-info");
+  const std::string command = info.tools[tool_id].getCommand(is_flatpak);
+  std::cout << "Running tool '" << info.tools[tool_id].getName() << "': " << command << "\n";
+  return std::system(command.c_str()) == 0 ? 0 : 3;
+}
+
+// ---------------------------------------------------------------------------
+// Subcommand: redeploy
+// ---------------------------------------------------------------------------
+
+/*! \brief Handles: redeploy <app_id> (force a purge + redeploy). */
+int cmdRedeploy(const std::vector<std::string>& args)
+{
+  if(args.empty())
+    return cliError("Usage: limo redeploy <app_id>");
+  const int app_id = parseId(args[0]);
+  ApplicationManager am;
+  if(!cliSetupApp(am, app_id))
+    return 1;
+  am.forceRedeployMods(app_id);
+  std::cout << "Mods force-redeployed for application " << app_id << ".\n";
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
 // Subcommand help text
 // ---------------------------------------------------------------------------
 
@@ -801,32 +1510,59 @@ void printCliHelp()
     "  --json                     Machine-readable JSON output for list/status\n"
     "  --help, -h                 Show this help\n"
     "\n"
-    "Subcommands:\n"
-    "  list apps\n"
-    "      List all managed applications.\n"
-    "  list deployers <app_id>\n"
-    "      List deployers for an application.\n"
-    "  list mods <app_id>\n"
-    "      List installed mods for an application.\n"
-    "  list profiles <app_id>\n"
-    "      List profiles for an application.\n"
-    "  install <app_id> <archive> [--deployer <deployer_id>]\n"
-    "      Install a local archive as a mod. Adds to all deployers unless\n"
-    "      --deployer is given.\n"
-    "  uninstall <app_id> <mod_id>\n"
-    "      Uninstall (remove) a mod.\n"
-    "  enable <app_id> <deployer_id> <mod_id>\n"
-    "      Enable a mod in a deployer.\n"
-    "  disable <app_id> <deployer_id> <mod_id>\n"
-    "      Disable a mod in a deployer.\n"
+    "Read / inspect:\n"
+    "  list apps | deployers <app_id> | mods <app_id> | profiles <app_id>\n"
+    "  list tools <app_id> | tags <app_id> | packs <app_id>\n"
+    "  list loadorder <app_id> <deployer_id>\n"
+    "      List managed objects. With --json, output is machine-readable.\n"
+    "  status <app_id>\n"
+    "      Print a summary (profiles, deployers, mod counts).\n"
+    "\n"
+    "Applications:\n"
+    "  add-app <name> --staging <dir> [--command C] [--icon P] [--version V] [--steam-id N]\n"
+    "  remove-app <app_id> [--cleanup]\n"
+    "\n"
+    "Deployers & profiles:\n"
+    "  add-deployer <app_id> <type> <name> <target_dir> [--mode hardlink|symlink|copy] [--source-dir D]\n"
+    "  remove-deployer <app_id> <deployer_id> [--cleanup]\n"
+    "  add-profile <app_id> <name> [--version V] [--copy-from <profile_id>]\n"
+    "  remove-profile <app_id> <profile_id>\n"
     "  set-profile <app_id> <profile_id>\n"
-    "      Switch the active profile.\n"
+    "\n"
+    "Mods:\n"
+    "  install <app_id> <archive> [--deployer <deployer_id>]\n"
+    "  uninstall <app_id> <mod_id>\n"
+    "  enable | disable <app_id> <deployer_id> <mod_id>\n"
+    "  rename-mod <app_id> <mod_id> <new_name>\n"
+    "  set-version <app_id> <mod_id> <version>\n"
+    "  set-update-ignored <app_id> <mod_id> <0|1>\n"
+    "  export-mod <app_id> <mod_id> <target_archive_path>\n"
+    "  merge <app_id> <target_mod_id> <source_mod_id...>\n"
+    "  sort <app_id> <deployer_id>\n"
+    "  create-group <app_id> <mod_id_1> <mod_id_2>\n"
+    "  remove-from-group <app_id> <mod_id>\n"
+    "\n"
+    "Tags:\n"
+    "  add-tag | remove-tag <app_id> <name>\n"
+    "  tag | untag <app_id> <tag_name> <mod_id...>\n"
+    "\n"
+    "Modpacks:\n"
+    "  add-pack <app_id> <name> [notes...] | remove-pack <app_id> <name>\n"
+    "  rename-pack <app_id> <old_name> <new_name>\n"
+    "  activate-pack | deactivate-pack <app_id> <name>\n"
+    "  set-pack-mods <app_id> <name> <mod_id...>\n"
+    "\n"
+    "Tools:\n"
+    "  add-tool <app_id> <name> <command...> | remove-tool <app_id> <tool_id>\n"
+    "  run-tool <app_id> <tool_id>\n"
+    "\n"
+    "Deploy:\n"
     "  deploy <app_id> [profile_id]\n"
     "      Deploy mods, optionally switching to the given profile first.\n"
     "  undeploy <app_id> [profile_id]\n"
     "      Undeploy mods, optionally switching to the given profile first.\n"
-    "  status <app_id>\n"
-    "      Print a summary (profiles, deployers, mod counts).\n"
+    "  redeploy <app_id>\n"
+    "      Force a purge and redeploy.\n"
     "\n"
     "Exit codes: 0=ok  1=usage/arg error  2=another instance running  3=runtime error\n";
 }
@@ -954,8 +1690,16 @@ int main(int argc, char* argv[])
   // entirely without touching Qt widgets.
   // -------------------------------------------------------------------------
   const std::vector<std::string> SUBCOMMANDS = {
-    "list",   "install", "uninstall",   "enable", "disable",
-    "set-profile", "deploy", "undeploy", "status" // fork #207: undeploy
+    "list",        "install",         "uninstall",       "enable",
+    "disable",     "set-profile",     "deploy",          "undeploy",
+    "status",      "redeploy", // fork #207: undeploy
+    "add-app",     "remove-app",      "add-deployer",    "remove-deployer",
+    "add-profile", "remove-profile",  "rename-mod",      "set-version",
+    "set-update-ignored", "export-mod", "merge",         "sort",
+    "create-group", "remove-from-group", "add-tag",      "remove-tag",
+    "tag",         "untag",           "add-pack",        "remove-pack",
+    "rename-pack", "activate-pack",   "deactivate-pack", "set-pack-mods",
+    "add-tool",    "remove-tool",     "run-tool"
   };
 
   bool is_subcommand = !pos_tokens.empty() &&
@@ -1123,6 +1867,62 @@ int main(int argc, char* argv[])
         return cmdUnDeploy(cmd_args);
       if(cmd == "status")
         return cmdStatus(cmd_args, json_out);
+      if(cmd == "redeploy")
+        return cmdRedeploy(cmd_args);
+      if(cmd == "add-app")
+        return cmdAddApp(cmd_args);
+      if(cmd == "remove-app")
+        return cmdRemoveApp(cmd_args);
+      if(cmd == "add-deployer")
+        return cmdAddDeployer(cmd_args);
+      if(cmd == "remove-deployer")
+        return cmdRemoveDeployer(cmd_args);
+      if(cmd == "add-profile")
+        return cmdAddProfile(cmd_args);
+      if(cmd == "remove-profile")
+        return cmdRemoveProfile(cmd_args);
+      if(cmd == "rename-mod")
+        return cmdRenameMod(cmd_args);
+      if(cmd == "set-version")
+        return cmdSetVersion(cmd_args);
+      if(cmd == "set-update-ignored")
+        return cmdSetUpdateIgnored(cmd_args);
+      if(cmd == "export-mod")
+        return cmdExportMod(cmd_args);
+      if(cmd == "merge")
+        return cmdMerge(cmd_args);
+      if(cmd == "sort")
+        return cmdSort(cmd_args);
+      if(cmd == "create-group")
+        return cmdCreateGroup(cmd_args);
+      if(cmd == "remove-from-group")
+        return cmdRemoveFromGroup(cmd_args);
+      if(cmd == "add-tag")
+        return cmdAddTag(cmd_args);
+      if(cmd == "remove-tag")
+        return cmdRemoveTag(cmd_args);
+      if(cmd == "tag")
+        return cmdTagMods(cmd_args, true);
+      if(cmd == "untag")
+        return cmdTagMods(cmd_args, false);
+      if(cmd == "add-pack")
+        return cmdAddPack(cmd_args);
+      if(cmd == "remove-pack")
+        return cmdRemovePack(cmd_args);
+      if(cmd == "rename-pack")
+        return cmdRenamePack(cmd_args);
+      if(cmd == "activate-pack")
+        return cmdSetPackActive(cmd_args, true);
+      if(cmd == "deactivate-pack")
+        return cmdSetPackActive(cmd_args, false);
+      if(cmd == "set-pack-mods")
+        return cmdSetPackMods(cmd_args);
+      if(cmd == "add-tool")
+        return cmdAddTool(cmd_args);
+      if(cmd == "remove-tool")
+        return cmdRemoveTool(cmd_args);
+      if(cmd == "run-tool")
+        return cmdRunTool(cmd_args);
     }
     catch(const std::exception& e)
     {

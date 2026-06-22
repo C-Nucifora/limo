@@ -2082,4 +2082,18 @@ std::vector<std::tuple<int, bool>> ApplicationManager::getCliLoadorder(int app_i
   return result;
 }
 
+std::vector<Pack> ApplicationManager::getCliPacks(int app_id) const
+{
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return {};
+  return apps_[app_id].getPacks();
+}
+
+std::vector<std::string> ApplicationManager::getCliActivePacks(int app_id) const
+{
+  if(app_id < 0 || app_id >= static_cast<int>(apps_.size()))
+    return {};
+  return apps_[app_id].getActivePacks();
+}
+
 // ---- End headless CLI helpers ------------------------------------------------
