@@ -1,6 +1,8 @@
 #include "../src/core/cryptography.h"
 #include "test_utils.h"
 #include <catch2/catch_test_macros.hpp>
+#include <cstdlib>
+#include <filesystem>
 #include <random>
 #include <string>
 
@@ -46,4 +48,48 @@ TEST_CASE("String are encrypted", "[crypto]")
                     CryptographyError);
   REQUIRE_THROWS_AS(cryptography::decrypt(cipher, key, nonce, tag == "a" ? "b" : "a"),
                     CryptographyError);
+}
+
+TEST_CASE("Secrets round-trip through an opaque encrypted token", "[crypto]")
+{
+  // Isolate the per-installation key file in a temp config dir so the token's installation-key
+  // encryption is hermetic and does not touch the developer's real ~/.config/Limo.
+  const std::filesystem::path config_home = DATA_DIR / "crypto_token_cfg";
+  std::filesystem::remove_all(config_home);
+  setenv("XDG_CONFIG_HOME", config_home.c_str(), 1);
+
+  SECTION("Round-trips plain, empty and binary secrets")
+  {
+    std::random_device r;
+    std::default_random_engine e(r());
+    std::vector<std::string> secrets{ "hunter2", "", "p@ss:word:with:colons" };
+    for(int i = 0; i < 10; i++)
+      secrets.push_back(generateRandomString(e));
+
+    for(const std::string& secret : secrets)
+    {
+      const std::string token = cryptography::encryptToToken(secret);
+      // The token is opaque and must not leak the secret verbatim.
+      REQUIRE(token.rfind("v1:", 0) == 0);
+      if(!secret.empty())
+        REQUIRE(token.find(secret) == std::string::npos);
+      const std::optional<std::string> recovered = cryptography::decryptFromToken(token);
+      REQUIRE(recovered.has_value());
+      REQUIRE(*recovered == secret);
+    }
+  }
+
+  SECTION("Malformed or tampered tokens yield nullopt instead of throwing")
+  {
+    REQUIRE_FALSE(cryptography::decryptFromToken("").has_value());
+    REQUIRE_FALSE(cryptography::decryptFromToken("not a token").has_value());
+    REQUIRE_FALSE(cryptography::decryptFromToken("v1:zz:zz:zz").has_value()); // non-hex
+    REQUIRE_FALSE(cryptography::decryptFromToken("v1:aabb:ccdd").has_value()); // too few fields
+    REQUIRE_FALSE(cryptography::decryptFromToken("v2:aa:bb:cc").has_value()); // wrong version
+
+    std::string token = cryptography::encryptToToken("secret");
+    // Flip the last hex nibble of the auth tag: GCM verification must fail -> nullopt.
+    token.back() = (token.back() == 'a' ? 'b' : 'a');
+    REQUIRE_FALSE(cryptography::decryptFromToken(token).has_value());
+  }
 }

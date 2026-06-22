@@ -10,6 +10,10 @@
 
 #include "../core/remote/ommrepository.h"
 #include <QDialog>
+#include <QFutureWatcher>
+#include <QString>
+#include <map>
+#include <optional>
 #include <vector>
 
 
@@ -32,12 +36,13 @@ class RepositoriesDialog;
  * location (QStandardPaths::AppDataLocation), file \c repositories.json.
  *
  * \par Credential storage
- * Passwords are persisted only if the user opted in. They are stored base64
- * encoded (obfuscation, NOT encryption). This is a deliberate, documented
- * limitation: Limo has no per-user secret store wired up for repository
- * credentials, so users who do not want their password on disk should leave it
- * empty and will be prompted (left as a future improvement) or rely on tokens
- * embedded in the URL.
+ * Passwords are persisted only if the user opted in. They are stored AES-256-GCM
+ * encrypted under the per-installation key (cryptography::encryptToToken), the same
+ * "no master password" scheme used for the Nexus API key. Recovering a stored
+ * password therefore requires both this config file and the owner-only installation
+ * key file, not merely a read of the (previously base64-obfuscated) config. Configs
+ * written by older versions, which stored a base64 password, are migrated to the
+ * encrypted form on the next save.
  */
 class RepositoriesDialog : public QDialog
 {
@@ -73,6 +78,12 @@ private slots:
   void onRefreshClicked();
   /*! \brief Resolves the selected package and emits installPackageRequested(). */
   void onInstallClicked();
+  /*! \brief Handles completion of the off-thread package listing. */
+  void onPackagesFetched();
+  /*! \brief Handles completion of the off-thread connect (title lookup) when adding a repo. */
+  void onConnectFetched();
+  /*! \brief Handles completion of the off-thread download-URL resolution for an install. */
+  void onResolveFetched();
 
 private:
   /*! \brief A configured repository plus its credentials. */
@@ -97,8 +108,33 @@ private:
   /*! \brief Packages of the currently selected repository. */
   std::vector<remote::RemotePackage> current_packages_;
 
+  /*! \brief Watches the off-thread package listing (fork audit F080). */
+  QFutureWatcher<std::vector<remote::RemotePackage>> packages_watcher_;
+  /*! \brief Watches the off-thread connect/title lookup when adding a repo. Holds the title if
+   *  the connection succeeded, std::nullopt otherwise. */
+  QFutureWatcher<std::optional<std::string>> connect_watcher_;
+  /*! \brief Watches the off-thread download-URL resolution for an install. */
+  QFutureWatcher<std::optional<std::string>> resolve_watcher_;
+  /*! \brief Cached packages keyed by repository identity (url\nuser) so switching between
+   *  repositories does not re-fetch from the network on every selection change (audit F163). */
+  std::map<QString, std::vector<remote::RemotePackage>> package_cache_;
+  /*! \brief Identity of the repository whose package listing is currently in flight. */
+  QString pending_packages_key_;
+  /*! \brief Whether a busy/override cursor is currently active (keeps the cursor stack balanced). */
+  bool is_busy_ = false;
+  /*! \brief Repository being added while its title lookup is in flight. */
+  RepoConfig pending_add_config_;
+  /*! \brief Partially filled download info awaiting URL resolution. */
+  remote::RemoteDownloadInfo pending_install_info_;
+
   /*! \brief Returns the path of the repositories JSON file. */
   static QString configFilePath();
+  /*! \brief Stable cache/identity key for a repository (url + user). */
+  static QString repoKey(const RepoConfig& config);
+  /*! \brief Toggles the busy/loading state (cursor, button enablement, status text). */
+  void setBusy(bool busy);
+  /*! \brief Fills the package tree widget from current_packages_. */
+  void populatePackageTree();
   /*! \brief Loads repos_ from disk. */
   void loadRepos();
   /*! \brief Saves repos_ to disk. */

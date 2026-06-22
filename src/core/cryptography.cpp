@@ -257,6 +257,99 @@ static std::string decryptWithKey(const std::string& cipher_text,
   return std::string(reinterpret_cast<const char*>(plain_text.data()), plain_text_length);
 }
 
+namespace
+{
+/*! \brief Lower-case hex encodes the given (possibly binary) bytes. */
+std::string toHex(const std::string& bytes)
+{
+  static constexpr char digits[] = "0123456789abcdef";
+  std::string out;
+  out.reserve(bytes.size() * 2);
+  for(unsigned char c : bytes)
+  {
+    out.push_back(digits[c >> 4]);
+    out.push_back(digits[c & 0x0f]);
+  }
+  return out;
+}
+
+/*!
+ * \brief Decodes a lower/upper-case hex string back to raw bytes.
+ * \return The decoded bytes, or std::nullopt if the input is not valid hex.
+ */
+std::optional<std::string> fromHex(const std::string& hex)
+{
+  if(hex.size() % 2 != 0)
+    return std::nullopt;
+  const auto nibble = [](char c) -> int
+  {
+    if(c >= '0' && c <= '9')
+      return c - '0';
+    if(c >= 'a' && c <= 'f')
+      return c - 'a' + 10;
+    if(c >= 'A' && c <= 'F')
+      return c - 'A' + 10;
+    return -1;
+  };
+  std::string out;
+  out.reserve(hex.size() / 2);
+  for(std::size_t i = 0; i < hex.size(); i += 2)
+  {
+    const int hi = nibble(hex[i]);
+    const int lo = nibble(hex[i + 1]);
+    if(hi < 0 || lo < 0)
+      return std::nullopt;
+    out.push_back(static_cast<char>((hi << 4) | lo));
+  }
+  return out;
+}
+}
+
+std::string encryptToToken(const std::string& plain_text)
+{
+  // Encrypt under the per-installation key (the default_key sentinel selects it, mirroring
+  // the Nexus API key's no-master-password path).
+  const auto [cipher, nonce, tag] = encrypt(plain_text, default_key);
+  return "v1:" + toHex(cipher) + ":" + toHex(nonce) + ":" + toHex(tag);
+}
+
+std::optional<std::string> decryptFromToken(const std::string& token)
+{
+  // Expect exactly four colon-separated fields: "v1", cipher_hex, nonce_hex, tag_hex.
+  std::vector<std::string> fields;
+  std::string current;
+  for(char c : token)
+  {
+    if(c == ':')
+    {
+      fields.push_back(current);
+      current.clear();
+    }
+    else
+      current.push_back(c);
+  }
+  fields.push_back(current);
+
+  if(fields.size() != 4 || fields[0] != "v1")
+    return std::nullopt;
+  const std::optional<std::string> cipher = fromHex(fields[1]);
+  const std::optional<std::string> nonce = fromHex(fields[2]);
+  const std::optional<std::string> tag = fromHex(fields[3]);
+  if(!cipher || !nonce || !tag)
+    return std::nullopt;
+
+  try
+  {
+    // default_key selects the per-installation key (with a legacy-key fallback) without
+    // generating one as a side effect; a wrong/tampered token fails the GCM tag check.
+    return decrypt(*cipher, default_key, *nonce, *tag);
+  }
+  catch(const CryptographyError&)
+  {
+    return std::nullopt;
+  }
+}
+
 std::string decrypt(const std::string& cipher_text,
                     const std::string& key,
                     const std::string& nonce,
