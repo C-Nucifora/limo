@@ -4,6 +4,14 @@
  *
  * Integration point for limo-app/limo#60.
  *
+ * \par Status (fork audit F087)
+ * EXPERIMENTAL — not yet wired into the GUI. The Thunderstore, GameBanana and mod.io providers
+ * behind this registry are implemented and exercised by network-free smoke tests
+ * (tests/test_remoteproviders.cpp), but no UI currently lets the user pick a provider and browse
+ * or install from it; the shipped remote flows are Nexus (src/core/nexus/) and OMM repositories
+ * (RepositoriesDialog). Surfacing these providers in a download/import dialog is the remaining
+ * work. Until then treat this registry as a tested-but-unwired building block, not dead code.
+ *
  * Usage example (e.g. from ApplicationManager or a future download dialog):
  * \code
  *   auto& reg = remote::RemoteSourceRegistry::instance();

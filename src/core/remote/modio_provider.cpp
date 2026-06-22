@@ -3,11 +3,14 @@
  * \brief Scaffold implementation of the mod.io provider
  *        (limo-app/limo#60, limo-app/limo#209).
  *
- * Status: SCAFFOLDED — compilable, full HTTP/parse structure in place.
+ * Status: implemented.
  *   search()         — implemented (/v1/games/{id}/mods?_q={query})
  *   getModInfo()     — implemented (/v1/games/{id}/mods/{mod_id})
  *   getFiles()       — implemented (/v1/games/{id}/mods/{mod_id}/files)
- *   getDownloadUrl() — returns public binary_url; OAuth flow is TODO.
+ *   getDownloadUrl() — returns the public binary_url when present, otherwise resolves the
+ *                      authenticated download endpoint with the configured OAuth bearer token
+ *                      (setOAuthToken). A clear error is surfaced when a file requires
+ *                      authentication but no token has been configured (fork audit F086).
  *
  * mod.io API docs: https://docs.mod.io/restapiref
  */
