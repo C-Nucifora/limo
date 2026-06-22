@@ -137,7 +137,6 @@ set(CORE_SOURCES
         src/core/wabbajackmodlist.h
         src/core/compressionerror.h
         src/core/conflictinfo.h
-        src/core/consts.h
         src/core/cryptography.cpp
         src/core/remote/remotesource.h
         src/core/remote/remotesourceregistry.h
@@ -265,6 +264,7 @@ endif()
 
 target_include_directories(core
     PRIVATE ${PROJECT_SOURCE_DIR}/src
+    PUBLIC ${PROJECT_BINARY_DIR}/generated
     PUBLIC ${LibArchive_INCLUDE_DIRS}
     PUBLIC ${LIBLOOT_INCLUDE_DIR}
     PUBLIC ${JSONCPP_INCLUDE_DIRS}
@@ -528,15 +528,21 @@ if(NOT DEFINED LIMO_INSTALL_PREFIX)
   set(LIMO_INSTALL_PREFIX "/usr/local")
 endif()
 
+# Generate consts.h into the build tree (not the source tree) so the generated file is never
+# committed to git and cannot go stale relative to consts.h.in. Both the core library and the
+# Limo executable add ${PROJECT_BINARY_DIR}/generated to their include path, so the canonical
+# include form is "core/consts.h" from anywhere.
 configure_file(src/core/consts.h.in
-               ${PROJECT_SOURCE_DIR}/src/core/consts.h)
+               ${PROJECT_BINARY_DIR}/generated/core/consts.h)
 
 add_executable(Limo
     ${PROJECT_SOURCES}
     ${QSS_RESOURCES}
 )
 
-target_include_directories(Limo PRIVATE ${PROJECT_SOURCE_DIR}/src)
+target_include_directories(Limo
+    PRIVATE ${PROJECT_SOURCE_DIR}/src
+    PRIVATE ${PROJECT_BINARY_DIR}/generated)
 
 target_link_libraries(Limo
     PRIVATE core

@@ -1,5 +1,5 @@
 #include "linkimporter.h"
-#include "../consts.h"
+#include "core/consts.h"
 #include "../log.h"
 #include <algorithm>
 #include <cpr/cpr.h>

@@ -102,3 +102,6 @@ build-repro/
 build-fix/
 build-clean/
 build-qt6/
+
+# Generated at configure time into the build tree (fork audit F088)
+src/core/consts.h
