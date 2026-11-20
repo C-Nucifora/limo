@@ -711,6 +711,8 @@ protected:
    */
   void deployFiles(const std::map<std::filesystem::path, int>& source_files,
                    std::optional<ProgressNode*> progress_node = {}) const;
+  void publishDeployedFile(const std::filesystem::path& source_path,
+                           const std::filesystem::path& dest_path) const;
   /*!
    * \brief Creates a map of currently deployed files to their source mods.
    * \param progress_node Used to inform about the current progress.
@@ -756,6 +758,9 @@ protected:
    */
   void removeManagedDirFile(const std::filesystem::path& directory) const;
   void setLoadorder(Json::Value entry, std::shared_ptr<TreeItem<DeployerEntry>> current);
+  virtual std::filesystem::path sourceForDeployedFile(int mod_id,
+                                                      const std::filesystem::path& path) const;
+
   /*!
    * \brief Checks whether the file currently at the given target path is the one Limo deployed
    * for the given mod. Used to avoid deleting user supplied files during cleanup.

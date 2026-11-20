@@ -54,6 +54,22 @@ std::map<int, unsigned long> Tw3Deployer::deploy(const std::vector<int>& loadord
   return mod_sizes;
 }
 
+sfs::path Tw3Deployer::sourceForDeployedFile(int mod_id, const sfs::path& path) const
+{
+  const auto first = path.begin()->string();
+  const auto separator = first.find('_', 3);
+  if(!first.starts_with("mod") || separator < 7 || separator == std::string::npos ||
+     first.find_first_not_of("0123456789", 3) != separator)
+    return Deployer::sourceForDeployedFile(mod_id, path);
+  const auto suffix = first.substr(separator + 1);
+  const auto root = source_path_ / std::to_string(mod_id);
+  const auto tail = path.lexically_relative(first);
+  if(suffix == std::to_string(mod_id) && sfs::exists(root / tail))
+    return root / tail;
+  const auto folder = pu::pathExists("mod" + suffix, root, true);
+  return root / folder.value_or("mod" + suffix) / tail;
+}
+
 sfs::path Tw3Deployer::rewriteTopLevelModFolder(const sfs::path& relative_path, int index) const
 {
   // Split the relative path into its first component and the remainder.
@@ -194,16 +210,7 @@ void Tw3Deployer::deployFilesWithPathMap(
         (*progress_node)->advance();
       continue;
     }
-    const auto parent_path = dest_path.parent_path();
-    sfs::create_directories(parent_path);
-    removeManagedDirFile(parent_path);
-    sfs::remove(dest_path);
-    if(deploy_mode_ == copy)
-      sfs::copy_file(source_path, dest_path);
-    else if(deploy_mode_ == sym_link)
-      sfs::create_symlink(source_path, dest_path);
-    else
-      sfs::create_hard_link(source_path, dest_path);
+    publishDeployedFile(source_path, dest_path);
 
     if(progress_node)
       (*progress_node)->advance();

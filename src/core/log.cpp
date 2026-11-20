@@ -24,6 +24,17 @@ void recordLogEntry(const std::string& message, Log::LogLevel log_level)
     log_buffer.pop_front();
 }
 
+using Printer = std::function<void(std::string, Log::LogLevel)>;
+std::mutex printer_mutex;
+std::vector<Printer> printers;
+
+Printer getPrinter(int target)
+{
+  std::lock_guard lock(printer_mutex);
+  return target >= 0 && static_cast<std::size_t>(target) < printers.size()
+           ? printers[target] : Printer{};
+}
+
 /*! \brief Guards access to the persistent log file stream. */
 std::mutex log_file_mutex;
 /*! \brief Persistent output stream kept open for the lifetime of the log file. */
@@ -56,9 +67,9 @@ void writeLog(const std::string& message, Log::LogLevel log_level, int target_pr
   // in-app log viewer, regardless of the active log level or printers.
   recordLogEntry(message, log_level);
 
-  if(Log::log_level >= log_level && target_printer >= 0 &&
-     static_cast<std::size_t>(target_printer) < Log::log_printers.size())
-    Log::log_printers[target_printer](message, log_level);
+  if(Log::log_level >= log_level)
+    if(const auto printer = getPrinter(target_printer))
+      printer(message, log_level);
 
   if(Log::log_file_path.empty())
     return;
@@ -82,8 +93,8 @@ void writeLog(const std::string& message, Log::LogLevel log_level, int target_pr
   }
   catch(...)
   {
-    if(target_printer >= 0 && static_cast<std::size_t>(target_printer) < Log::log_printers.size())
-      Log::log_printers[target_printer]("Failed to write to log file!", Log::LOG_DEBUG);
+    if(const auto printer = getPrinter(target_printer))
+      printer("Failed to write to log file!", Log::LOG_DEBUG);
   }
 }
 
@@ -99,6 +110,18 @@ std::string getLogFileName(int log_num)
 
 namespace Log
 {
+void addPrinter(Printer printer)
+{
+  std::lock_guard lock(printer_mutex);
+  printers.push_back(std::move(printer));
+}
+
+void clearPrinters()
+{
+  std::lock_guard lock(printer_mutex);
+  printers.clear();
+}
+
 std::vector<LogEntry> getRecentLogs(LogLevel min_level)
 {
   std::lock_guard<std::mutex> lock(log_buffer_mutex);

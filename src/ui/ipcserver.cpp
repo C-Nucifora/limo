@@ -23,6 +23,10 @@ bool IpcServer::setup()
   {
     // A stale socket left behind by a crashed previous instance prevents listen() from
     // succeeding. Remove it and retry so nxm:// handling does not silently break.
+    QLocalSocket existing;
+    existing.connectToServer(server_name);
+    if(existing.waitForConnected(50))
+      return false;
     QLocalServer::removeServer(server_name);
     started = server_->listen(server_name);
     if(!started)
@@ -59,10 +63,13 @@ void IpcServer::processData()
   auto it = buffers_.find(socket);
   if(it == buffers_.end())
     return;
+  if(socket->bytesAvailable() > max_message_size - it->size())
+  {
+    buffers_.erase(it);
+    socket->abort();
+    return;
+  }
   it->append(socket->readAll());
-  // Guard against a malicious or buggy peer streaming unbounded data into our buffer.
-  if(it->size() > max_message_size)
-    it->truncate(max_message_size);
 }
 
 void IpcServer::finalizeConnection()
@@ -74,9 +81,10 @@ void IpcServer::finalizeConnection()
   if(it != buffers_.end())
   {
     // Drain anything still pending before emitting the reassembled message.
-    it->append(socket->readAll());
-    if(it->size() > max_message_size)
-      it->truncate(max_message_size);
+    if(socket->bytesAvailable() <= max_message_size - it->size())
+      it->append(socket->readAll());
+    else
+      it->clear();
     const QByteArray message = *it;
     buffers_.erase(it);
     if(!message.isEmpty())

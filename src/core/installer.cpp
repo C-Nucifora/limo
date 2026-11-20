@@ -15,6 +15,8 @@
 #include <regex>
 #include <string>
 #include <system_error>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <zlib.h>
 #ifdef LIMO_WITH_UNRAR
 #define _UNIX
@@ -31,14 +33,8 @@ bool Installer::sourceIsArchive(const sfs::path& source_path)
     archive_read_support_filter_all(source);
     archive_read_support_format_all(source);
 
-    if(archive_read_open_filename(source, source_path.c_str(), 10240) != ARCHIVE_OK){
-        return false;
-    }
-    if(archive_read_free(source) != ARCHIVE_OK){
-        return false;
-    }
-
-    return true;
+    const bool opened = archive_read_open_filename(source, source_path.c_str(), 10240) == ARCHIVE_OK;
+    return archive_read_free(source) == ARCHIVE_OK && opened;
 }
 
 void Installer::extract(const sfs::path& source_path,
@@ -62,6 +58,8 @@ void Installer::extract(const sfs::path& source_path,
     extractOmodArchive(source_path, dest_path);
     for(const auto& dir_entry : sfs::recursive_directory_iterator(dest_path))
     {
+      if(dir_entry.is_symlink())
+        continue;
       auto permissions = sfs::perms::owner_read | sfs::perms::owner_write | sfs::perms::group_read |
                          sfs::perms::group_write | sfs::perms::others_read;
       if(dir_entry.is_directory())
@@ -124,6 +122,8 @@ void Installer::extract(const sfs::path& source_path,
   for(const auto& dir_entry :
       sfs::recursive_directory_iterator(dest_path, sfs::directory_options::none))
   {
+    if(dir_entry.is_symlink())
+      continue;
     auto permissions = sfs::perms::owner_read | sfs::perms::owner_write | sfs::perms::group_read |
                        sfs::perms::group_write | sfs::perms::others_read;
     if(dir_entry.is_directory())
@@ -188,7 +188,6 @@ unsigned long Installer::install(const sfs::path& source,
     catch(...)
     {
       sfs::remove_all(tmp_dir);
-      sfs::create_directories(tmp_dir);
       populated_from_cache = false;
     }
   }
@@ -681,122 +680,90 @@ void Installer::extractWithProgress(const sfs::path& source_path,
   log(Log::LOG_DEBUG, "Beginning extraction with progress");
 
   constexpr int buffer_size = 10240;
-  struct archive* source;
-  struct archive* dest;
-  struct archive_entry* entry;
-  int return_code;
-  const char* file_name = source_path.c_str();
-  // Security: reject archive entries that would escape the destination directory (absolute
-  // paths or ".." traversal) or be written through a symlink (zip-slip / symlink attacks).
-  int flags = ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_SECURE_NODOTDOT |
-              ARCHIVE_EXTRACT_SECURE_SYMLINKS | ARCHIVE_EXTRACT_SECURE_NOABSOLUTEPATHS;
-  sfs::path working_dir = "/tmp";
-  try
+  auto openArchive = [&]
   {
-    working_dir = sfs::current_path();
-  }
-  catch(std::filesystem::filesystem_error& error)
-  {}
-  // Restore the working directory on every exit path (including exceptions): the extraction loop
-  // chdir's into dest_path, and a leaked cwd would make later relative-path operations act on the
-  // wrong directory.
-  struct CwdGuard
+    std::unique_ptr<archive, decltype(&archive_read_free)> reader(archive_read_new(),
+                                                                  archive_read_free);
+    if(!reader)
+      throw CompressionError("Could not allocate archive reader.");
+    archive_read_support_format_all(reader.get());
+    archive_read_support_filter_all(reader.get());
+    if(archive_read_open_filename(reader.get(), source_path.c_str(), buffer_size) != ARCHIVE_OK)
+      throwCompressionError(reader.get());
+    return reader;
+  };
+
+  sfs::create_directories(dest_path);
+  const auto root = sfs::canonical(dest_path);
+  const auto entryPath = [&root](const char* raw_path)
   {
-    sfs::path dir;
-    ~CwdGuard()
-    {
-      std::error_code ec;
-      sfs::current_path(dir, ec);
-    }
-  } cwd_guard{ working_dir };
-  if(!sfs::exists(dest_path))
-    sfs::create_directories(dest_path);
-  sfs::current_path(dest_path);
-  source = archive_read_new();
-  archive_read_support_format_all(source);
-  archive_read_support_filter_all(source);
-  dest = archive_write_disk_new();
-  archive_write_disk_set_options(dest, flags);
-  archive_write_disk_set_standard_lookup(dest);
-  if(archive_read_open_filename(source, file_name, buffer_size))
-  {
-    sfs::current_path(working_dir);
-    throw CompressionError("Could not open archive file.");
-  }
-  uint64_t total_size = 0;
-  while(true)
-  {
-    return_code = archive_read_next_header(source, &entry);
-    if(return_code == ARCHIVE_EOF)
-      break;
-    if(return_code < ARCHIVE_OK)
-    {
-      sfs::current_path(working_dir);
-      throwCompressionError(source);
-    }
-    total_size += archive_entry_size(entry);
-  }
+    const sfs::path path(raw_path ? raw_path : "");
+    if(path.empty() || path.is_absolute() ||
+       std::ranges::any_of(path, [](const auto& part) { return part == ".."; }))
+      throw CompressionError("Archive entry is outside the extraction directory.");
+    return (root / path).lexically_normal();
+  };
+  archive_entry* entry = nullptr;
   if(progress_node)
-    (*progress_node)->setTotalSteps(total_size);
-  archive_read_close(source);
-  archive_read_free(source);
-  source = archive_read_new();
-  archive_read_support_format_all(source);
-  archive_read_support_filter_all(source);
-  if(archive_read_open_filename(source, file_name, buffer_size))
   {
-    sfs::current_path(working_dir);
-    throw CompressionError("Could not open archive file.");
+    auto source = openArchive();
+    uint64_t total_size = 0;
+    for(int code; (code = archive_read_next_header(source.get(), &entry)) != ARCHIVE_EOF;)
+    {
+      if(code < ARCHIVE_OK)
+        throwCompressionError(source.get());
+      const auto size = archive_entry_size(entry);
+      if(size > 0)
+        total_size += size;
+    }
+    (*progress_node)->setTotalSteps(total_size);
   }
 
-  while(true)
-  {
-    return_code = archive_read_next_header(source, &entry);
-    if(return_code == ARCHIVE_EOF)
-      break;
-    if(return_code < ARCHIVE_OK)
-    {
-      sfs::current_path(working_dir);
-      throwCompressionError(source);
-    }
-    if(archive_write_header(dest, entry) < ARCHIVE_OK)
-    {
-      sfs::current_path(working_dir);
-      throwCompressionError(dest);
-    }
-    const void* buff;
-    size_t size;
-    int64_t offset;
+  auto source = openArchive();
+  std::unique_ptr<archive, decltype(&archive_write_free)> dest(archive_write_disk_new(),
+                                                               archive_write_free);
+  if(!dest)
+    throw CompressionError("Could not allocate archive writer.");
+  archive_write_disk_set_options(dest.get(), ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_SECURE_NODOTDOT |
+                                            ARCHIVE_EXTRACT_SECURE_SYMLINKS);
+  archive_write_disk_set_standard_lookup(dest.get());
 
-    while(true)
+  std::set<sfs::path> file_paths;
+  for(int code; (code = archive_read_next_header(source.get(), &entry)) != ARCHIVE_EOF;)
+  {
+    if(code < ARCHIVE_OK)
+      throwCompressionError(source.get());
+    const auto path = entryPath(archive_entry_pathname(entry));
+    const auto mode = archive_entry_filetype(entry);
+    if(mode != AE_IFREG && mode != AE_IFDIR && mode != AE_IFLNK && !archive_entry_hardlink(entry))
+      throw CompressionError("Archive contains an unsupported special file.");
+    if(mode == AE_IFDIR && (path == root || path == root / ""))
+      continue;
+    if(mode != AE_IFDIR && !file_paths.insert(path).second)
+      throw CompressionError("Archive contains duplicate file paths.");
+    archive_entry_set_pathname(entry, path.c_str());
+    if(const auto target = archive_entry_hardlink(entry))
+      archive_entry_set_hardlink(entry, entryPath(target).c_str());
+    if(archive_write_header(dest.get(), entry) < ARCHIVE_OK)
+      throwCompressionError(dest.get());
+
+    const void* buffer;
+    size_t size;
+    la_int64_t offset;
+    while((code = archive_read_data_block(source.get(), &buffer, &size, &offset)) != ARCHIVE_EOF)
     {
-      return_code = archive_read_data_block(source, &buff, &size, &offset);
-      if(return_code == ARCHIVE_EOF)
-        break;
-      if(return_code < ARCHIVE_OK)
-      {
-        sfs::current_path(working_dir);
-        throwCompressionError(source);
-      }
-      if(archive_write_data_block(dest, buff, size, offset) != ARCHIVE_OK)
-      {
-        sfs::current_path(working_dir);
-        throwCompressionError(dest);
-      }
+      if(code < ARCHIVE_OK)
+        throwCompressionError(source.get());
+      if(archive_write_data_block(dest.get(), buffer, size, offset) < ARCHIVE_OK)
+        throwCompressionError(dest.get());
       if(progress_node)
         (*progress_node)->advance(size);
     }
-    if(archive_write_finish_entry(dest) < ARCHIVE_OK)
-    {
-      sfs::current_path(working_dir);
-      throwCompressionError(dest);
-    }
+    if(archive_write_finish_entry(dest.get()) < ARCHIVE_OK)
+      throwCompressionError(dest.get());
   }
-  archive_read_close(source);
-  archive_read_free(source);
-  archive_write_close(dest);
-  archive_write_free(dest);
-  sfs::current_path(working_dir);
+  if(archive_write_close(dest.get()) < ARCHIVE_OK)
+    throwCompressionError(dest.get());
 }
 
 #ifdef LIMO_WITH_UNRAR
@@ -804,32 +771,38 @@ void Installer::extractRarArchive(const sfs::path& source_path, const sfs::path&
 {
   log(Log::LOG_DEBUG, "Using fallback rar extraction");
 
-  const auto source_str = source_path.string();
-  const auto dest_str = dest_path.string();
-  char input_path[source_str.size() + 1];
-  for(int i = 0; i < source_str.size(); i++)
-    input_path[i] = source_str[i];
-  input_path[source_str.size()] = '\0';
-  char output_path[dest_str.size() + 1];
-  for(int i = 0; i < dest_str.size(); i++)
-    output_path[i] = dest_str[i];
-  output_path[dest_str.size()] = '\0';
+  auto input_path = source_path.string();
+  auto output_path = dest_path.string();
+  sfs::create_directories(dest_path);
 
-  RAROpenArchiveDataEx archive{ input_path, nullptr, RAR_OM_EXTRACT, 0, nullptr, 0, 0, 0, 0 };
-  HANDLE hArcData = RAROpenArchiveEx(&archive);
-  if(archive.OpenResult != 0)
+  RAROpenArchiveDataEx archive{};
+  archive.ArcName = input_path.data();
+  archive.OpenMode = RAR_OM_EXTRACT;
+  std::unique_ptr<void, decltype(&RARCloseArchive)> handle(RAROpenArchiveEx(&archive),
+                                                           RARCloseArchive);
+  if(archive.OpenResult != 0 || !handle)
     throw CompressionError("Failed to open RAR archive.");
-  auto header_data = std::make_unique<RARHeaderDataEx>();
-  int header_state = RARReadHeaderEx(hArcData, header_data.get());
-  while(header_state == 0)
+
+  std::set<sfs::path> files;
+  auto header = std::make_unique<RARHeaderDataEx>();
+  int status;
+  while((status = RARReadHeaderEx(handle.get(), header.get())) == ERAR_SUCCESS)
   {
-    if(RARProcessFile(hArcData, RAR_EXTRACT, output_path, nullptr) != 0)
+    const std::string raw_name(header->FileName, strnlen(header->FileName, sizeof(header->FileName)));
+    const sfs::path name = pu::normalizePath(raw_name);
+    const auto format = header->FileAttr & S_IFMT;
+    if(name.empty() || name.is_absolute() || raw_name.find(':') != std::string::npos ||
+       std::ranges::any_of(name, [](const auto& part) { return part == ".."; }) ||
+       header->RedirType != 0 ||
+       (header->HostOS == 3 && format != 0 && format != S_IFREG && format != S_IFDIR))
+      throw CompressionError("RAR contains an unsupported path or file type.");
+    if(!(header->Flags & RHDF_DIRECTORY) && !files.insert(name.lexically_normal()).second)
+      throw CompressionError("RAR contains duplicate file paths.");
+    if(RARProcessFile(handle.get(), RAR_EXTRACT, output_path.data(), nullptr) != ERAR_SUCCESS)
       throw CompressionError("Failed to extract RAR archive.");
-    header_state = RARReadHeaderEx(hArcData, header_data.get());
   }
-  if(header_state != ERAR_END_ARCHIVE)
+  if(status != ERAR_END_ARCHIVE)
     throw CompressionError("Failed to extract RAR archive.");
-  RARCloseArchive(hArcData);
 }
 #endif
 
@@ -862,42 +835,14 @@ sfs::path Installer::cacheEntryPath(const std::string& key)
   sfs::path base = sfs::temp_directory_path(ec);
   if(ec)
     base = "/tmp";
-  return base / EXTRACT_CACHE_DIR / key;
-}
-
-void Installer::hardLinkOrCopyTree(const sfs::path& src, const sfs::path& dst)
-{
-  sfs::create_directories(dst);
-  for(const auto& dir_entry : sfs::recursive_directory_iterator(src))
-  {
-    const auto relative = pu::getRelativePath(dir_entry.path(), src);
-    const auto target = dst / relative;
-    if(dir_entry.is_directory())
-    {
-      sfs::create_directories(target);
-    }
-    else if(dir_entry.is_regular_file())
-    {
-      sfs::create_directories(target.parent_path());
-      std::error_code ec;
-      sfs::create_hard_link(dir_entry.path(), target, ec);
-      if(ec)
-      {
-        // Hard links can not cross file system boundaries (and fail for some
-        // file systems); fall back to a plain copy in that case.
-        sfs::copy_file(dir_entry.path(), target, sfs::copy_options::overwrite_existing);
-      }
-    }
-    else
-    {
-      // Symlinks and other special entries: copy verbatim where possible.
-      std::error_code ec;
-      sfs::copy(dir_entry.path(),
-                target,
-                sfs::copy_options::copy_symlinks | sfs::copy_options::overwrite_existing,
-                ec);
-    }
-  }
+  const auto cache = base / ("limo_extract_cache_v2_" + std::to_string(::geteuid()));
+  if(::mkdir(cache.c_str(), 0700) != 0 && errno != EEXIST)
+    throw std::runtime_error("Could not create the extraction cache");
+  struct stat status{};
+  if(::lstat(cache.c_str(), &status) != 0 || !S_ISDIR(status.st_mode) ||
+     status.st_uid != ::geteuid() || (status.st_mode & 0077) != 0)
+    throw std::runtime_error("Extraction cache directory is not private");
+  return cache / key;
 }
 
 bool Installer::populateFromCache(const sfs::path& source, const sfs::path& dest_path)
@@ -924,35 +869,35 @@ bool Installer::populateFromCache(const sfs::path& source, const sfs::path& dest
     return false;
 
   log(Log::LOG_DEBUG, "Populating installation from extraction cache");
-  if(!sfs::exists(dest_path))
-    sfs::create_directories(dest_path);
-  hardLinkOrCopyTree(payload, dest_path);
+  pu::reflinkOrCopy(payload, dest_path);
   return true;
 }
 
 void Installer::storeInCache(const sfs::path& source, const sfs::path& extracted_path)
 {
+  sfs::path pending;
   try
   {
     const auto key = computeCacheKey(source);
     if(!key)
       return;
     const auto entry = cacheEntryPath(*key);
-    const auto marker = entry / CACHE_MARKER_FILE;
-    const auto payload = entry / CACHE_PAYLOAD_DIR;
-
-    // Rebuild the entry from scratch so a partial/stale cache can not be reused.
-    sfs::remove_all(entry);
-    sfs::create_directories(payload);
-    hardLinkOrCopyTree(extracted_path, payload);
-
-    std::ofstream marker_stream(marker, std::ios::trunc);
-    if(marker_stream)
-      marker_stream << *key << "\n";
+    if(pu::exists(entry))
+      return;
+    pending = pu::createTemporaryDirectory(entry.parent_path());
+    pu::reflinkOrCopy(extracted_path, pending / CACHE_PAYLOAD_DIR);
+    std::ofstream marker_stream(pending / CACHE_MARKER_FILE);
+    marker_stream.exceptions(std::ios::failbit | std::ios::badbit);
+    marker_stream << *key << "\n";
+    marker_stream.close();
+    sfs::rename(pending, entry);
     log(Log::LOG_DEBUG, "Stored extraction in cache for future reinstalls");
   }
   catch(...)
   {
+    std::error_code cleanup_error;
+    if(!pending.empty())
+      sfs::remove_all(pending, cleanup_error);
     // Caching is a best-effort optimization; never let it break installation.
     log(Log::LOG_DEBUG, "Failed to store extraction cache (ignored)");
   }

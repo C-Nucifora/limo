@@ -112,6 +112,9 @@ public:
   std::vector<std::string> getMissingFrameworks() const;
 
 private:
+  std::filesystem::path sourceForDeployedFile(int mod_id,
+                                              const std::filesystem::path& path) const override;
+
   /*! \brief Relative directory under which ordering sensitive \c .archive files are placed. */
   static inline const std::filesystem::path ARCHIVE_MOD_DIR = "archive/pc/mod";
   /*! \brief File extension (lower case) of ordering sensitive archive files. */

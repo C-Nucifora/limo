@@ -84,6 +84,9 @@ public:
   using CaseMatchingDeployer::deploy;
 
 private:
+  std::filesystem::path sourceForDeployedFile(int mod_id,
+                                              const std::filesystem::path& path) const override;
+
   /*! \brief Number of digits used for the zero-padded load-order folder prefix. */
   static constexpr int LOAD_ORDER_PREFIX_DIGITS = 4;
 

@@ -1,5 +1,7 @@
 #include "pathutils.h"
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <regex>
 #include <set>
 // For FICLONE reflink support (limo-app/limo#232)
@@ -8,6 +10,7 @@
 #include <fcntl.h>
 #include <linux/fs.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace sfs = std::filesystem;
@@ -101,17 +104,8 @@ std::string getRelativePath(sfs::path target, sfs::path source)
 {
   if(source == target)
     return "";
-  std::string relative_path = target.string();
-  const std::string source_string = source.string();
-  // The prefix shortcut below only produces a correct result when source is an actual
-  // prefix of target. If that precondition does not hold, fall back to the standard
-  // std::filesystem::relative() rather than erasing an arbitrary number of characters.
-  if(!relative_path.starts_with(source_string))
-    return sfs::relative(target, source).string();
-  const bool ends_with_separator =
-    source_string.ends_with(sfs::path::preferred_separator) || source_string.ends_with('/');
-  relative_path.erase(0, source_string.size() + (ends_with_separator ? 0 : 1));
-  return relative_path;
+  const auto relative = target.lexically_relative(source);
+  return relative == "." ? "" : relative.string();
 }
 
 bool directoryIsEmpty(const sfs::path& directory, std::vector<std::string> ignored_files)
@@ -218,43 +212,107 @@ void copyOrMoveFiles(const sfs::path& source, const sfs::path& destination, bool
 
 bool exists(const std::filesystem::path& path)
 {
-  return sfs::status(path).type() != sfs::file_type::not_found;
+  return sfs::exists(sfs::symlink_status(path));
+}
+
+sfs::path createTemporaryDirectory(const sfs::path& parent)
+{
+  std::string pattern = (parent / ".limo-XXXXXX").string();
+  if(!::mkdtemp(pattern.data()))
+    throw sfs::filesystem_error("Could not create temporary directory", parent,
+                                std::error_code(errno, std::generic_category()));
+  return pattern;
+}
+
+TemporaryDirectory::TemporaryDirectory(const sfs::path& parent) :
+  path(createTemporaryDirectory(parent))
+{}
+
+TemporaryDirectory::~TemporaryDirectory()
+{
+  std::error_code error;
+  if(cleanup_)
+    sfs::remove_all(path, error);
+}
+
+void TemporaryDirectory::retain()
+{
+  cleanup_ = false;
+}
+
+void exchangePaths(const sfs::path& first, const sfs::path& second)
+{
+  if(::renameat2(AT_FDCWD, first.c_str(), AT_FDCWD, second.c_str(), RENAME_EXCHANGE) == 0)
+    return;
+  const auto error = std::error_code(errno, std::generic_category());
+  if(error != std::errc::invalid_argument && error != std::errc::function_not_supported &&
+     error != std::errc::operation_not_supported)
+    throw sfs::filesystem_error("Could not exchange paths", first, second, error);
+
+  TemporaryDirectory pending(first.parent_path());
+  const auto held = pending.path / "original";
+  sfs::rename(first, held);
+  bool second_moved = false;
+  try
+  {
+    sfs::rename(second, first);
+    second_moved = true;
+    sfs::rename(held, second);
+  }
+  catch(...)
+  {
+    try
+    {
+      if(second_moved)
+        sfs::rename(first, second);
+      sfs::rename(held, first);
+    }
+    catch(...)
+    {
+      pending.retain();
+      throw std::runtime_error("Could not restore exchanged paths. Recovery data is at " +
+                               pending.path.string());
+    }
+    throw;
+  }
 }
 
 void reflinkOrCopyFile(const sfs::path& source, const sfs::path& dest)
 {
-  // Attempt a reflink (CoW clone) via FICLONE ioctl (limo-app/limo#232).
-  // This is near-instant and uses no extra disk space until the clone is modified.
-  // Supported on btrfs, XFS (≥4.16), bcachefs, and other reflink-capable filesystems.
-  int src_fd = ::open(source.c_str(), O_RDONLY);
-  if(src_fd >= 0)
+  const int src_fd = ::open(source.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK);
+  if(src_fd < 0)
+    throw sfs::filesystem_error("Could not open copy source", source,
+                                std::error_code(errno, std::generic_category()));
+  struct stat status{};
+  if(::fstat(src_fd, &status) != 0 || !S_ISREG(status.st_mode))
   {
-    int dst_fd =
-      ::open(dest.c_str(), O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    if(dst_fd >= 0)
-    {
-      int ret = ::ioctl(dst_fd, FICLONE, src_fd);
-      ::close(src_fd);
-      ::close(dst_fd);
-      if(ret == 0)
-        return; // reflink succeeded
-      // EOPNOTSUPP / ENOTTY: filesystem does not support reflinks
-      // EXDEV: source and destination are on different filesystems
-      // EINVAL: source is not a regular file or other constraint violated
-      // For any of these, fall through to a regular copy below.
-      if(errno != EOPNOTSUPP && errno != ENOTTY && errno != EXDEV && errno != EINVAL)
-        throw std::runtime_error(std::string("reflinkOrCopyFile: ioctl FICLONE failed: ") +
-                                 ::strerror(errno));
-      // Remove the (empty) destination file created above before retrying with copy.
-      sfs::remove(dest);
-    }
-    else
-    {
-      ::close(src_fd);
-    }
+    ::close(src_fd);
+    throw sfs::filesystem_error("Copy source is not a regular file", source,
+                                std::make_error_code(std::errc::invalid_argument));
   }
-  // Fall back to a regular file copy when reflink is unavailable.
-  sfs::copy_file(source, dest, sfs::copy_options::overwrite_existing);
+  const int dst_fd = ::open(dest.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+  if(dst_fd < 0)
+  {
+    const auto error = std::error_code(errno, std::generic_category());
+    ::close(src_fd);
+    throw sfs::filesystem_error("Could not create copy destination", dest, error);
+  }
+  const int cloned = ::ioctl(dst_fd, FICLONE, src_fd);
+  const int clone_error = errno;
+  const int mode_result = cloned == 0 ? ::fchmod(dst_fd, status.st_mode & 0777) : 0;
+  const int mode_error = errno;
+  ::close(src_fd);
+  ::close(dst_fd);
+  if(cloned == 0 && mode_result == 0)
+    return;
+  sfs::remove(dest);
+  if(mode_result != 0 ||
+     (clone_error != EOPNOTSUPP && clone_error != ENOTTY && clone_error != EXDEV &&
+      clone_error != EINVAL && clone_error != ENOSYS))
+    throw sfs::filesystem_error("Could not clone file", source, dest,
+                                std::error_code(mode_result != 0 ? mode_error : clone_error,
+                                                std::generic_category()));
+  sfs::copy_file(source, dest);
 }
 
 void reflinkOrCopy(const sfs::path& source, const sfs::path& dest)
@@ -269,9 +327,12 @@ void reflinkOrCopy(const sfs::path& source, const sfs::path& dest)
   }
   if(sfs::is_directory(source))
   {
-    sfs::create_directories(dest);
+    if(!sfs::create_directory(dest))
+      throw sfs::filesystem_error("Copy destination already exists", dest,
+                                  std::make_error_code(std::errc::file_exists));
     for(const auto& entry : sfs::directory_iterator(source))
       reflinkOrCopy(entry.path(), dest / entry.path().filename());
+    sfs::permissions(dest, sfs::status(source).permissions());
     return;
   }
   // Regular file: attempt reflink, fall back to copy.

@@ -50,7 +50,7 @@ signals:
   /*! \brief Requests cancellation of the item with the given id. */
   void cancelDownload(int id);
   /*! \brief Requests a retry of the item with the given id. */
-  void retryDownload(int id);
+  void retryDownload(int id, bool direct);
   /*! \brief Requests removal of the item with the given id. */
   void removeDownload(int id);
 

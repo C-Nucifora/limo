@@ -1,4 +1,5 @@
 #include "addappdialog.h"
+#include "resourcepaths.h"
 #include "core/autotag.h"
 #include "core/consts.h"
 #include "core/deployerfactory.h"
@@ -196,15 +197,18 @@ bool AddAppDialog::targetDirIsSafe(const sfs::path& target_dir) const
       return false;
   }
   // The target must be lexically contained within one of the known Steam install/prefix
-  // roots. lexically_normal avoids resolving symlinks (the dirs may not exist yet) while
-  // still collapsing any redundant separators.
-  const sfs::path normalized = target_dir.lexically_normal();
+  // roots, including after resolving existing symbolic links.
+  std::error_code error;
+  const auto normalized = sfs::weakly_canonical(target_dir, error);
+  if(error)
+    return false;
   const auto is_within = [&normalized](const QString& root_str)
   {
     if(root_str.isEmpty())
       return false;
-    const sfs::path root = sfs::path(root_str.toStdString()).lexically_normal();
-    if(root.empty())
+    std::error_code error;
+    const auto root = sfs::weakly_canonical(root_str.toStdString(), error);
+    if(error || root.empty())
       return false;
     const sfs::path rel = normalized.lexically_relative(root);
     // lexically_relative yields an empty path when unrelated, and a leading ".." when the
@@ -232,12 +236,7 @@ std::vector<sfs::path> AddAppDialog::gameConfigSearchDirs()
     dirs.push_back(user_dir);
   }
 
-  sfs::path bundled_dir =
-    sfs::path(is_flatpak_ ? "/app" : APP_INSTALL_PREFIX) / "share/limo/steam_app_configs";
-  // Overwrite for local build
-  if(!is_flatpak_ && sfs::exists("steam_app_configs"))
-    bundled_dir = "steam_app_configs";
-  dirs.push_back(bundled_dir);
+  dirs.push_back(limoResourcePath("steam_app_configs"));
 
   return dirs;
 }
@@ -251,16 +250,11 @@ std::optional<sfs::path> findGameConfigFile(const std::string& app_id)
 {
   if(app_id.empty())
     return std::nullopt;
-  const bool is_flatpak = Installer::isAFlatpak();
   std::vector<sfs::path> dirs;
   const QString user_loc = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
   if(!user_loc.isEmpty())
     dirs.push_back(sfs::path(user_loc.toStdString()) / "game_configs");
-  sfs::path bundled_dir =
-    sfs::path(is_flatpak ? "/app" : APP_INSTALL_PREFIX) / "share/limo/steam_app_configs";
-  if(!is_flatpak && sfs::exists("steam_app_configs"))
-    bundled_dir = "steam_app_configs";
-  dirs.push_back(bundled_dir);
+  dirs.push_back(limoResourcePath("steam_app_configs"));
 
   const std::string config_file_name = app_id + ".json";
   std::error_code ec;
@@ -384,6 +378,7 @@ void AddAppDialog::initConfigForApp()
   try
   {
     std::vector<std::string> skipped_unsafe_targets;
+    bool skipped_unavailable_deployers = false;
     for(int i = 0; i < json["deployers"].size(); i++)
     {
       Json::Value deployer = json["deployers"][i];
@@ -404,6 +399,7 @@ void AddAppDialog::initConfigForApp()
       {
         Log::debug(std::format(
           "App config for deployer {} for app {} contains unknown type {}", i, steam_app_id_, type));
+        skipped_unavailable_deployers = true;
         continue;
       }
       info.type = type;
@@ -414,27 +410,13 @@ void AddAppDialog::initConfigForApp()
       target_string.replace("$STEAM_INSTALL_PATH$", steam_install_path_);
       target_string.replace("$STEAM_PREFIX_PATH$", steam_prefix_path_);
       const std::string target_dir = target_string.toStdString();
+      if(!targetDirIsSafe(target_dir))
+      {
+        skipped_unsafe_targets.push_back(target_dir);
+        continue;
+      }
       if(!sfs::exists(target_dir))
       {
-        // A plugin/Loot deployer's target often lives inside the Proton prefix (e.g. ".../Local
-        // Settings/Application Data/<Game>") and is only created once the game has run. Create it
-        // rather than silently dropping the deployer, so imports set up every recommended deployer
-        // (limo-app/limo#224).
-        // Security: the target comes from a (potentially user-supplied/community) game config.
-        // Only create it if it resolves to a location inside the known Steam install/prefix
-        // roots and contains no ".." traversal, so a malicious config can not create
-        // directories at arbitrary filesystem locations.
-        if(!targetDirIsSafe(target_dir))
-        {
-          Log::debug(std::format(
-            "App config for deployer {} for app {} has an unsafe target {} outside the install/"
-            "prefix roots; skipping deployer",
-            i,
-            steam_app_id_,
-            target_dir));
-          skipped_unsafe_targets.push_back(target_dir);
-          continue;
-        }
         std::error_code ec;
         sfs::create_directories(target_dir, ec);
         if(ec)
@@ -496,6 +478,10 @@ void AddAppDialog::initConfigForApp()
     }
     Log::debug(std::format("Found {} deployers", deployers_.size()));
 
+    if(skipped_unavailable_deployers)
+      QMessageBox::warning(this, tr("Unavailable deployers"),
+                           tr("This game preset uses deployers unavailable in this build. "
+                              "Bethesda and OpenMW plugin management require a LOOT-enabled build."));
     if(!skipped_unsafe_targets.empty())
     {
       QString details;
@@ -505,8 +491,7 @@ void AddAppDialog::initConfigForApp()
         this,
         "Skipped deployers",
         QString("Some deployers from the game configuration were skipped because their target "
-                "directory pointed outside the game's install/prefix directories and was not "
-                "created for security reasons:%1")
+                "directory pointed outside the game's install or prefix directories:%1")
           .arg(details));
     }
 

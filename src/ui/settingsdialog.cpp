@@ -168,7 +168,7 @@ void SettingsDialog::on_buttonBox_accepted()
 #endif
 
   Log::log_level = static_cast<Log::LogLevel>(ui->log_level_box->currentIndex() + 2);
-  settings.setValue("log_level", Log::log_level);
+  settings.setValue("log_level", Log::log_level.load());
 
   deploy_all_ = ui->deploy_for_box->currentIndex() == 0;
   settings.setValue("deploy_for_all", deploy_all_);

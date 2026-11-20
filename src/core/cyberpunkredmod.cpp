@@ -1,7 +1,9 @@
 #include "cyberpunkredmod.h"
+#include "pathutils.h"
 #include <algorithm>
 #include <fstream>
 #include <json/json.h>
+#include <set>
 
 namespace sfs = std::filesystem;
 
@@ -179,48 +181,79 @@ void writeLoadOrderFile(const std::vector<std::string>& mod_names_in_order,
     root["mods"].append(entry);
   }
 
-  const sfs::path file_path = mods_dir / REDMOD_LOAD_ORDER_FILE_NAME;
-  std::ofstream file(file_path, std::fstream::binary);
-  if(!file.is_open())
-    throw std::runtime_error("Error: Could not write to \"" + file_path.string() + "\".");
+  const path_utils::TemporaryDirectory pending(mods_dir);
+  const auto file_path = pending.path / REDMOD_LOAD_ORDER_FILE_NAME;
+  std::ofstream file(file_path, std::ios::binary);
+  file.exceptions(std::ios::failbit | std::ios::badbit);
   file << root;
+  file.close();
+  sfs::rename(file_path, mods_dir / REDMOD_LOAD_ORDER_FILE_NAME);
 }
 
 void layoutRedMods(const std::vector<std::pair<int, sfs::path>>& mods_in_load_order,
-                   const sfs::path& game_root)
+                   const sfs::path& game_root,
+                   const std::function<void()>& compile)
 {
-  const sfs::path mods_dir = game_root / REDMOD_MODS_DIR;
-  std::error_code ec;
-  sfs::create_directories(mods_dir, ec);
-
-  std::vector<std::string> ordered_names;
-  ordered_names.reserve(mods_in_load_order.size());
-
-  for(const auto& [id, source_path] : mods_in_load_order)
+  namespace pu = path_utils;
+  const auto mods_dir = game_root / REDMOD_MODS_DIR;
+  if(sfs::is_symlink(sfs::symlink_status(mods_dir)))
+    throw std::runtime_error("REDmod destination is a symbolic link.");
+  sfs::create_directories(mods_dir);
+  pu::TemporaryDirectory pending(mods_dir);
+  const auto staged = pending.path / REDMOD_MODS_DIR;
+  sfs::create_directory(staged);
+  std::vector<std::string> names;
+  std::set<std::string> seen;
+  for(const auto& [id, source] : mods_in_load_order)
   {
-    auto mod = parseRedMod(source_path);
-    // Skip sources that are not valid REDmods rather than aborting the whole
-    // layout; detection already filtered most of these but a caller may pass an
-    // arbitrary path.
+    const auto mod = parseRedMod(source);
     if(!mod)
       continue;
-
-    const sfs::path dest = mods_dir / mod->name;
-    // Remove any previous deployment of this mod so stale files do not linger.
-    sfs::remove_all(dest, ec);
-    // TODO(cp-redmod): This copies the whole mod folder. Consider hard-linking for
-    // large archive mods, mirroring Deployer::hard_link mode, once validated.
-    // Copy symlinks as links rather than following them, so a malicious mod cannot
-    // use a symlink to read or overwrite files outside the destination.
-    sfs::copy(source_path,
-              dest,
-              sfs::copy_options::recursive | sfs::copy_options::overwrite_existing |
-                sfs::copy_options::copy_symlinks);
-
-    ordered_names.push_back(mod->name);
+    if(mod->name == REDMOD_LOAD_ORDER_FILE_NAME || !seen.insert(mod->name).second)
+      throw std::runtime_error("Conflicting REDmod folder name: " + mod->name);
+    pu::reflinkOrCopy(source, staged / mod->name);
+    names.push_back(mod->name);
   }
+  writeLoadOrderFile(names, pending.path);
+  names.emplace_back(REDMOD_LOAD_ORDER_FILE_NAME);
 
-  writeLoadOrderFile(ordered_names, game_root);
+  std::vector<bool> had_original;
+  had_original.reserve(names.size());
+  try
+  {
+    for(const auto& name : names)
+    {
+      const bool exists = pu::exists(mods_dir / name);
+      if(exists)
+        pu::exchangePaths(staged / name, mods_dir / name);
+      else
+        sfs::rename(staged / name, mods_dir / name);
+      had_original.push_back(exists);
+    }
+    if(compile)
+      compile();
+  }
+  catch(...)
+  {
+    try
+    {
+      for(auto count = had_original.size(); count > 0; count--)
+      {
+        const auto& name = names[count - 1];
+        if(had_original[count - 1])
+          pu::exchangePaths(staged / name, mods_dir / name);
+        else
+          sfs::rename(mods_dir / name, staged / name);
+      }
+    }
+    catch(...)
+    {
+      pending.retain();
+      throw std::runtime_error("Could not restore the REDmod layout. Recovery data is at " +
+                               pending.path.string());
+    }
+    throw;
+  }
 }
 
 std::string redmodDeployCommand(const sfs::path& game_root,

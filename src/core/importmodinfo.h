@@ -40,9 +40,11 @@ struct ImportModInfo
   };
 
   /*! \brief Target ModdedApplication */
-  int app_id;
+  int app_id = -1;
   /*! \brief ActionType of action to be performed. */
-  ActionType action_type;
+  ActionType action_type = extract;
+  int retry_download_id = -1;
+  bool enabled = true;
   /*! \brief Path to the local file used for extraction or empty if type == download. */
   std::filesystem::path local_source;
   /*! \brief Type of remote this mod was retreived from. */

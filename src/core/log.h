@@ -5,6 +5,7 @@
 #pragma once
 
 #include <chrono>
+#include <atomic>
 #include <filesystem>
 #include <functional>
 #include <string>
@@ -29,9 +30,10 @@ enum LogLevel
  * \brief Current log level. Messages with a log level less important than
  * this will be ignored.
  */
-inline LogLevel log_level = LOG_INFO;
+inline std::atomic<LogLevel> log_level{ LOG_INFO };
 /*! \brief Callback function used to output log messages. */
-inline std::vector<std::function<void(std::string, LogLevel)>> log_printers;
+void addPrinter(std::function<void(std::string, LogLevel)> printer);
+void clearPrinters();
 /*! \brief Directory to which log files should be written. Empty string means no log files. */
 inline std::filesystem::path log_dir = "";
 /*! \brief Path to a log file. If this is != "" and exists, the log will be appended to that file. */

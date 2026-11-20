@@ -105,7 +105,8 @@ public:
                     std::string name = "",
                     std::string command = "",
                     std::filesystem::path icon_path = "",
-                    std::string app_version = "");
+                    std::string app_version = "",
+                    long steam_app_id = -1);
 
   /*! \brief Name of the file used to store this objects internal state. */
   inline static const std::string CONFIG_FILE_NAME = "lmm_mods.json";
@@ -1042,13 +1043,10 @@ public:
    */
   std::string getCyberpunkSetupInfo(int deployer);
   /*!
-   * \brief Lays out the enabled REDmods of the given deployer into the game's mods directory
-   * and returns the shell command that runs redMod.exe deploy under Proton.
-   * \param deployer Target deployer (should be a Cyberpunk 2077 deployer).
-   * \return The deploy command, or an empty string if no REDmods were found among the enabled
-   * mods.
+   * \brief Publishes the enabled REDmods and runs the supplied compiler.
+   * \return True if REDmods were deployed.
    */
-  std::string buildRedmodDeployCommand(int deployer);
+  bool deployRedmods(int deployer, const std::function<void(const std::string&)>& compile);
 
   /*! \brief Name of the config file contained in an exported instance bundle. */
   inline static const std::string INSTANCE_BUNDLE_FILE_NAME = "limo_instance.json";

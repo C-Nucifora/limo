@@ -106,8 +106,6 @@ void BackupManager::removeBackup(int target_id, int backup_id, bool update_dirs)
 
   if(target.active_members[cur_profile_] == backup_id)
     setActiveBackup(target_id, backup_id == 0 ? 1 : 0);
-  for(int prof = 0; prof < num_profiles_; prof++)
-    target.active_members[prof] = 0;
   sfs::path backup_path = getBackupPath(target.path, backup_id);
   sfs::remove_all(backup_path);
   for(int i = backup_id + 1; i < target.backup_names.size(); i++)
@@ -117,6 +115,13 @@ void BackupManager::removeBackup(int target_id, int backup_id, bool update_dirs)
       sfs::rename(cur_path, getBackupPath(target.path, i - 1));
   }
   target.backup_names.erase(target.backup_names.begin() + backup_id);
+  for(auto& member : target.active_members)
+  {
+    if(member == backup_id)
+      member = 0;
+    else if(member > backup_id)
+      member--;
+  }
   if(update_dirs)
     updateSettings();
 }
@@ -130,28 +135,32 @@ void BackupManager::setActiveBackup(int target_id, int backup_id)
   if(backup_id < 0 || backup_id >= target.backup_names.size())
     throw std::runtime_error(
       std::format("Invalid backup id: {} for target: \"{}\"", backup_id, target.target_name));
-  int active_id = target.active_members[cur_profile_];
-  if(backup_id == active_id)
+  swapActiveBackup(target, target.active_members[cur_profile_], backup_id);
+  target.active_members[cur_profile_] = backup_id;
+  updateSettings();
+}
+
+void BackupManager::swapActiveBackup(const BackupTarget& target, int active_id, int backup_id)
+{
+  if(active_id == backup_id)
     return;
   const sfs::path saved_active_path = getBackupPath(target.path, active_id);
   const sfs::path new_active_path = getBackupPath(target.path, backup_id);
   if(!sfs::exists(new_active_path))
     throw std::runtime_error(std::format(
       "Backup \"{}\" for target \"{}\" does not exist.", backup_id, target.target_name));
-  sfs::rename(target.path, saved_active_path);
+  if(pu::exists(saved_active_path))
+    throw std::runtime_error("Backup already exists at " + saved_active_path.string());
+  pu::exchangePaths(target.path, new_active_path);
   try
   {
-    sfs::rename(new_active_path, target.path);
+    sfs::rename(new_active_path, saved_active_path);
   }
   catch(...)
   {
-    // Roll back the first rename so the live target is never left missing.
-    sfs::rename(saved_active_path, target.path);
+    pu::exchangePaths(target.path, new_active_path);
     throw;
   }
-  target.active_members[cur_profile_] = backup_id;
-  target.cur_active_member = backup_id;
-  updateSettings();
 }
 
 void BackupManager::setProfile(int profile)
@@ -165,27 +174,36 @@ void BackupManager::setProfile(int profile)
                   profile,
                   num_profiles_));
 
-  for(size_t target_id = 0; target_id < targets_.size(); target_id++)
+  size_t switched = 0;
+  try
   {
-    auto& target = targets_[target_id];
-    int old_id = target.active_members[cur_profile_];
-    int new_id = target.active_members[profile];
-    if(old_id == new_id)
-      continue;
-    setActiveBackup(target_id, new_id);
-    target.active_members[cur_profile_] = old_id;
+    for(const auto& target : targets_)
+    {
+      swapActiveBackup(target, target.active_members[cur_profile_], target.active_members[profile]);
+      switched++;
+    }
+  }
+  catch(...)
+  {
+    while(switched > 0)
+    {
+      const auto& target = targets_[--switched];
+      swapActiveBackup(target, target.active_members[profile], target.active_members[cur_profile_]);
+    }
+    throw;
   }
   cur_profile_ = profile;
 }
 
 void BackupManager::addProfile(int source)
 {
+  const bool copy_profile = source >= 0 && source < num_profiles_;
   num_profiles_++;
   if(cur_profile_ < 0 || cur_profile_ >= num_profiles_)
     cur_profile_ = 0;
   for(auto& target : targets_)
   {
-    int active_id = source >= 0 && source < num_profiles_ ? target.active_members[source] : 0;
+    int active_id = copy_profile ? target.active_members[source] : 0;
     target.active_members.push_back(active_id);
   }
   updateSettings();
@@ -257,10 +275,13 @@ void BackupManager::overwriteBackup(int target_id, int source_backup, int dest_b
     return;
   const auto source_path = getBackupPath(target_id, source_backup);
   const auto dest_path = getBackupPath(target_id, dest_backup);
-  sfs::remove_all(dest_path);
-  // Use reflink (CoW clone) where the filesystem supports it, falling back to a regular
-  // recursive copy otherwise (limo-app/limo#232).
-  pu::reflinkOrCopy(source_path, dest_path);
+  const pu::TemporaryDirectory temp(dest_path.parent_path());
+  const auto replacement = temp.path / "backup";
+  pu::reflinkOrCopy(source_path, replacement);
+  if(pu::exists(dest_path))
+    pu::exchangePaths(replacement, dest_path);
+  else
+    sfs::rename(replacement, dest_path);
 }
 
 void BackupManager::setLog(const std::function<void(Log::LogLevel, const std::string&)>& new_log)
@@ -399,11 +420,13 @@ void BackupManager::updateSettings()
 
 void BackupManager::writeSettings(const sfs::path& path, const Json::Value& settings) const
 {
-  std::ofstream file(path, std::fstream::binary);
-  if(!file.is_open())
-    throw std::runtime_error("Error: Could not write to \"" + path.string() + "\".");
+  const pu::TemporaryDirectory temp(path.parent_path());
+  const auto pending = temp.path / "settings.json";
+  std::ofstream file(pending, std::fstream::binary);
+  file.exceptions(std::ios::failbit | std::ios::badbit);
   file << settings;
   file.close();
+  sfs::rename(pending, path);
 }
 
 Json::Value BackupManager::readSettings(const sfs::path& path) const

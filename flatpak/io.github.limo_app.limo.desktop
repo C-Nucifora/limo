@@ -1,10 +1,12 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Comment=Mod manager with LOOT integration
+Comment=Install and deploy game mods
 Name=Limo
 Categories=Utility;FileTools;
 Icon=io.github.limo_app.limo
 MimeType=x-scheme-handler/nxm;
 Exec=limo %u
 Terminal=false
+StartupWMClass=Limo
+Keywords=mods;modding;games;

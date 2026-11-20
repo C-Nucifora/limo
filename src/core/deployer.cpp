@@ -16,6 +16,26 @@ namespace sfs = std::filesystem;
 namespace pu = path_utils;
 
 
+namespace
+{
+void validateDeploymentPath(const sfs::path& root, const sfs::path& relative)
+{
+  if(relative.empty() || relative.native().find('\0') != std::string::npos ||
+     relative.is_absolute() || relative.lexically_normal() != relative ||
+     relative == "." ||
+     std::ranges::any_of(relative, [](const auto& part) { return part == ".."; }))
+    throw std::runtime_error("Invalid deployed path: " + relative.string());
+
+  auto parent = root;
+  for(const auto& part : relative.parent_path())
+  {
+    parent /= part;
+    if(sfs::is_symlink(sfs::symlink_status(parent)))
+      throw std::runtime_error("A deployment directory is a symbolic link: " + parent.string());
+  }
+}
+}
+
 Deployer::Deployer(const sfs::path& source_path,
                    const sfs::path& dest_path,
                    const std::string& name,
@@ -617,6 +637,11 @@ Deployer::getDeploymentSourceFilesAndModSizes(const std::vector<int>& loadorder)
 void Deployer::backupOrRestoreFiles(const std::map<sfs::path, int>& source_files,
                                     const std::map<sfs::path, int>& dest_files) const
 {
+  for(const auto& [path, id] : source_files)
+    validateDeploymentPath(dest_path_, path);
+  for(const auto& [path, id] : dest_files)
+    validateDeploymentPath(dest_path_, path);
+
   std::map<sfs::path, int> restore_targets;
   std::map<sfs::path, int> backup_targets;
   std::set_difference(dest_files.begin(),
@@ -636,9 +661,15 @@ void Deployer::backupOrRestoreFiles(const std::map<sfs::path, int>& source_files
   for(const auto& [path, id] : restore_targets)
   {
     sfs::path absolute_path = dest_path_ / path;
-    if(!pu::exists(absolute_path))
+    const sfs::path backup_name = absolute_path.string() + backup_extension_;
+    const auto status = sfs::symlink_status(absolute_path);
+    if(!sfs::exists(status))
+    {
+      if(pu::exists(backup_name))
+        sfs::rename(backup_name, absolute_path);
       continue;
-    if(sfs::is_directory(absolute_path))
+    }
+    if(sfs::is_directory(status))
     {
       restore_directories[path] = id;
       continue;
@@ -655,7 +686,6 @@ void Deployer::backupOrRestoreFiles(const std::map<sfs::path, int>& source_files
                        absolute_path.string()));
       continue;
     }
-    sfs::path backup_name = absolute_path.string() + backup_extension_;
     // Restore atomically: when a backup exists, rename overwrites the deployed file in one step so
     // an I/O failure can't leave the target missing. Only plainly remove the deployed file when
     // there is no backup (it was added by a mod rather than backed up from the game).
@@ -677,8 +707,14 @@ void Deployer::backupOrRestoreFiles(const std::map<sfs::path, int>& source_files
   {
     sfs::path absolute_path = dest_path_ / path;
     sfs::path backup_name = absolute_path.string() + backup_extension_;
-    if(pu::exists(absolute_path) && !sfs::is_directory(absolute_path))
-      sfs::rename(absolute_path, backup_name);
+    const auto status = sfs::symlink_status(absolute_path);
+    if(sfs::exists(status) && !sfs::is_directory(status) && !pu::exists(backup_name))
+    {
+      const pu::TemporaryDirectory pending(absolute_path.parent_path());
+      const auto backup = pending.path / "backup";
+      pu::reflinkOrCopy(absolute_path, backup);
+      sfs::rename(backup, backup_name);
+    }
   }
 }
 
@@ -704,50 +740,48 @@ void Deployer::deployFiles(const std::map<sfs::path, int>& source_files,
         (*progress_node)->advance();
       continue;
     }
-    const auto parent_path = dest_path.parent_path();
-    sfs::create_directories(parent_path);
-    removeManagedDirFile(parent_path);
-    // Build the new link/copy under a temporary name in the same directory, then atomically rename
-    // it over dest_path. sfs::rename replaces the existing target on a single filesystem, so an
-    // interrupted deploy never leaves the target absent (limo-app/limo audit F125).
-    const sfs::path temp_path =
-      parent_path / (dest_path.filename().string() + ".limo_deploy_tmp");
-    sfs::remove(temp_path);
-    try
-    {
-      if(deploy_mode_ == copy)
-        sfs::copy_file(source_path, temp_path);
-      else if(deploy_mode_ == sym_link)
-        sfs::create_symlink(source_path, temp_path);
-      else
-        sfs::create_hard_link(source_path, temp_path);
-      sfs::rename(temp_path, dest_path);
-    }
-    catch(const sfs::filesystem_error& e)
-    {
-      // Drop the partial temporary so a failed deploy does not leave stray files behind. The
-      // original dest_path is untouched because the rename never completed.
-      std::error_code temp_ec;
-      sfs::remove(temp_path, temp_ec);
-      // Hard links can't span filesystems; under Flatpak the sandbox can also place the staging and
-      // target dirs on different mounts. Give actionable guidance instead of the raw errno
-      // (limo-app/limo#13, #143).
-      if(deploy_mode_ == hard_link && e.code() == std::errc::cross_device_link)
-        throw std::runtime_error(std::format(
-          "Deployer '{}': cannot hard link onto the target because the staging directory and the "
-          "game directory are on different filesystems (or separated by the Flatpak sandbox). Use "
-          "the 'Sym Link' or 'Copy' deploy mode, move the staging directory onto the same filesystem "
-          "as the game, or grant Limo access to both locations (e.g. via Flatseal). Affected file: "
-          "'{}' -> '{}'.",
-          name_,
-          source_path.string(),
-          dest_path.string()));
-      throw;
-    }
+    publishDeployedFile(source_path, dest_path);
 
     if(progress_node)
       (*progress_node)->advance();
   }
+}
+
+void Deployer::publishDeployedFile(const sfs::path& source_path, const sfs::path& dest_path) const
+{
+  const auto parent_path = dest_path.parent_path();
+  sfs::create_directories(parent_path);
+  removeManagedDirFile(parent_path);
+  const pu::TemporaryDirectory pending(parent_path);
+  const auto temp_path = pending.path / "file";
+  try
+  {
+    if(deploy_mode_ == copy)
+      sfs::copy_file(source_path, temp_path);
+    else if(deploy_mode_ == sym_link)
+      sfs::create_symlink(source_path, temp_path);
+    else
+      sfs::create_hard_link(source_path, temp_path);
+    sfs::rename(temp_path, dest_path);
+  }
+  catch(const sfs::filesystem_error& e)
+  {
+    // Hard links can't span filesystems; under Flatpak the sandbox can also place the staging and
+    // target dirs on different mounts. Give actionable guidance instead of the raw errno
+    // (limo-app/limo#13, #143).
+    if(deploy_mode_ == hard_link && e.code() == std::errc::cross_device_link)
+      throw std::runtime_error(std::format(
+        "Deployer '{}': cannot hard link onto the target because the staging directory and the "
+        "game directory are on different filesystems (or separated by the Flatpak sandbox). Use "
+        "the 'Sym Link' or 'Copy' deploy mode, move the staging directory onto the same filesystem "
+        "as the game, or grant Limo access to both locations (e.g. via Flatseal). Affected file: "
+        "'{}' -> '{}'.",
+        name_,
+        source_path.string(),
+        dest_path.string()));
+    throw;
+  }
+
 }
 
 std::map<sfs::path, int> Deployer::loadDeployedFiles(std::optional<ProgressNode*> progress_node,
@@ -774,19 +808,11 @@ std::map<sfs::path, int> Deployer::loadDeployedFiles(std::optional<ProgressNode*
   }
   catch(const std::exception& e)
   {
-    log_(Log::LOG_ERROR,
-         std::format("Deployer '{}': Failed to parse deployed files record '{}': {}",
-                     name_,
-                     deployed_files_path.string(),
-                     e.what()));
-    return deployed_files;
+    throw std::runtime_error("Could not parse deployed files record " +
+                             deployed_files_path.string() + ": " + e.what());
   }
-  if(!json_object["files"].isArray())
-  {
-    if(progress_node)
-      (*progress_node)->child(0).advance();
-    return deployed_files;
-  }
+  if(!json_object["files"].isArray() && !json_object["files"].isNull())
+    throw std::runtime_error("Invalid deployed files record: " + deployed_files_path.string());
   if(progress_node)
   {
     (*progress_node)->child(0).advance();
@@ -795,9 +821,12 @@ std::map<sfs::path, int> Deployer::loadDeployedFiles(std::optional<ProgressNode*
   for(Json::ArrayIndex i = 0; i < json_object["files"].size(); i++)
   {
     const Json::Value& entry = json_object["files"][i];
-    if(entry.isMember("path") && entry["path"].isString() && entry.isMember("mod_id") &&
-       entry["mod_id"].isInt())
-      deployed_files[entry["path"].asString()] = entry["mod_id"].asInt();
+    if(!entry.isObject() || !entry["path"].isString() || !entry["mod_id"].isInt())
+      throw std::runtime_error("Invalid entry in " + deployed_files_path.string());
+    const sfs::path path = entry["path"].asString();
+    validateDeploymentPath(dest_path, path);
+    if(!deployed_files.emplace(path, entry["mod_id"].asInt()).second)
+      throw std::runtime_error("Duplicate entry in " + deployed_files_path.string());
     if(progress_node)
       (*progress_node)->child(1).advance();
   }
@@ -814,10 +843,12 @@ void Deployer::saveDeployedFiles(const std::map<sfs::path, int>& deployed_files,
     (*progress_node)->child(1).setTotalSteps(1);
   }
   sfs::path deployed_files_path = dest_path_ / deployed_files_name_;
-  std::ofstream file(deployed_files_path, std::fstream::binary);
-  if(!file.is_open())
-    throw std::runtime_error("Could not write \"" + deployed_files_path.string() + "\"");
+  const pu::TemporaryDirectory pending(dest_path_);
+  const auto temp_path = pending.path / "manifest";
+  std::ofstream file(temp_path, std::fstream::binary);
+  file.exceptions(std::ios::failbit | std::ios::badbit);
   Json::Value json_object;
+  json_object["files"] = Json::Value(Json::arrayValue);
   int i = 0;
   for(auto const& [path, id] : deployed_files)
   {
@@ -829,6 +860,7 @@ void Deployer::saveDeployedFiles(const std::map<sfs::path, int>& deployed_files,
   }
   file << json_object;
   file.close();
+  sfs::rename(temp_path, deployed_files_path);
   if(progress_node)
     (*progress_node)->child(1).advance();
 }
@@ -1010,7 +1042,7 @@ std::vector<std::pair<sfs::path, int>> Deployer::getExternallyModifiedFiles(
   for(const auto& [path, mod_id] : deployed_files)
   {
     const auto target_path = dest_path_ / path;
-    const auto mod_file_path = source_path_ / std::to_string(mod_id) / path;
+    const auto mod_file_path = sourceForDeployedFile(mod_id, path);
     const bool file_exists_and_is_modified_link =
       modPathExists(mod_id) && pu::exists(target_path) && sfs::exists(mod_file_path) &&
       !sfs::is_directory(target_path) &&
@@ -1056,7 +1088,7 @@ Deployer::VerificationResult Deployer::verifyDeployment(
       (*progress_node)->advance();
 
     const auto target_path = dest_path_ / path;
-    const auto source_path = source_path_ / std::to_string(mod_id) / path;
+    const auto source_path = sourceForDeployedFile(mod_id, path);
 
     // Directories are recorded but are not deployed as links/copies; nothing to verify.
     if(sfs::exists(source_path) && sfs::is_directory(source_path))
@@ -1289,7 +1321,7 @@ void Deployer::keepOrRevertFileModifications(const FileChangeChoices& changes_to
       stv::zip(changes_to_keep.paths, changes_to_keep.mod_ids, changes_to_keep.changes_to_keep))
   {
     const auto target_path = dest_path_ / path;
-    const auto mod_file_path = source_path_ / std::to_string(mod_id) / path;
+    const auto mod_file_path = sourceForDeployedFile(mod_id, path);
     if(!checkModPathExistsAndMaybeLogError(mod_id) || !pu::exists(target_path))
       continue;
     if(keep_change)
@@ -1359,19 +1391,13 @@ void Deployer::updateDeployedFilesForMod(int mod_id,
     if(id != mod_id)
       continue;
     const sfs::path dest_path = dest_path_ / path;
-    const sfs::path source_path = source_path_ / std::to_string(mod_id) / path;
+    const sfs::path source_path = sourceForDeployedFile(mod_id, path);
 
     if(pu::exists(dest_path) && sfs::is_directory(dest_path) || !sfs::exists(source_path) ||
        sfs::is_directory(source_path))
       continue;
 
-    sfs::remove(dest_path);
-    if(deploy_mode_ == sym_link)
-      sfs::create_symlink(source_path, dest_path);
-    else if(deploy_mode_ == DeployMode::copy)
-      sfs::copy(source_path, dest_path);
-    else
-      sfs::create_hard_link(source_path, dest_path);
+    publishDeployedFile(source_path, dest_path);
   }
 }
 
@@ -1550,17 +1576,22 @@ bool Deployer::isIgnoredFile(const sfs::path& path) const
   return false;
 }
 
+sfs::path Deployer::sourceForDeployedFile(int mod_id, const sfs::path& path) const
+{
+  return source_path_ / std::to_string(mod_id) / path;
+}
+
 bool Deployer::targetWasDeployedByLimo(const sfs::path& target_path,
                                        int mod_id,
                                        const sfs::path& relative_path) const
 {
-  if(!pu::exists(target_path) || sfs::is_directory(target_path))
+  if(!pu::exists(target_path) || sfs::is_directory(sfs::symlink_status(target_path)))
     return false;
   // Copies leave no trace linking them back to the source mod, so the recorded entry is trusted.
   if(deploy_mode_ == copy)
     return true;
 
-  const sfs::path source_path = source_path_ / std::to_string(mod_id) / relative_path;
+  const auto source_path = sourceForDeployedFile(mod_id, relative_path);
   try
   {
     if(deploy_mode_ == sym_link)

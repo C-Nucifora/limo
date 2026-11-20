@@ -51,7 +51,9 @@ struct DownloadQueueItem
   /*! \brief Stable id assigned by Limo, unique within a queue file. */
   int id = -1;
   /*! \brief Target application id this download belongs to. */
-  int app_id = -1;
+  int app_registration_id = -1;
+  std::string remote_file_name;
+  std::string name_overwrite;
   /*! \brief Remote source URL (mod page url) used to (re)request the download. */
   std::string remote_source = "";
   /*! \brief Remote request URL (if the request came from an nxm handler). */
@@ -162,6 +164,8 @@ public:
   std::string toString() const;
   /*! \brief Returns the number of managed \ModdedApplication "applications". */
   int getNumApplications() const;
+  int getAppRegistrationId(int app_index) const;
+  int findAppIndex(int registration_id) const;
   /*!
    * \brief fork #24: Minimal synchronous passthrough used by the save-game manager to obtain
    * a suggested saves directory for the given app (its staging directory).
@@ -487,6 +491,8 @@ private:
 
   /*! \brief Contains every ModdedApplication handled by this object. */
   std::vector<ModdedApplication> apps_;
+  std::vector<std::filesystem::path> registered_app_paths_;
+  std::vector<int> app_registration_ids_;
   /*! \brief If true: Do not catch exceptions. */
   bool throw_exceptions_ = false;
 
@@ -825,12 +831,6 @@ signals:
    * \param message The result text.
    */
   void sendGameToolResult(QString title, QString message);
-  /*!
-   * \brief Asks the UI to run a shell command (e.g. the REDmod deploy command).
-   * \param name Display name for the command.
-   * \param command The shell command to run.
-   */
-  void sendRunCommand(QString name, QString command);
   /*!
    * \brief Sends the deploy restore points for one app to the UI. // fork #54
    * \param restore_points Metadata for every stored restore point (index = position).
@@ -1384,7 +1384,7 @@ public slots:
    * \brief Re-queues a failed/cancelled download and starts it.
    * \param id Id of the queue item to retry.
    */
-  void retryDownload(int id);
+  void retryDownload(int id, int selected_app);
   /*!
    * \brief Removes a finished/failed/cancelled item from the queue.
    * \param id Id of the queue item to remove.
@@ -1610,7 +1610,7 @@ public slots:
    */
   void getCyberpunkSetupInfo(int app_id, int deployer);
   /*!
-   * \brief Lays out REDmods and emits the deploy command via sendRunCommand (or a result if none).
+   * \brief Publishes REDmods and runs the compiler before committing the layout.
    * \param app_id Target app.
    * \param deployer Target deployer.
    */

@@ -1,4 +1,5 @@
 #include "changelogdialog.h"
+#include "resourcepaths.h"
 #include "core/consts.h"
 #include "core/log.h"
 #include "ui_changelogdialog.h"
@@ -16,11 +17,7 @@ ChangelogDialog::ChangelogDialog(bool is_flatpak, QWidget* parent) :
 {
   ui->setupUi(this);
   setWindowTitle("Changelog");
-  sfs::path path(is_flatpak ? "/app" : APP_INSTALL_PREFIX);
-  path /= sfs::path("share") / "limo";
-  if(!is_flatpak && sfs::exists("install_files"))
-    path = "install_files";
-  path /= "changelogs.json";
+  const auto path = limoResourcePath("changelogs.json");
   Log::debug(std::format("Changelog path: '{}'", path.string()));
   if(!sfs::exists(path))
   {

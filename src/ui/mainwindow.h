@@ -366,6 +366,8 @@ private:
   QString conflict_detail_mod_name_;
   /*! \brief Contains all queued mods to be downloaded or extracted. */
   std::priority_queue<ImportModInfo> mod_import_queue_;
+  bool import_active_ = false;
+  bool operations_busy_ = false;
   /*! \brief Last position of the scroll bar for ui->deployer_list */
   int deployer_list_slider_pos_ = 0;
   /*! \brief Last position of the scroll bar for ui->mod_list */
@@ -459,21 +461,7 @@ private:
   std::vector<Mo2ModEntry> mo2_pending_mods_;
   /*! \brief App id assigned to the newly created Limo application during MO2 import. */
   int mo2_pending_app_id_ = -1;
-  /*!
-   * \brief Maps mod names to their disabled state for the in-progress MO2 import.
-   * Populated as mods are installed; consumed after all installs are done to apply
-   * setModStatus for each disabled mod.
-   */
-  std::map<std::string, bool> mo2_mod_enabled_map_;
-  /*!
-   * \brief Enabled state of the mod most recently submitted via installMod during an
-   * MO2 import.  Read by onModInstallationComplete to apply setModStatus if needed.
-   */
-  bool mo2_next_mod_enabled_ = true;
-  /*! \brief True while the MO2 import is in the final enabled-state pass. */
-  bool mo2_finalising_ = false;
-  /*! \brief App id being finalised during the MO2 import second pass. */
-  int mo2_app_id_finalising_ = -1;
+
   /*! \brief Timestamp representing the last time the progress bar has been updated. */
   std::chrono::time_point<std::chrono::high_resolution_clock> last_progress_update_time_;
   /*! \brief The last progress state. */
@@ -599,10 +587,9 @@ private:
   /*!
    * \brief Runs the given command and returns its output and return code.
    * \param command Command to be run.
-   * \param ignore_flatpak If true: Do not modify the command for use inside of a flatpak sandbox.
    * \return Output, return code
    */
-  QPair<QString, int> runCommand(QString command, bool ignore_flatpak = false);
+  static QPair<QString, int> runCommand(QString command);
   /*!
    * \brief Runs the given command in a separate thread and prints its output to the log.
    * \param command Command to be run.
@@ -1517,7 +1504,6 @@ private slots:
    * \param name Display name for the command.
    * \param command The shell command to run.
    */
-  void onRunGameCommand(QString name, QString command);
   /*!
    * \brief Installs the next mod from mo2_pending_mods_ into mo2_pending_app_id_.
    * Called from onGetModInfo and onMo2ModInstallationComplete during an import.

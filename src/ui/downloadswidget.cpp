@@ -173,9 +173,13 @@ void DownloadsWidget::onDownloadQueueChanged(std::vector<DownloadQueueItem> queu
     layout->addWidget(cancel_button);
 
     auto* retry_button = new QPushButton("Retry");
-    retry_button->setEnabled(item.status == DownloadQueueItem::failed ||
-                             item.status == DownloadQueueItem::cancelled);
-    connect(retry_button, &QPushButton::clicked, this, [this, id]() { emit retryDownload(id); });
+    retry_button->setEnabled(item.app_registration_id >= 0 &&
+      (item.status == DownloadQueueItem::failed || item.status == DownloadQueueItem::cancelled));
+    if(item.app_registration_id < 0)
+      retry_button->setToolTip(tr("Start a new download to select its application."));
+    const bool direct = !item.remote_download_url.empty();
+    connect(retry_button, &QPushButton::clicked, this,
+            [this, id, direct]() { emit retryDownload(id, direct); });
     layout->addWidget(retry_button);
 
     ui->download_table->setCellWidget(row, COL_ACTIONS, actions);

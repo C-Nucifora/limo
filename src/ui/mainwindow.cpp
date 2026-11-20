@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "resourcepaths.h"
 #include "../core/deployerfactory.h"
 #include "../core/importers/mo2importer.h"
 #include "../core/log.h"
@@ -146,7 +147,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
   connect(app_manager_,
           &ApplicationManager::downloadQueueChanged,
           downloads_widget_,
-          &DownloadsWidget::onDownloadQueueChanged);
+          &DownloadsWidget::onDownloadQueueChanged,
+          Qt::QueuedConnection);
   connect(downloads_widget_,
           &DownloadsWidget::requestDownloadQueue,
           app_manager_,
@@ -154,11 +156,24 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), ui(new Ui::MainWi
   connect(downloads_widget_,
           &DownloadsWidget::cancelDownload,
           app_manager_,
-          &ApplicationManager::cancelDownload);
-  connect(downloads_widget_,
-          &DownloadsWidget::retryDownload,
-          app_manager_,
-          &ApplicationManager::retryDownload);
+          &ApplicationManager::cancelDownload,
+          Qt::DirectConnection);
+  connect(downloads_widget_, &DownloadsWidget::retryDownload, this, [this](int id, bool direct)
+  {
+    if(currentApp() < 0)
+    {
+      onReceiveError("Download retry", "Select the original application before retrying.");
+      return;
+    }
+    ImportModInfo info;
+    info.app_id = currentApp();
+    info.action_type = ImportModInfo::download;
+    info.retry_download_id = id;
+    if(!direct && !initNexusApiKey())
+      return;
+    mod_import_queue_.push(info);
+    importMod();
+  });
   connect(downloads_widget_,
           &DownloadsWidget::removeDownload,
           app_manager_,
@@ -179,19 +194,8 @@ MainWindow::~MainWindow()
   // Ask its event loop to quit and wait (without a hard short timeout) for any in-flight
   // filesystem operations to finish before tearing anything down.
   worker_thread_->quit();
-  if(!worker_thread_->wait(30000))
-  {
-    // Last resort only: the thread is wedged and we are exiting anyway. Wait once more so an
-    // ongoing write has the best chance of completing, then leak app_manager_ rather than
-    // deleting an object that may still be executing on a live thread.
-    Log::warning("Worker thread did not finish in time during shutdown");
-    if(!worker_thread_->wait(30000))
-    {
-      delete ui;
-      return;
-    }
-  }
-  // The thread has fully finished, so app_manager_ is no longer executing and can be deleted.
+  worker_thread_->wait();
+  Log::clearPrinters();
   delete app_manager_;
   delete worker_thread_;
   delete ui;
@@ -199,6 +203,12 @@ MainWindow::~MainWindow()
 
 void MainWindow::closeEvent(QCloseEvent* event)
 {
+  if(operations_busy_ || import_active_ || mo2_pending_app_id_ >= 0)
+  {
+    setStatusMessage(tr("Wait for the current operation to finish before closing Limo."), 5000);
+    event->ignore();
+    return;
+  }
   QSettings settings = QSettings(QCoreApplication::applicationName());
   settings.setValue("main/geometry", saveGeometry());
   settings.setValue("main/state", saveState());
@@ -645,8 +655,6 @@ void MainWindow::setupConnections()
           app_manager_, &ApplicationManager::deployRedMods);
   connect(app_manager_, &ApplicationManager::sendGameToolResult,
           this, &MainWindow::onGameToolResult);
-  connect(app_manager_, &ApplicationManager::sendRunCommand,
-          this, &MainWindow::onRunGameCommand);
   connect(ui->deployer_list, &DeployerListView::modMoved,
           this, &MainWindow::onModMoved);
   connect(this, &MainWindow::extractArchive,
@@ -1593,16 +1601,26 @@ void MainWindow::onRepositoryInstallRequested(remote::RemoteDownloadInfo info)
 
 void MainWindow::importMod()
 {
+  if(import_active_ || mo2_pending_app_id_ >= 0 || mod_import_queue_.empty())
+    return;
   ImportModInfo info = mod_import_queue_.top();
+  mod_import_queue_.pop();
+  if(info.app_id != currentApp())
+  {
+    onReceiveError("Mod import", "The application changed before this import could start.");
+    importMod();
+    return;
+  }
+  import_active_ = true;
   setBusyStatus(true);
   if(info.action_type == ImportModInfo::download)
   {
     // fork #233/#114: a pre-resolved direct download (paste-a-link importer, OMM repository)
     // never touches the Nexus API, so don't gate it on a Nexus API key.
-    const bool needs_nexus_key = info.remote_download_url.empty();
+    const bool needs_nexus_key = info.retry_download_id < 0 && info.remote_download_url.empty();
     if(needs_nexus_key && !initNexusApiKey())
     {
-      mod_import_queue_.pop();
+      import_active_ = false;
       setBusyStatus(false);
       if(!mod_import_queue_.empty())
         importMod();
@@ -1624,7 +1642,9 @@ void MainWindow::importMod()
         onReceiveError(
           "File system error",
           std::format("Error while trying to delete '{}'", info.target_path.string()).c_str());
+        import_active_ = false;
         setBusyStatus(false);
+        importMod();
         return;
       }
     }
@@ -1636,6 +1656,7 @@ void MainWindow::importMod()
 
 void MainWindow::setBusyStatus(bool busy, bool show_progress_bar, bool disable_app_launch)
 {
+  operations_busy_ = busy;
   enableModifyApps(!busy);
   enableModifyBackups(!busy);
   enableModifyDeployers(!busy);
@@ -1674,54 +1695,33 @@ void MainWindow::setStatusMessage(QString message, int timeout_ms)
 
 void MainWindow::setupLog()
 {
-  // main log
-  Log::log_printers.push_back(
-    [show_error = &show_log_on_error_,
-     show_warning = &show_log_on_warning_,
-     log = ui->log_frame,
-     log_container = ui->log_container,
-     orange = colors::ORANGE,
-     red = colors::RED,
-     blue = colors::LIGHT_BLUE,
-     text_color = palette().color(QPalette::Text)](std::string message, Log::LogLevel level)
+  auto addPrinter = [this](QPlainTextEdit* log)
+  {
+    auto print = [this, log](const std::string& message, Log::LogLevel level)
     {
-      QColor color = text_color;
+      QColor color = palette().color(QPalette::Text);
       if(level == Log::LOG_WARNING)
-        color = orange;
+        color = colors::ORANGE;
       else if(level == Log::LOG_ERROR)
-        color = red;
+        color = colors::RED;
       else if(level == Log::LOG_DEBUG)
-        color = blue;
+        color = colors::LIGHT_BLUE;
       log->moveCursor(QTextCursor::End);
-      log->appendHtml(QString("<p style='color: " + color.name(QColor::HexRgb) + "'>") +
-                      QString(message.c_str()).toHtmlEscaped().replace("\n", "<br/>") + "</p>");
-      if((*show_error && level <= Log::LOG_ERROR) || (*show_warning && level <= Log::LOG_WARNING))
-        log_container->setVisible(true);
-    });
-  // tool log
-  Log::log_printers.push_back(
-    [show_error = &show_log_on_error_,
-     show_warning = &show_log_on_warning_,
-     log = ui->tool_log_frame,
-     log_container = ui->log_container,
-     orange = colors::ORANGE,
-     red = colors::RED,
-     blue = colors::LIGHT_BLUE,
-     text_color = palette().color(QPalette::Text)](std::string message, Log::LogLevel level)
+      log->appendHtml(QString("<p style='color: %1'>").arg(color.name(QColor::HexRgb)) +
+                      QString::fromStdString(message).toHtmlEscaped().replace("\n", "<br/>") +
+                      "</p>");
+      if((show_log_on_error_ && level <= Log::LOG_ERROR) ||
+         (show_log_on_warning_ && level <= Log::LOG_WARNING))
+        ui->log_container->setVisible(true);
+    };
+    Log::addPrinter([this, print](std::string message, Log::LogLevel level)
     {
-      QColor color = text_color;
-      if(level == Log::LOG_WARNING)
-        color = orange;
-      else if(level == Log::LOG_ERROR)
-        color = red;
-      else if(level == Log::LOG_DEBUG)
-        color = blue;
-      log->moveCursor(QTextCursor::End);
-      log->appendHtml(QString("<p style='color: " + color.name(QColor::HexRgb) + "'>") +
-                      QString(message.c_str()).toHtmlEscaped().replace("\n", "<br/>") + "</p>");
-      if((*show_error && level <= Log::LOG_ERROR) || (*show_warning && level <= Log::LOG_WARNING))
-        log_container->setVisible(true);
+      QMetaObject::invokeMethod(this, [print, message = std::move(message), level]
+                               { print(message, level); });
     });
+  };
+  addPrinter(ui->log_frame);
+  addPrinter(ui->tool_log_frame);
 
   QStringList config_paths = QStandardPaths::standardLocations(QStandardPaths::AppConfigLocation);
   if(!config_paths.empty())
@@ -1736,12 +1736,10 @@ void MainWindow::setupLog()
   connect(button, &QPushButton::pressed, this, &MainWindow::onLogButtonPressed);
 }
 
-QPair<QString, int> MainWindow::runCommand(QString command, bool ignore_flatpak)
+QPair<QString, int> MainWindow::runCommand(QString command)
 {
   QString output;
   std::array<char, 128> buffer;
-  if(is_a_flatpak_ && !ignore_flatpak)
-    command = "flatpak-spawn --host " + command;
   command += "  2>&1";
   auto pipe = popen(command.toStdString().c_str(), "r");
   if(pipe == nullptr)
@@ -1786,14 +1784,9 @@ void MainWindow::runConcurrent(QString command, QString name, QString type, bool
                   .toStdString());
       delete watcher;
     });
-  // Capture is_a_flatpak_ by value so the work running on the thread pool does not read the member
-  // (which the GUI thread owns); the flatpak prefix is resolved here and runCommand is told to skip
-  // re-applying it.
-  const bool is_a_flatpak = is_a_flatpak_;
-  if(is_a_flatpak && !ignore_flatpak)
+  if(is_a_flatpak_ && !ignore_flatpak)
     command = "flatpak-spawn --host " + command;
-  auto future =
-    QtConcurrent::run([this, command]() { return runCommand(command, /*ignore_flatpak=*/true); });
+  auto future = QtConcurrent::run([command] { return runCommand(command); });
   watcher->setFuture(future);
 }
 
@@ -2037,7 +2030,8 @@ bool MainWindow::initNexusApiKey()
 void MainWindow::setupIpcServer()
 {
   ipc_server_ = std::make_unique<IpcServer>();
-  ipc_server_->setup();
+  if(!ipc_server_->setup())
+    Log::warning("Could not enable Nexus link forwarding.");
   connect(ipc_server_.get(), &IpcServer::receivedMessage, this, &MainWindow::onReceiveIpcMessage);
 }
 
@@ -2171,11 +2165,7 @@ void MainWindow::initRootLevelConditions()
   if(app_info_.steam_app_id == -1)
     return;
 
-  sfs::path config_path =
-    sfs::path(is_a_flatpak_ ? "/app" : APP_INSTALL_PREFIX) / "share/limo/steam_app_configs";
-  // Overwrite for local build
-  if(!is_a_flatpak_ && sfs::exists("steam_app_configs"))
-    config_path = "steam_app_configs";
+  auto config_path = limoResourcePath("steam_app_configs");
   Log::debug("Config path: " + config_path.string());
   if(!sfs::exists(config_path))
   {
@@ -2313,28 +2303,6 @@ void MainWindow::onGetModInfo(std::vector<ModInfo> mod_info)
 void MainWindow::onGetDeployerInfo(DeployerInfo depl_info)
 {
   // fork #45: second pass — apply enabled/disabled states after MO2 import
-  if(mo2_finalising_ && mo2_app_id_finalising_ >= 0)
-  {
-    mo2_finalising_ = false;
-    const int app_id = mo2_app_id_finalising_;
-    mo2_app_id_finalising_ = -1;
-    // Map each imported mod's name to its id via the (now populated) mod list, then disable any
-    // mod that was disabled in the source MO2 profile. The simple deployer's traversal items don't
-    // carry mod names, so the mod list is the reliable name->id source.
-    for(const auto& info : mod_list_model_->getModInfo())
-    {
-      auto it = mo2_mod_enabled_map_.find(info.mod.name);
-      if(it != mo2_mod_enabled_map_.end() && !it->second)
-        emit setModStatus(app_id, 0, info.mod.id, false);
-    }
-    mo2_mod_enabled_map_.clear();
-    onCompletedOperations("MO2 import complete");
-    emit getModInfo(app_id);
-    emit getDeployerInfo(app_id, 0);
-    setBusyStatus(false);
-    return;
-  }
-
   setWindowTitle(ui->app_selection_box->currentText() + " - Limo");
   ui->actionremove_from_deployer->setVisible(!depl_info.is_autonomous);
   ui->actionget_file_conflicts->setVisible(depl_info.supports_file_conflicts);
@@ -2978,6 +2946,7 @@ void MainWindow::onModAddedToGroup(int mod_id, int target_id)
 void MainWindow::onAddModAborted(QString temp_dir)
 {
   Log::info("Mod installation aborted");
+  import_active_ = false;
   bool abort = true;
   if(!mod_import_queue_.empty())
   {
@@ -3009,8 +2978,6 @@ void MainWindow::onAddModAborted(QString temp_dir)
     ui->deployer_list->setAcceptDrops(true);
     setBusyStatus(false);
   }
-  else
-    importMod();
   try
   {
     if(std::filesystem::exists(temp_dir.toStdString()))
@@ -3020,6 +2987,8 @@ void MainWindow::onAddModAborted(QString temp_dir)
   {
     Log::error("Filesystem error: Failed to delete temporary extraction directory.");
   }
+  if(!abort)
+    importMod();
 }
 
 void MainWindow::onModMovedTo(int from, int to)
@@ -3031,9 +3000,9 @@ void MainWindow::onModMovedTo(int from, int to)
 void MainWindow::onExtractionComplete(ImportModInfo info)
 {
   setBusyStatus(false);
-  mod_import_queue_.pop();
-  if(!info.last_action_was_successful)
+  if(!info.last_action_was_successful || info.app_id != currentApp())
   {
+    import_active_ = false;
     if(!mod_import_queue_.empty())
       importMod();
     setStatusMessage("Import failed", 3000);
@@ -3074,6 +3043,7 @@ void MainWindow::onExtractionComplete(ImportModInfo info)
   {
     onReceiveError("Error",
                    ("Failed to import mod from \"" + info.local_source.string() + "\"").c_str());
+    import_active_ = false;
     setBusyStatus(false);
     if(!mod_import_queue_.empty())
       importMod();
@@ -5462,19 +5432,6 @@ void MainWindow::onGameToolResult(QString title, QString message)
   QMessageBox::information(this, title, message);
 }
 
-void MainWindow::onRunGameCommand(QString name, QString command)
-{
-  const auto answer =
-    QMessageBox::question(this,
-                          "Run " + name + "?",
-                          "This will run the following command:\n\n" + command +
-                            "\n\nThis is experimental and runs an external tool under Proton. "
-                            "Continue?",
-                          QMessageBox::Yes | QMessageBox::No,
-                          QMessageBox::No);
-  if(answer == QMessageBox::Yes)
-    runConcurrent(command, name, "REDmod");
-}
 
 void MainWindow::on_actionShow_Nexus_Page_triggered()
 {
@@ -5546,11 +5503,10 @@ void MainWindow::onReceiveIpcMessage(QString message)
 
 void MainWindow::onDownloadComplete(ImportModInfo info)
 {
+  import_active_ = false;
   onCompletedOperations("Download complete");
-  mod_import_queue_.pop();
   info.action_type = ImportModInfo::extract;
-  info.target_path = ui->info_sdir_label->text().toStdString();
-  info.target_path /= temp_dir_.toStdString();
+  info.target_path = info.target_path.parent_path() / temp_dir_.toStdString();
   mod_import_queue_.push(info);
   importMod();
 }
@@ -5575,8 +5531,8 @@ void MainWindow::onModDownloadRequested(int app_id,
 
 void MainWindow::onDownloadFailed()
 {
+  import_active_ = false;
   onCompletedOperations("Download failed");
-  mod_import_queue_.pop();
   if(!mod_import_queue_.empty())
     importMod();
 }
@@ -5699,23 +5655,20 @@ void MainWindow::on_actionSuppress_Update_triggered()
 
 void MainWindow::onModInstallationComplete(bool success)
 {
-  // fork #45: continue MO2 import chain if active
-  if(!mo2_pending_mods_.empty() && mo2_pending_app_id_ >= 0)
+  if(mo2_pending_app_id_ >= 0)
   {
-    if(!success)
+    if(success)
     {
-      Log::error("MO2 import: mod installation failed — aborting remaining imports");
-      mo2_pending_mods_.clear();
-      mo2_pending_app_id_ = -1;
-    }
-    else
       installNextMo2Mod();
-    return;
+      return;
+    }
+    mo2_pending_mods_.clear();
+    mo2_pending_app_id_ = -1;
   }
 
+  import_active_ = false;
   onCompletedOperations(success ? "Installation complete" : "Installation failed");
-  if(!mod_import_queue_.empty())
-    importMod();
+  importMod();
 }
 
 void MainWindow::onGetExternalChangesInfo(int app_id,
@@ -5927,36 +5880,12 @@ void MainWindow::installNextMo2Mod()
 {
   if(mo2_pending_mods_.empty())
   {
-    // All mods installed — apply disabled states in a second pass.
-    // Use getDeployerInfo to retrieve the load order with mod_ids, then
-    // call setModStatus for any mod that should be disabled.
-    // We re-use onGetDeployerInfo to do this, but mark the import finished first
-    // so that the normal UI refresh path takes over.
     const int app_id = mo2_pending_app_id_;
     mo2_pending_app_id_ = -1;
-
-    // Apply enabled/disabled states for each mod.
-    // After installMod, mods are always added as enabled.  We now iterate
-    // through mo2_mod_enabled_map_ and call setModStatus(false) for those
-    // that should be disabled.  We emit getModInfo to get the current mod_ids.
-    //
-    // Since setModStatus / getModInfo are async, we emit everything now.
-    // The ApplicationManager processes them sequentially in the worker thread.
-    // After all setModStatus calls, the UI is refreshed by the final
-    // getModInfo / getDeployerInfo pair.
-    emit getModInfo(app_id); // triggers onGetModInfo -> updates list
-    // Actual setModStatus calls are emitted from onGetModInfoForMo2Finalise,
-    // which is connected below when pending is cleared.
-    Log::info("MO2 import: all mods installed; applying enabled/disabled states");
-
-    // Quick path: emit setModStatus directly — we look up mod_ids from the
-    // deployer list.  The load order (deployer 0) maps index -> mod_id.
-    // We saved (name -> enabled) in mo2_mod_enabled_map_ during install.
-    // We cannot do this here because we don't yet have the mod_ids; defer to
-    // the next onGetDeployerInfo call by storing a pending flag.
-    mo2_finalising_ = true;
-    mo2_app_id_finalising_ = app_id;
+    onCompletedOperations("MO2 import complete");
+    emit getModInfo(app_id);
     emit getDeployerInfo(app_id, 0);
+    importMod();
     return;
   }
 
@@ -5983,8 +5912,7 @@ void MainWindow::installNextMo2Mod()
   info.root_level = 0;
   info.deployers = { 0 }; // deployer index 0 = the Simple Deployer created during import
 
-  // Track enabled state for final pass
-  mo2_mod_enabled_map_[entry.name] = entry.enabled;
+  info.enabled = entry.enabled;
 
   setBusyStatus(true);
   emit installMod(mo2_pending_app_id_, info);
@@ -6018,8 +5946,6 @@ void MainWindow::onImportMo2DialogAccepted(EditApplicationInfo app_info,
 
   // Store the mod list — consumed one entry at a time by installNextMo2Mod()
   mo2_pending_mods_ = std::move(parse_result.mods);
-  mo2_mod_enabled_map_.clear();
-  mo2_finalising_ = false;
 
   // The new app will occupy index == current count (0-based)
   mo2_pending_app_id_ = ui->app_selection_box->count();

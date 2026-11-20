@@ -45,7 +45,10 @@
         <string>This deployer's target directory is used by the fomod installer to check for file dependencies</string>
        </property>
        <property name="text">
-        <string>Fomod target:</string>
+        <string>&amp;Fomod target:</string>
+       </property>
+       <property name="buddy">
+        <cstring>fomod_deployer_box</cstring>
        </property>
       </widget>
      </item>
@@ -102,7 +105,10 @@
         <string>Mod name</string>
        </property>
        <property name="text">
-        <string>Name (required):</string>
+        <string>&amp;Name (required):</string>
+       </property>
+       <property name="buddy">
+        <cstring>name_text</cstring>
        </property>
       </widget>
      </item>
@@ -122,7 +128,10 @@
         <string>Mod version</string>
        </property>
        <property name="text">
-        <string>Version (optional):</string>
+        <string>&amp;Version (optional):</string>
+       </property>
+       <property name="buddy">
+        <cstring>version_text</cstring>
        </property>
       </widget>
      </item>
@@ -178,7 +187,10 @@
         <string>How many leading folder levels to strip from the mod's files so they install at the correct depth. Limo auto-detects this — only change it if the mod ends up in the wrong subfolder.</string>
        </property>
        <property name="text">
-        <string>Root level:</string>
+        <string>&amp;Root level:</string>
+       </property>
+       <property name="buddy">
+        <cstring>root_level_box</cstring>
        </property>
       </widget>
      </item>
@@ -237,7 +249,10 @@
         <string>Determines how mods are installed</string>
        </property>
        <property name="text">
-        <string>Installer:</string>
+        <string>&amp;Installer:</string>
+       </property>
+       <property name="buddy">
+        <cstring>installer_box</cstring>
        </property>
       </widget>
      </item>

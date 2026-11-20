@@ -38,8 +38,10 @@ ModdedApplication::ModdedApplication(sfs::path staging_dir,
                                      std::string name,
                                      std::string command,
                                      std::filesystem::path icon_path,
-                                     std::string app_version) :
-  name_(name), staging_dir_(staging_dir), command_(command), icon_path_(icon_path)
+                                     std::string app_version,
+                                     long steam_app_id) :
+  name_(name), staging_dir_(staging_dir), command_(command), icon_path_(icon_path),
+  steam_app_id_(steam_app_id)
 {
   if(sfs::exists(staging_dir / CONFIG_FILE_NAME))
     updateState(true);
@@ -48,9 +50,6 @@ ModdedApplication::ModdedApplication(sfs::path staging_dir,
     addProfile({ "Default", app_version, -1 });
     updateSettings(true);
   }
-  sfs::copy(staging_dir_ / CONFIG_FILE_NAME,
-            staging_dir_ / ("." + CONFIG_FILE_NAME + ".bak"),
-            sfs::copy_options::overwrite_existing);
 }
 
 void ModdedApplication::deployMods()
@@ -150,6 +149,7 @@ void ModdedApplication::unDeployModsFor(std::vector<int> deployers)
 
 void ModdedApplication::installMod(const ImportModInfo& info)
 {
+  last_mod_id_ = -1;
   if(info.replace_mod && info.target_group_id != -1)
   {
     replaceMod(info);
@@ -200,7 +200,8 @@ void ModdedApplication::installMod(const ImportModInfo& info)
   }
 
   for(int deployer : info.deployers)
-    addModToDeployer(deployer, mod_id, true, &progress_node.child(info.target_group_id >= 0 ? 2 : 1));
+    addModToDeployer(deployer, mod_id, info.enabled,
+                     &progress_node.child(info.target_group_id >= 0 ? 2 : 1));
 
   for(auto& tag : auto_tags_)
     tag.updateMods(staging_dir_, std::vector<int>{ mod_id });
@@ -209,6 +210,7 @@ void ModdedApplication::installMod(const ImportModInfo& info)
   autoAddScriptExtenderTools(mod_id);
 
   updateSettings(true);
+  last_mod_id_ = -1;
 }
 
 int ModdedApplication::createEmptyMod(const std::string& name, const std::string& version)
@@ -236,6 +238,7 @@ int ModdedApplication::createEmptyMod(const std::string& name, const std::string
   updateAutoTagMap();
 
   updateSettings(true);
+  last_mod_id_ = -1;
   return mod_id;
 }
 
@@ -3498,13 +3501,20 @@ void ModdedApplication::writeSettings() const
            CONFIG_FILE_NAME + ".corrupt\" backup may have been created) before saving.");
     return;
   }
-  sfs::path settings_file_path = staging_dir_ / (CONFIG_FILE_NAME + ".tmp");
-  std::ofstream file(settings_file_path, std::fstream::binary);
-  if(!file.is_open())
-    throw std::runtime_error("Error: Could not write to \"" + settings_file_path.string() + "\".");
+  const auto config = staging_dir_ / CONFIG_FILE_NAME;
+  const pu::TemporaryDirectory pending(staging_dir_);
+  const auto next_config = pending.path / CONFIG_FILE_NAME;
+  std::ofstream file(next_config, std::fstream::binary);
+  file.exceptions(std::ios::failbit | std::ios::badbit);
   file << json_settings_;
   file.close();
-  sfs::rename(settings_file_path, staging_dir_ / CONFIG_FILE_NAME);
+  if(sfs::exists(config))
+  {
+    const auto backup = pending.path / "backup";
+    pu::reflinkOrCopyFile(config, backup);
+    sfs::rename(backup, staging_dir_ / ("." + CONFIG_FILE_NAME + ".bak"));
+  }
+  sfs::rename(next_config, config);
 }
 
 void ModdedApplication::readSettings()
@@ -4065,26 +4075,21 @@ void ModdedApplication::replaceMod(const ImportModInfo& info)
   if(index == installed_mods_.end())
     throw std::runtime_error(std::format("Invalid group '{}' for mod '{}'", info.target_group_id, info.name));
 
-  int mod_id = 0;
-  if(!installed_mods_.empty())
-    mod_id = std::max_element(installed_mods_.begin(), installed_mods_.end())->id + 1;
-  while(pu::exists(staging_dir_ / std::to_string(mod_id)) &&
-        mod_id < std::numeric_limits<int>().max())
-    mod_id++;
-  if(mod_id == std::numeric_limits<int>().max())
-    throw std::runtime_error("Error: Could not generate new mod id.");
-  const sfs::path tmp_replace_dir =
-    staging_dir_ / (std::string("tmp_replace_") + std::to_string(mod_id));
-
+  const auto old_mod_path = staging_dir_ / std::to_string(info.target_group_id);
+  const auto recovery_path =
+    staging_dir_ / (".limo-replace-" + std::to_string(info.target_group_id));
+  if(pu::exists(recovery_path))
+    throw std::runtime_error("A previous replacement needs recovery at " + recovery_path.string());
+  const pu::TemporaryDirectory pending(staging_dir_);
+  const auto replacement = pending.path / "replacement";
   const auto mod_size = Installer::install(info.current_path,
-                                           tmp_replace_dir,
+                                           replacement,
                                            info.installer_flags,
                                            info.installer,
                                            info.root_level,
                                            info.files);
-  const sfs::path old_mod_path = staging_dir_ / std::to_string(info.target_group_id);
-  sfs::remove_all(old_mod_path);
-  sfs::rename(tmp_replace_dir, old_mod_path);
+  sfs::rename(replacement, recovery_path);
+  pu::exchangePaths(recovery_path, old_mod_path);
 
   index->name = info.name;
   index->version = info.version;
@@ -4148,6 +4153,10 @@ void ModdedApplication::replaceMod(const ImportModInfo& info)
   updateAutoTagMap();
 
   updateSettings(true);
+  std::error_code cleanup_error;
+  sfs::remove_all(recovery_path, cleanup_error);
+  if(cleanup_error)
+    log_(Log::LOG_WARNING, "Previous mod retained at " + recovery_path.string());
 }
 
 void ModdedApplication::updateManualTagMap()
@@ -4491,9 +4500,9 @@ std::vector<std::pair<int, sfs::path>> ModdedApplication::getEnabledModPathsInLo
   std::vector<std::pair<int, sfs::path>> result;
   if(deployer < 0 || deployer >= static_cast<int>(deployers_.size()))
     return result;
-  for(const auto& entry_weak : *deployers_[deployer]->getLoadorder())
+  for(const auto& entry_weak : deployers_[deployer]->getLoadorder()->getTraversalItems())
   {
-    auto entry = std::static_pointer_cast<DeployerModInfo>(entry_weak.lock());
+    const auto entry = std::static_pointer_cast<DeployerModInfo>(entry_weak.lock());
     if(!entry || entry->isSeparator || !entry->enabled)
       continue;
     result.emplace_back(entry->id, staging_dir_ / std::to_string(entry->id));
@@ -4506,8 +4515,6 @@ std::string ModdedApplication::mergeTw3Scripts(int deployer)
   if(deployer < 0 || deployer >= static_cast<int>(deployers_.size()))
     return "Invalid deployer.";
   const auto mods = getEnabledModPathsInLoadOrder(deployer);
-  if(mods.empty())
-    return "No enabled mods to merge scripts for.";
   const sfs::path output_dir = staging_dir_ / "tw3_merged_scripts";
   // fork #59: use the configured vanilla scripts root as the 3-way merge base when it is set and
   // present on disk; otherwise fall back to the current 2-way merge.
@@ -4594,10 +4601,11 @@ std::string ModdedApplication::getCyberpunkSetupInfo(int deployer)
   return msg;
 }
 
-std::string ModdedApplication::buildRedmodDeployCommand(int deployer)
+bool ModdedApplication::deployRedmods(int deployer,
+                                    const std::function<void(const std::string&)>& compile)
 {
   if(deployer < 0 || deployer >= static_cast<int>(deployers_.size()))
-    return {};
+    return false;
   const auto mods = getEnabledModPathsInLoadOrder(deployer);
   const sfs::path game_root = deployers_[deployer]->getDestPath();
   std::vector<std::pair<int, sfs::path>> redmod_sources;
@@ -4612,9 +4620,10 @@ std::string ModdedApplication::buildRedmodDeployCommand(int deployer)
     }
   }
   if(redmod_sources.empty())
-    return {};
-  cyberpunk_redmod::layoutRedMods(redmod_sources, game_root);
-  return cyberpunk_redmod::redmodDeployCommand(game_root, names, {});
+    return false;
+  const auto command = cyberpunk_redmod::redmodDeployCommand(game_root, names, {});
+  cyberpunk_redmod::layoutRedMods(redmod_sources, game_root, [&] { compile(command); });
+  return true;
 }
 
 void ModdedApplication::autoAddScriptExtenderTools(int mod_id)

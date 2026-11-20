@@ -24,6 +24,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <optional>
 #include <string>
 #include <utility>
@@ -192,7 +193,8 @@ std::optional<RedMod> parseRedMod(const std::filesystem::path& mod_dir);
  * supersede this function entirely (see the integration notes in the header docs).
  */
 void layoutRedMods(const std::vector<std::pair<int, std::filesystem::path>>& mods_in_load_order,
-                   const std::filesystem::path& game_root);
+                   const std::filesystem::path& game_root,
+                   const std::function<void()>& compile = {});
 
 /*!
  * \brief Writes the REDmod load order file into \c game_root/mods.

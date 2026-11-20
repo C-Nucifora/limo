@@ -120,6 +120,27 @@ void copyOrMoveFiles(const std::filesystem::path& source,
  */
 bool exists(const std::filesystem::path& path);
 
+// Creates a private, uniquely named directory on the parent's filesystem.
+std::filesystem::path createTemporaryDirectory(const std::filesystem::path& parent);
+
+class TemporaryDirectory
+{
+public:
+  explicit TemporaryDirectory(const std::filesystem::path& parent);
+  ~TemporaryDirectory();
+  TemporaryDirectory(const TemporaryDirectory&) = delete;
+  TemporaryDirectory& operator=(const TemporaryDirectory&) = delete;
+
+  const std::filesystem::path path;
+  void retain();
+
+private:
+  bool cleanup_ = true;
+};
+
+// Swaps two existing paths, keeping recovery data if rollback fails.
+void exchangePaths(const std::filesystem::path& first, const std::filesystem::path& second);
+
 /*!
  * \brief Copies a single regular file, attempting a reflink (copy-on-write clone) first.
  *

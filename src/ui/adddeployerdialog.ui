@@ -36,7 +36,10 @@
      <item row="3" column="0">
       <widget class="QLabel" name="source_dir_label">
        <property name="text">
-        <string>Source directory (optional):</string>
+        <string>&amp;Source directory (optional):</string>
+       </property>
+       <property name="buddy">
+        <cstring>source_path_field</cstring>
        </property>
       </widget>
      </item>
@@ -53,7 +56,10 @@
         <string>Name of the deployer</string>
        </property>
        <property name="text">
-        <string>Name (required):</string>
+        <string>&amp;Name (required):</string>
+       </property>
+       <property name="buddy">
+        <cstring>name_field</cstring>
        </property>
       </widget>
      </item>
@@ -63,7 +69,10 @@
         <string>This is where installed mods will be deployed to</string>
        </property>
        <property name="text">
-        <string>Target directory (required):</string>
+        <string>&amp;Target directory (required):</string>
+       </property>
+       <property name="buddy">
+        <cstring>path_field</cstring>
        </property>
       </widget>
      </item>
@@ -73,12 +82,18 @@
         <string>Determines how mods will be deployed</string>
        </property>
        <property name="text">
-        <string>Deployer type (required):</string>
+        <string>&amp;Deployer type (required):</string>
+       </property>
+       <property name="buddy">
+        <cstring>type_box</cstring>
        </property>
       </widget>
      </item>
      <item row="2" column="3">
       <widget class="QPushButton" name="file_picker_button">
+       <property name="accessibleName">
+        <string>Browse for target directory</string>
+       </property>
        <property name="toolTip">
         <string>Pick target directory</string>
        </property>
@@ -99,12 +114,18 @@
         <string>Determines how files will be deployed.</string>
        </property>
        <property name="text">
-        <string>Deployment method:</string>
+        <string>&amp;Deployment method:</string>
+       </property>
+       <property name="buddy">
+        <cstring>deploy_mode_box</cstring>
        </property>
       </widget>
      </item>
      <item row="3" column="3">
       <widget class="QPushButton" name="source_picker_button">
+       <property name="accessibleName">
+        <string>Browse for source directory</string>
+       </property>
        <property name="text">
         <string/>
        </property>

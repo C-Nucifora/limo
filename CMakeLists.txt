@@ -19,13 +19,13 @@ option(LIMO_BUILD_TESTS "Build the Catch2 test suite." OFF)
 
 # jsoncpp
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(JSONCPP jsoncpp)
+pkg_check_modules(JSONCPP REQUIRED jsoncpp)
 
 # libarchive
 find_package(LibArchive REQUIRED)
 
 # pugixml
-pkg_check_modules(PUGIXML pugixml)
+pkg_check_modules(PUGIXML REQUIRED pugixml)
 find_package(pugixml REQUIRED)
 
 # cpr
@@ -523,10 +523,14 @@ if(LIMO_WITH_LOOT)
             src/ui/lootuserlistdialog.ui)
 endif()
 
-# Set install target so app config files can be found
-if(NOT DEFINED LIMO_INSTALL_PREFIX)
-  set(LIMO_INSTALL_PREFIX "/usr/local")
+if(DEFINED LIMO_INSTALL_PREFIX)
+  set(CMAKE_INSTALL_PREFIX "${LIMO_INSTALL_PREFIX}")
+elseif(IS_FLATPAK AND CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "/app")
 endif()
+include(GNUInstallDirs)
+file(COPY steam_app_configs DESTINATION "${PROJECT_BINARY_DIR}/share/limo")
+configure_file(install_files/changelogs.json share/limo/changelogs.json COPYONLY)
 
 # Generate consts.h into the build tree (not the source tree) so the generated file is never
 # committed to git and cannot go stale relative to consts.h.in. Both the core library and the
@@ -550,31 +554,34 @@ target_link_libraries(Limo
     PRIVATE Qt${QT_VERSION_MAJOR}::Svg
     PRIVATE Qt${QT_VERSION_MAJOR}::Network)
 
-install(PROGRAMS ${CMAKE_BINARY_DIR}/Limo
-    DESTINATION bin RENAME limo)
+set_target_properties(Limo PROPERTIES OUTPUT_NAME limo)
+add_custom_command(TARGET Limo POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E create_symlink "$<TARGET_FILE_NAME:Limo>" "$<TARGET_FILE_DIR:Limo>/Limo"
+  VERBATIM)
+install(TARGETS Limo RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+install(DIRECTORY steam_app_configs DESTINATION "${CMAKE_INSTALL_DATADIR}/limo")
+install(FILES install_files/changelogs.json DESTINATION "${CMAKE_INSTALL_DATADIR}/limo")
 
 if(IS_FLATPAK)
-  install(FILES flatpak/io.github.limo_app.limo.png
-            DESTINATION /app/share/icons/hicolor/512x512/apps)
-  install(FILES flatpak/io.github.limo_app.limo.metainfo.xml
-            DESTINATION /app/share/metainfo)
-  install(FILES flatpak/io.github.limo_app.limo.desktop
-            DESTINATION /app/share/applications)
-  install(DIRECTORY steam_app_configs
-            DESTINATION /app/share/limo)
-  install(FILES install_files/changelogs.json
-            DESTINATION /app/share/limo)
+  set(LIMO_DESKTOP_ID io.github.limo_app.limo)
+  set(LIMO_DESKTOP_FILES flatpak)
 else()
-  install(DIRECTORY steam_app_configs
-            DESTINATION ${LIMO_INSTALL_PREFIX}/share/limo)
-  install(FILES install_files/limo.png
-            DESTINATION ${LIMO_INSTALL_PREFIX}/share/icons/hicolor/512x512/apps)
-  install(FILES install_files/limo.desktop
-            DESTINATION ${LIMO_INSTALL_PREFIX}/share/applications)
+  set(LIMO_DESKTOP_ID limo)
+  set(LIMO_DESKTOP_FILES install_files)
+endif()
+install(FILES "${LIMO_DESKTOP_FILES}/${LIMO_DESKTOP_ID}.png"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/512x512/apps")
+install(FILES "${LIMO_DESKTOP_FILES}/${LIMO_DESKTOP_ID}.desktop"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
+if(IS_FLATPAK)
   install(FILES flatpak/io.github.limo_app.limo.metainfo.xml
-            DESTINATION ${LIMO_INSTALL_PREFIX}/share/metainfo)
-  install(FILES install_files/changelogs.json
-            DESTINATION ${LIMO_INSTALL_PREFIX}/share/limo)
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
+else()
+  file(READ flatpak/io.github.limo_app.limo.metainfo.xml LIMO_METAINFO)
+  string(REPLACE "io.github.limo_app.limo.desktop" "limo.desktop" LIMO_METAINFO "${LIMO_METAINFO}")
+  file(CONFIGURE OUTPUT limo.metainfo.xml CONTENT "${LIMO_METAINFO}" @ONLY)
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/limo.metainfo.xml"
+          DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
 endif()
 
 # fork #22: Qt translation (i18n) support.
@@ -587,11 +594,7 @@ set(LIMO_TS_FILES
     ${PROJECT_SOURCE_DIR}/translations/limo_en.ts)
 
 if(Qt${QT_VERSION_MAJOR}LinguistTools_FOUND)
-  if(IS_FLATPAK)
-    set(LIMO_QM_INSTALL_DIR /app/share/limo/translations)
-  else()
-    set(LIMO_QM_INSTALL_DIR ${LIMO_INSTALL_PREFIX}/share/limo/translations)
-  endif()
+  set(LIMO_QM_INSTALL_DIR "${CMAKE_INSTALL_DATADIR}/limo/translations")
 
   if(COMMAND qt_add_translations)
     # Qt >= 6.2 convenience API: builds the .qm files and ties them to the target.

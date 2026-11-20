@@ -160,6 +160,7 @@ private:
   void updateState();
   /*! \brief Updates every targets state file with the internal state. */
   void updateSettings();
+  void swapActiveBackup(const BackupTarget& target, int active_id, int backup_id);
   /*!
    * \brief Writes the given json object to disk.
    * \param path Path to write to.

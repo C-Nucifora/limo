@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QMessageBox>
+#include <QProcess>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -23,54 +24,27 @@ bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
 {
   // Security: the remote URL may carry a signed token / expiry in its query string; strip the
   // query before logging so those credentials are not written to the debug log.
-  QUrl log_url(QString::fromStdString(info.remote_download_url));
-  const std::string log_url_str =
-    log_url.isValid()
-      ? log_url.toString(QUrl::RemoveQuery | QUrl::RemoveUserInfo).toStdString()
-      : info.remote_download_url;
-  app_mgr->sendLogMessage(Log::LOG_DEBUG,
-                          std::format("Downloading from : '{}'", log_url_str));
-  std::regex url_regex(R"(.*/([^/?]+)(?:\?.*)?$)");
-  std::smatch match;
-  if(!std::regex_match(info.remote_download_url, match, url_regex))
-    throw std::runtime_error(std::format("Invalid download URL \"{}\"", info.remote_download_url));
-  sfs::path download_path = info.target_path;
-  if(!sfs::exists(download_path))
-    sfs::create_directories(download_path);
-  // Security: a malicious/compromised CDN could return a URL whose last path segment is empty
-  // or "..", redirecting the write outside the download directory. Use the basename only.
-  sfs::path file_name = sfs::path(match[1].str()).filename();
-  // fork #233/#114: for pre-resolved direct downloads (paste-a-link importer, OMM repository)
-  // the URL's last segment may not be a usable archive name — e.g. GitHub's .../zipball/<tag>.
-  // Prefer the file name the resolver supplied, still sanitized down to a bare basename.
-  if(info.remote_type != ImportModInfo::nexus && !info.remote_file_name.empty())
-  {
-    const sfs::path resolved_name = sfs::path(info.remote_file_name).filename();
-    if(!resolved_name.empty() && resolved_name != "..")
-      file_name = resolved_name;
-  }
-  if(file_name.empty() || file_name == "..")
-    throw std::runtime_error(
-      std::format("Invalid file name in download URL \"{}\"", info.remote_download_url));
-  const std::string file_name_prefix = file_name.stem();
-  const std::string extension = file_name.extension();
-  int suffix = 1;
-  while(pu::exists(download_path / file_name))
-  {
-    file_name = file_name_prefix + "(" + std::to_string(suffix) + ")" + extension;
-    suffix++;
-  }
-  std::string file_name_str = file_name.string();
-  auto pos = file_name_str.find("%20");
-  while(pos != std::string::npos)
-  {
-    file_name_str.replace(pos, 3, " ");
-    pos = file_name_str.find("%20");
-  }
-  file_name = file_name_str;
+  const QUrl url = QUrl::fromEncoded(QByteArray::fromStdString(info.remote_download_url));
+  if(!url.isValid() || url.host().isEmpty() || (url.scheme() != "https" && url.scheme() != "http"))
+    throw std::runtime_error("Invalid HTTP download URL.");
+  const auto log_url = url.toString(QUrl::RemoveQuery | QUrl::RemoveUserInfo);
+  app_mgr->sendLogMessage(Log::LOG_DEBUG, std::string("Downloading from ") + log_url.toStdString());
+  const auto& download_path = info.target_path;
+  sfs::create_directories(download_path);
 
+  const auto decoded_name = url.fileName(QUrl::FullyDecoded).toStdString();
+  auto file_name = sfs::path(decoded_name).filename();
+  if(!info.remote_file_name.empty())
+    file_name = sfs::path(info.remote_file_name).filename();
+  if(file_name.empty() || file_name == "." || file_name == ".." ||
+     file_name.native().find('\0') != std::string::npos)
+    throw std::runtime_error("Invalid file name in download URL.");
+  const auto file_name_prefix = file_name.stem().string();
+  const auto extension = file_name.extension().string();
+  const pu::TemporaryDirectory pending(download_path);
+  const auto partial_file = pending.path / "download";
   auto progress_callback = [app_mgr](float progress) { app_mgr->sendUpdateProgress(progress); };
-  std::ofstream fstream(download_path / file_name, std::ios::binary);
+  std::ofstream fstream(partial_file, std::ios::binary);
   if(!fstream.is_open())
     throw std::runtime_error("Failed to write to disk.");
   bool message_sent = false;
@@ -143,21 +117,23 @@ bool performDownload(ImportModInfo& info, ApplicationManager* app_mgr)
           speed = (double)download_now / elapsed;
         return app_mgr->reportDownloadProgress(download_now, download_total, speed);
       }));
-  // fork #8: a user-requested cancellation aborts the transfer; surface it as an error
-  // so downloadMod marks the item cancelled rather than complete.
-  if(app_mgr->downloadCancelRequested())
-  {
-    fstream.close();
-    sfs::remove(download_path / file_name);
-    throw std::runtime_error("Download cancelled.");
-  }
-  if(response.status_code != 200)
-  {
-    sfs::remove(download_path / file_name);
-    throw std::runtime_error("Download failed with response: \"" + response.status_line +
-                             "\" (code " + std::to_string(response.status_code) + ").");
-  }
   fstream.close();
+  if(app_mgr->downloadCancelRequested())
+    throw std::runtime_error("Download cancelled.");
+  if(response.error.code != cpr::ErrorCode::OK || response.status_code != 200 || !fstream)
+    throw std::runtime_error("Download did not finish successfully (HTTP " +
+                             std::to_string(response.status_code) + ").");
+
+  for(unsigned suffix = 1;; suffix++)
+  {
+    std::error_code error;
+    sfs::create_hard_link(partial_file, download_path / file_name, error);
+    if(!error)
+      break;
+    if(error != std::errc::file_exists)
+      throw sfs::filesystem_error("Could not publish download", download_path / file_name, error);
+    file_name = file_name_prefix + "(" + std::to_string(suffix) + ")" + extension;
+  }
   info.local_source = download_path / file_name;
   info.current_path = info.local_source;
   return true;
@@ -314,7 +290,7 @@ std::string ApplicationManager::toString() const
   std::string summary = "";
   for(int i = 0; const auto& app : apps_)
   {
-    summary += "[" + std::to_string(i) + "] " + app.name() + "\n";
+    summary += "[" + std::to_string(getAppRegistrationId(i)) + "] " + app.name() + "\n";
     for(int j = 0; const auto& profile : app.getProfileNames())
     {
       summary += "\t[" + std::to_string(j) + "] " + profile + "\n";
@@ -328,6 +304,18 @@ std::string ApplicationManager::toString() const
 int ApplicationManager::getNumApplications() const
 {
   return apps_.size();
+}
+
+int ApplicationManager::getAppRegistrationId(int app_index) const
+{
+  return app_registration_ids_.at(app_index);
+}
+
+int ApplicationManager::findAppIndex(int registration_id) const
+{
+  const auto it = std::ranges::find(app_registration_ids_, registration_id);
+  return it == app_registration_ids_.end()
+           ? -1 : static_cast<int>(it - app_registration_ids_.begin());
 }
 
 // fork #24: minimal synchronous passthrough for the save-game manager.
@@ -353,11 +341,13 @@ void ApplicationManager::enableExceptions(bool enabled)
 void ApplicationManager::updateSettings()
 {
   QSettings settings(QCoreApplication::applicationName());
-  settings.beginWriteArray("staging_directories");
-  for(int i = 0; i < apps_.size(); i++)
+  for(int app = 0; app < apps_.size(); app++)
+    registered_app_paths_[app_registration_ids_[app]] = apps_[app].getStagingDir();
+  settings.beginWriteArray("staging_directories", registered_app_paths_.size());
+  for(int id = 0; id < registered_app_paths_.size(); id++)
   {
-    settings.setArrayIndex(i);
-    settings.setValue(QString::number(i), apps_[i].getStagingDir().c_str());
+    settings.setArrayIndex(id);
+    settings.setValue(QString::number(id), registered_app_paths_[id].c_str());
   }
   settings.endArray();
 }
@@ -365,8 +355,10 @@ void ApplicationManager::updateSettings()
 void ApplicationManager::updateState()
 {
   apps_.clear();
+  app_registration_ids_.clear();
   QSettings settings(QCoreApplication::applicationName());
   int num_apps = settings.beginReadArray("staging_directories");
+  registered_app_paths_.assign(num_apps, {});
   for(int i = 0; i < num_apps; i++)
   {
     sfs::path staging_dir;
@@ -378,6 +370,15 @@ void ApplicationManager::updateState()
       handleParseError(settings.fileName().toStdString(), "Could not parse staging directories.");
       continue;
     }
+    registered_app_paths_[i] = staging_dir;
+    if(staging_dir.empty())
+      continue;
+    std::error_code error;
+    if(!sfs::is_regular_file(staging_dir / ModdedApplication::CONFIG_FILE_NAME, error))
+    {
+      handleAddAppError(1, staging_dir);
+      continue;
+    }
     int code = ModdedApplication::verifyStagingDir(staging_dir);
     if(code != 0)
     {
@@ -387,6 +388,7 @@ void ApplicationManager::updateState()
     try
     {
       apps_.emplace_back(staging_dir);
+      app_registration_ids_.push_back(i);
       apps_.back().setProgressCallback([app_mgr = this](float p)
                                        { app_mgr->sendUpdateProgress(p); });
       apps_.back().setLog([app_mgr = this](Log::LogLevel log_level, const std::string& message)
@@ -513,22 +515,42 @@ void ApplicationManager::sendLogMessage(Log::LogLevel level, QString message)
 void ApplicationManager::addApplication(EditApplicationInfo info)
 {
   sfs::path staging_dir{ info.staging_dir };
+  if(!sfs::is_directory(staging_dir))
+  {
+    handleAddAppError(1, staging_dir);
+    return;
+  }
+  staging_dir = sfs::canonical(staging_dir);
+  if(std::ranges::any_of(registered_app_paths_, [&staging_dir](const auto& existing)
+                         {
+                           std::error_code error;
+                           return !existing.empty() && sfs::equivalent(existing, staging_dir, error);
+                         }))
+  {
+    emit sendError("Error", "The staging directory is already registered.");
+    emit completedOperations();
+    return;
+  }
   int code = ModdedApplication::verifyStagingDir(staging_dir);
   if(code == 0)
   {
     try
     {
-      apps_.emplace_back(staging_dir, info.name, info.command, info.icon_path, info.app_version);
-      apps_.back().setProgressCallback([app_mgr = this](float p)
+      ModdedApplication app(staging_dir, info.name, info.command, info.icon_path, info.app_version,
+                            info.steam_app_id);
+      app.setProgressCallback([app_mgr = this](float p)
                                        { app_mgr->sendUpdateProgress(p); });
-      apps_.back().setLog([app_mgr = this](Log::LogLevel log_level, const std::string& message)
+      app.setLog([app_mgr = this](Log::LogLevel log_level, const std::string& message)
                           { app_mgr->sendLogMessage(log_level, message); });
 
       for(const auto& depl_info : info.deployers)
-        apps_.back().addDeployer(depl_info);
-      apps_.back().fixInvalidHardLinkDeployers();
+        app.addDeployer(depl_info);
+      app.fixInvalidHardLinkDeployers();
       for(const auto& tag : info.auto_tags)
-        apps_.back().addAutoTag(tag, true);
+        app.addAutoTag(tag, true);
+      apps_.push_back(std::move(app));
+      app_registration_ids_.push_back(static_cast<int>(registered_app_paths_.size()));
+      registered_app_paths_.push_back(staging_dir);
       updateSettings();
       emit completedOperations("Application added");
     }
@@ -576,6 +598,8 @@ void ApplicationManager::removeApplication(int app_id, bool cleanup)
     return;
   if(cleanup)
     handleExceptions<&ModdedApplication::deleteAllData>(app_id);
+  registered_app_paths_[app_registration_ids_[app_id]].clear();
+  app_registration_ids_.erase(app_registration_ids_.begin() + app_id);
   apps_.erase(apps_.begin() + app_id);
   updateSettings();
 }
@@ -1248,17 +1272,30 @@ void ApplicationManager::deployRedMods(int app_id, int deployer)
 {
   if(appIndexIsValid(app_id) && deployerIndexIsValid(app_id, deployer))
   {
-    auto command =
-      handleExceptions(&ModdedApplication::buildRedmodDeployCommand, apps_[app_id], deployer);
-    if(command)
+    const auto compile = [this](const std::string& command)
     {
-      if(command->empty())
-        emit sendGameToolResult("Cyberpunk REDmod Deploy",
-                                "No REDmods (mods containing an info.json) were found among the "
-                                "enabled mods of this deployer.");
+      QProcess process;
+      process.setProcessChannelMode(QProcess::MergedChannels);
+      const QString shell_command = QString::fromStdString(command);
+      if(Installer::isAFlatpak())
+        process.start("flatpak-spawn", { "--host", "/bin/sh", "-c", shell_command });
       else
-        emit sendRunCommand("REDmod deploy", command->c_str());
-    }
+        process.start("/bin/sh", { "-c", shell_command });
+      if(!process.waitForStarted())
+        throw std::runtime_error("Could not start REDmod: " + process.errorString().toStdString());
+      if(!process.waitForFinished(-1))
+        throw std::runtime_error("Could not wait for REDmod: " + process.errorString().toStdString());
+      const auto output = QString::fromLocal8Bit(process.readAll());
+      if(!output.isEmpty())
+        sendLogMessage(Log::LOG_INFO, output);
+      if(process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
+        throw std::runtime_error("REDmod failed. The previous mod layout was restored.");
+    };
+    const auto deployed = handleExceptions(&ModdedApplication::deployRedmods, apps_[app_id],
+                                           deployer, compile);
+    if(deployed)
+      emit sendGameToolResult("Cyberpunk REDmod Deploy",
+        *deployed ? "REDmods deployed." : "No enabled REDmods were found.");
   }
   emit completedOperations();
 }
@@ -1547,6 +1584,11 @@ void ApplicationManager::getNexusPage(int app_id, int mod_id)
 
 void ApplicationManager::downloadMod(ImportModInfo info)
 {
+  if(info.retry_download_id >= 0)
+  {
+    retryDownload(info.retry_download_id, info.app_id);
+    return;
+  }
   info.last_action_was_successful = false;
 
   // fork #8: register (or reuse) a persistent queue item for this download and mark it
@@ -1555,16 +1597,19 @@ void ApplicationManager::downloadMod(ImportModInfo info)
   int queue_id = -1;
   {
     std::lock_guard<std::mutex> lock(download_queue_mutex_);
-    cancel_active_download_ = false;
     if(active_download_id_ != -1)
     {
       queue_id = active_download_id_;
     }
     else
     {
+      cancel_active_download_ = false;
       DownloadQueueItem item;
       item.id = next_download_id_++;
-      item.app_id = info.app_id;
+      if(appIndexIsValid(info.app_id, false))
+        item.app_registration_id = getAppRegistrationId(info.app_id);
+      item.remote_file_name = info.remote_file_name;
+      item.name_overwrite = info.name_overwrite;
       item.remote_source = info.remote_source;
       item.remote_request_url = info.remote_request_url;
       item.remote_mod_id = info.remote_mod_id;
@@ -1687,15 +1732,10 @@ void ApplicationManager::downloadMod(ImportModInfo info)
     emitDownloadQueueLocked();
   }
 
-  // fork #8: a restored/retried queue item may carry a target_group_id whose group has since
-  // been deleted. Validate it against the app's current groups and clear it if it no longer
-  // exists so installation does not target a stale or out-of-range group index.
-  if(info.target_group_id != -1 && appIndexIsValid(info.app_id))
-  {
-    const int num_groups = apps_[info.app_id].getNumGroups();
-    if(info.target_group_id < 0 || info.target_group_id >= num_groups)
-      info.target_group_id = -1;
-  }
+  if(info.target_group_id != -1 &&
+     !std::ranges::any_of(apps_[info.app_id].getModInfo(),
+                          [&info](const auto& mod) { return mod.mod.id == info.target_group_id; }))
+    info.target_group_id = -1;
 
   info.last_action_was_successful = true;
   emit downloadComplete(info);
@@ -1727,7 +1767,9 @@ void ApplicationManager::saveDownloadQueueLocked()
     {
       Json::Value entry;
       entry["id"] = item.id;
-      entry["app_id"] = item.app_id;
+      entry["app_registration_id"] = item.app_registration_id;
+      entry["remote_file_name"] = item.remote_file_name;
+      entry["name_overwrite"] = item.name_overwrite;
       entry["remote_source"] = item.remote_source;
       entry["remote_request_url"] = item.remote_request_url;
       entry["remote_mod_id"] = (Json::Int64)item.remote_mod_id;
@@ -1745,12 +1787,14 @@ void ApplicationManager::saveDownloadQueueLocked()
       entry["retry_count"] = item.retry_count;
       json["items"][i++] = entry;
     }
-    std::ofstream file(path, std::fstream::binary);
+    const pu::TemporaryDirectory pending(path.parent_path());
+    const auto next = pending.path / "queue.json";
+    std::ofstream file(next, std::fstream::binary);
+    file.exceptions(std::ios::failbit | std::ios::badbit);
     file << json;
-    file.flush();
-    if(!file.good())
-      sendLogMessage(Log::LOG_WARNING,
-                     std::string("Could not write download queue to \"") + path.string() + "\".");
+    file.close();
+    sfs::permissions(next, sfs::perms::owner_read | sfs::perms::owner_write);
+    sfs::rename(next, path);
   }
   catch(const std::exception& error)
   {
@@ -1781,7 +1825,9 @@ void ApplicationManager::loadDownloadQueue()
     {
       DownloadQueueItem item;
       item.id = entry.get("id", -1).asInt();
-      item.app_id = entry.get("app_id", -1).asInt();
+      item.app_registration_id = entry.get("app_registration_id", -1).asInt();
+      item.remote_file_name = entry.get("remote_file_name", "").asString();
+      item.name_overwrite = entry.get("name_overwrite", "").asString();
       item.remote_source = entry.get("remote_source", "").asString();
       item.remote_request_url = entry.get("remote_request_url", "").asString();
       item.remote_mod_id = entry.get("remote_mod_id", -1).asInt64();
@@ -1889,7 +1935,9 @@ void ApplicationManager::removeDownload(int id)
 ImportModInfo ApplicationManager::importInfoForItem(const DownloadQueueItem& item) const
 {
   ImportModInfo info;
-  info.app_id = item.app_id;
+  info.app_id = findAppIndex(item.app_registration_id);
+  info.remote_file_name = item.remote_file_name;
+  info.name_overwrite = item.name_overwrite;
   info.action_type = ImportModInfo::download;
   info.remote_source = item.remote_source;
   info.remote_request_url = item.remote_request_url;
@@ -1906,29 +1954,36 @@ ImportModInfo ApplicationManager::importInfoForItem(const DownloadQueueItem& ite
   return info;
 }
 
-void ApplicationManager::retryDownload(int id)
+void ApplicationManager::retryDownload(int id, int selected_app)
 {
   ImportModInfo info;
   {
     std::lock_guard<std::mutex> lock(download_queue_mutex_);
-    if(active_download_id_ != -1)
-    {
-      sendLogMessage(Log::LOG_WARNING,
-                     std::string("Cannot retry while another download is active."));
-      return;
-    }
     auto iter = std::find_if(download_queue_.begin(),
                              download_queue_.end(),
-                             [id](const DownloadQueueItem& it) { return it.id == id; });
-    if(iter == download_queue_.end())
+                             [id](const DownloadQueueItem& item) { return item.id == id; });
+    if(active_download_id_ != -1 || iter == download_queue_.end() ||
+       (iter->status != DownloadQueueItem::failed && iter->status != DownloadQueueItem::cancelled))
+    {
+      emit sendError("Download retry", "This download can no longer be retried.");
+      emit downloadFailed();
       return;
+    }
+    info = importInfoForItem(*iter);
+    if(info.app_id < 0 || info.app_id != selected_app)
+    {
+      emit sendError("Download retry", info.app_id < 0
+        ? "The original application is unavailable. Start a new download."
+        : "Select the original application before retrying this download.");
+      emit downloadFailed();
+      return;
+    }
     iter->retry_count++;
     iter->status = DownloadQueueItem::active;
     iter->bytes_done = 0;
     iter->speed = 0.0;
     active_download_id_ = id;
     cancel_active_download_ = false;
-    info = importInfoForItem(*iter);
     saveDownloadQueueLocked();
     emitDownloadQueueLocked();
   }

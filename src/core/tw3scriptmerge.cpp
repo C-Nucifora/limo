@@ -1,4 +1,5 @@
 #include "tw3scriptmerge.h"
+#include "pathutils.h"
 #include "log.h"
 #include <algorithm>
 #include <cctype>
@@ -393,18 +394,13 @@ std::vector<std::pair<std::string, std::filesystem::path>> findScriptFiles(
 
 namespace
 {
-/*! \brief Reads an entire file as raw bytes. Returns an empty string and logs on failure. */
+/*! \brief Reads an entire file as raw bytes. */
 std::string readFileBytes(const sfs::path& path)
 {
   std::ifstream stream(path, std::ios::binary);
-  if(!stream.is_open())
-  {
-    Log::warning(std::format("Tw3 script merge: could not open '{}' for reading.", path.string()));
-    return {};
-  }
-  std::ostringstream buffer;
-  buffer << stream.rdbuf();
-  return buffer.str();
+  if(!stream)
+    throw std::runtime_error("Cannot read script " + path.string());
+  return { std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>() };
 }
 
 /*!
@@ -448,19 +444,11 @@ MergeResult mergeScripts(
       script_to_sources[relative_script].emplace_back(mod_id, std::move(absolute_path));
   }
 
-  const sfs::path output_scripts_root = output_dir / sfs::path(SCRIPTS_SUBDIR);
-
-  // Step 2: idempotency. Wipe any previously generated scripts so a re-run cannot leave stale
-  // merged files behind. Only our own content/scripts subtree is touched.
-  std::error_code ec;
-  if(sfs::exists(output_scripts_root, ec))
-  {
-    sfs::remove_all(output_scripts_root, ec);
-    if(ec)
-      Log::warning(std::format("Tw3 script merge: could not clear '{}': {}",
-                               output_scripts_root.string(),
-                               ec.message()));
-  }
+  const auto output_scripts_root = output_dir / sfs::path(SCRIPTS_SUBDIR);
+  sfs::create_directories(output_scripts_root.parent_path());
+  const path_utils::TemporaryDirectory pending(output_scripts_root.parent_path());
+  const auto staged_scripts = pending.path / "scripts";
+  sfs::create_directory(staged_scripts);
 
   // Step 3: merge each script that is provided by more than one mod.
   for(const auto& [relative_script, sources] : script_to_sources)
@@ -508,28 +496,15 @@ MergeResult mergeScripts(
       merged_text += '\n';
     }
 
-    const sfs::path out_path = output_scripts_root / sfs::path(relative_script);
-    sfs::create_directories(out_path.parent_path(), ec);
-    if(ec)
-    {
-      Log::error(std::format("Tw3 script merge: could not create directory for '{}': {}",
-                             out_path.string(),
-                             ec.message()));
-      ec.clear();
-      continue;
-    }
-    std::ofstream out_stream(out_path, std::ios::binary | std::ios::trunc);
-    if(!out_stream.is_open())
-    {
-      Log::error(
-        std::format("Tw3 script merge: could not open '{}' for writing.", out_path.string()));
-      continue;
-    }
+    const auto out_path = staged_scripts / relative_script;
+    sfs::create_directories(out_path.parent_path());
+    std::ofstream out_stream(out_path, std::ios::binary);
+    out_stream.exceptions(std::ios::failbit | std::ios::badbit);
     out_stream << merged_text;
     out_stream.close();
 
     result.scripts_merged++;
-    result.written_files.push_back(out_path);
+    result.written_files.push_back(output_scripts_root / relative_script);
     if(conflicted)
     {
       result.conflicts_unresolved++;
@@ -538,6 +513,11 @@ MergeResult mergeScripts(
     else
       result.conflicts_auto_resolved++;
   }
+
+  if(path_utils::exists(output_scripts_root))
+    path_utils::exchangePaths(staged_scripts, output_scripts_root);
+  else
+    sfs::rename(staged_scripts, output_scripts_root);
 
   Log::info(std::format("Tw3 script merge: merged {} script(s), {} auto-resolved, {} need "
                         "manual resolution.",
