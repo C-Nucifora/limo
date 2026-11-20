@@ -14,7 +14,7 @@ are in `base-devel` / the standard repos):
 
 | Library | Debian/Ubuntu package |
 |---|---|
-| Qt 5 (Widgets, Svg, Network) | `qtbase5-dev qtbase5-dev-tools qt5-qmake libqt5svg5-dev` |
+| Qt 6 (Widgets, Svg, Network) | `qt6-base-dev qt6-base-dev-tools libqt6svg6-dev` |
 | jsoncpp | `libjsoncpp-dev` |
 | libarchive | `libarchive-dev` |
 | pugixml | `libpugixml-dev` |
@@ -25,18 +25,20 @@ are in `base-devel` / the standard repos):
 | libcurl (used by cpr) | `libcurl4-openssl-dev` |
 | Build tools | `cmake ninja-build g++-14 pkg-config git` |
 
-On Arch / CachyOS most of these are in the standard repos under their short names (`qt5-base`,
+On Arch / CachyOS most of these are in the standard repos under their short names (`qt6-base`,
 `jsoncpp`, `libarchive`, `pugixml`, `openssl`, `lz4`, `zstd`, `zlib`, `curl`).
 
 ---
 
 ## Build cpr from source into a local prefix
 
-cpr is not packaged on Debian 12 / Ubuntu 22.04 in a version new enough for this project.
-Build and install it into `/tmp/cpr-prefix` (or any path you prefer):
+The build requires CMake 3.25 or newer and a C++23 toolchain with `std::format`.
+CI uses Ubuntu 24.04 and GCC 14. Build the pinned cpr revision into `/tmp/cpr-prefix` (or any path you prefer):
 
 ```bash
-git clone --depth 1 https://github.com/libcpr/cpr /tmp/cpr
+git init /tmp/cpr
+git -C /tmp/cpr fetch --depth 1 https://github.com/libcpr/cpr f091b2c061b307ee89b164c39976fc9202a1c79d
+git -C /tmp/cpr checkout --detach FETCH_HEAD
 cmake -S /tmp/cpr -B /tmp/cpr/build -G Ninja \
   -DCPR_USE_SYSTEM_CURL=ON \
   -DCPR_BUILD_TESTS=OFF \
@@ -68,12 +70,13 @@ cmake --build build -j"$(nproc)"
 |---|---|---|
 | `LIMO_WITH_LOOT` | `OFF` | Compile the LOOT and OpenMW deployers (Bethesda / Morrowind plugin sorting). Requires libloot (`loot/api.h` + `libloot.so`). |
 | `LIMO_WITH_UNRAR` | `OFF` | Compile RAR-archive extraction support. Requires libunrar headers and either `libunrar.a` or `libunrar.so`. |
-| `LIMO_INSTALL_PREFIX` | `/usr/local` | Where `cmake --install` places binaries, icons, and `steam_app_configs/`. |
-| `IS_FLATPAK` | `OFF` | Set by the Flatpak build manifest; paths are routed under `/app/`. |
+| `CMAKE_INSTALL_PREFIX` | `/usr/local` | Default install prefix. `cmake --install build --prefix <path>` can override it. |
+| `IS_FLATPAK` | `OFF` | Installs the Flatpak desktop files and defaults the prefix to `/app`. |
 
 When both optional flags are `OFF` you do **not** need libloot, libunrar, or any Rust toolchain.
-The LOOT and OpenMW deployer source files are excluded from the build entirely
-(see `CMakeLists.txt`, lines 195-203).
+LOOT and OpenMW plugin management require a LOOT-enabled build. An existing application
+that needs an unavailable deployer stays registered and can load again in a build with
+that deployer enabled.
 
 ---
 
@@ -98,13 +101,13 @@ cmake -S . -B build -G Ninja \
   -DBUILD_TESTING=ON
 
 cmake --build build -j"$(nproc)"
-ctest --test-dir build
+ctest --test-dir build --parallel "$(nproc)" --output-on-failure
 ```
 
 ---
 
 ## CI reference
 
-The CI workflow (`.github/workflows/ci.yml`) runs exactly the steps above on Ubuntu 24.04 with
+The CI workflow (`.github/workflows/ci.yml`) builds and checks the default feature set on Ubuntu 24.04 with
 `g++-14`. If a build fails locally but passes CI (or vice versa), that file is the canonical
 reference for the expected compiler and flag set.

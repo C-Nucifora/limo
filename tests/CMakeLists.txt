@@ -6,8 +6,7 @@ if(NOT Catch2_FOUND)
     FetchContent_Declare(
         Catch2
         GIT_REPOSITORY https://github.com/catchorg/Catch2.git
-        GIT_TAG        v3.7.1
-        GIT_SHALLOW    TRUE
+        GIT_TAG        fa43b77429ba76c462b1898d6cd2f2d7a9416b14 # v3.7.1
     )
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH ${Catch2_SOURCE_DIR}/extras)
@@ -56,9 +55,6 @@ endif()
 configure_file(test_utils.h.in test_utils.h)
 
 add_executable(tests ${TEST_SOURCES})
-target_include_directories(tests
-    PRIVATE core
-)
 target_link_libraries(tests
     PRIVATE Catch2::Catch2WithMain
     PRIVATE core

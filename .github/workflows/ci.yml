@@ -6,6 +6,9 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same ref (e.g. rapid pushes / PR updates).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -69,6 +72,16 @@ jobs:
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
+
+      - name: Smoke test staged install
+        run: |
+          stage=$(mktemp -d)
+          DESTDIR="$stage" cmake --install build --prefix /usr
+          test -f "$stage/usr/share/applications/limo.desktop"
+          test -f "$stage/usr/share/limo/changelogs.json"
+          test -d "$stage/usr/share/limo/steam_app_configs"
+          LD_LIBRARY_PATH="$CPR_PREFIX/lib" "$stage/usr/bin/limo" --json list apps
+
 
   # Build the test suite (LOOT off, so no libloot dependency) and run ctest.
   # Blocking: the suite passes with LOOT off, so a test regression gates merges.

@@ -9,7 +9,7 @@ name: Release
 #     handy for testing the packaging without cutting a tag.
 #
 # The build mirrors .github/workflows/ci.yml (same deps, same cmake flags,
-# LOOT/UNRAR off, cpr built from a pinned tag). On top of the CI build it runs
+# LOOT/UNRAR off, cpr built from a pinned commit). On top of the CI build it runs
 # `cmake --install` into a staging prefix and wraps the result in an AppImage
 # via linuxdeploy + its Qt plugin. If AppImage tooling were to fail, the tarball
 # fallback step still produces a usable archive of the staged install tree.
@@ -21,14 +21,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  # Needed by softprops/action-gh-release to create/update the Release.
-  contents: write
+  contents: read
 
 env:
   # Pin cpr to an immutable commit SHA rather than a mutable tag (fork audit F092; same as CI).
   # This is the commit the 1.14.2 release tag points to.
   CPR_REF: "f091b2c061b307ee89b164c39976fc9202a1c79d" # cpr 1.14.2
-  CPR_PREFIX: "/tmp/cpr-prefix"
+  CPR_PREFIX: "/tmp/cpr-static-prefix"
   # Where `cmake --install` stages the app before it is turned into an AppImage.
   STAGE_DIR: "/tmp/limo-appdir"
 
@@ -36,6 +35,8 @@ jobs:
   release:
     name: Build AppImage (Qt6, LOOT/UNRAR off)
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -48,7 +49,7 @@ jobs:
             qt6-base-dev qt6-base-dev-tools libqt6svg6-dev \
             libjsoncpp-dev libarchive-dev libpugixml-dev libssl-dev \
             liblz4-dev libzstd-dev zlib1g-dev libcurl4-openssl-dev \
-            file desktop-file-utils libfuse2t64 wget
+            file desktop-file-utils libfuse2t64 wget catch2 qt6-tools-dev
 
       # Cache the built+installed cpr prefix, keyed on the pinned ref and runner
       # image. A cache hit skips the clone/configure/build/install below.
@@ -57,7 +58,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ env.CPR_PREFIX }}
-          key: cpr-${{ runner.os }}-ubuntu-24.04-gxx14-${{ env.CPR_REF }}
+          key: cpr-static-${{ runner.os }}-ubuntu-24.04-gxx14-${{ env.CPR_REF }}
 
       - name: Build and install cpr from source
         if: steps.cache-cpr.outputs.cache-hit != 'true'
@@ -70,7 +71,7 @@ jobs:
           cmake -S /tmp/cpr -B /tmp/cpr/build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCPR_USE_SYSTEM_CURL=ON -DCPR_BUILD_TESTS=OFF \
-            -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX="$CPR_PREFIX"
+            -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX="$CPR_PREFIX"
           cmake --build /tmp/cpr/build --target install
 
       # --- Configure & build (mirrors ci.yml) -----------------------------
@@ -81,11 +82,14 @@ jobs:
             -DCMAKE_CXX_COMPILER=g++-14 \
             -DLIMO_WITH_LOOT=OFF \
             -DLIMO_WITH_UNRAR=OFF \
-            -DBUILD_TESTING=OFF \
+            -DBUILD_TESTING=ON \
             -DCMAKE_PREFIX_PATH="$CPR_PREFIX"
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure --no-tests=error
 
       # --- Stage the install tree -----------------------------------------
       # Install into a usr-prefixed AppDir layout that linuxdeploy understands.
@@ -95,8 +99,11 @@ jobs:
         run: |
           rm -rf "$STAGE_DIR"
           DESTDIR="$STAGE_DIR" cmake --install build --prefix /usr
-          echo "Staged tree:"
-          find "$STAGE_DIR" -maxdepth 4 -print
+          test -f "$STAGE_DIR/usr/share/applications/limo.desktop"
+          test -f "$STAGE_DIR/usr/share/limo/changelogs.json"
+          test -d "$STAGE_DIR/usr/share/limo/steam_app_configs"
+          "$STAGE_DIR/usr/bin/limo" --version
+          "$STAGE_DIR/usr/bin/limo" --json list apps
 
       # --- Determine version ----------------------------------------------
       # On a tag push use the tag (without leading v); otherwise use the short
@@ -106,66 +113,15 @@ jobs:
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
             VERSION="${GITHUB_REF_NAME#v}"
+            if [ "$VERSION" != "$(build/limo --version)" ]; then
+              echo "Tag version must match the CMake project version."
+              exit 1
+            fi
           else
             VERSION="dev-$(git rev-parse --short HEAD)"
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building artifacts for version: $VERSION"
-
-      # --- AppImage packaging ---------------------------------------------
-      # linuxdeploy bundles the ELF + its non-system libraries; the Qt plugin
-      # pulls in the needed Qt6 plugins/libs so the result runs on other distros.
-      - name: Download linuxdeploy
-        env:
-          # Pin to a specific, immutable release tag instead of the rolling
-          # 'continuous' tag so builds are reproducible and the artifacts can be
-          # checksum-verified against the upstream-published .sha256 files.
-          LINUXDEPLOY_TAG: "1-alpha-20240109-1"
-          LINUXDEPLOY_QT_TAG: "1-alpha-20240109-1"
-        run: |
-          set -euo pipefail
-          cd /tmp
-
-          base_ld="https://github.com/linuxdeploy/linuxdeploy/releases/download/${LINUXDEPLOY_TAG}"
-          base_qt="https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/${LINUXDEPLOY_QT_TAG}"
-
-          # Download each binary together with its upstream SHA256 sidecar and
-          # verify before making it executable. Abort the build on any mismatch.
-          for spec in \
-            "${base_ld}|linuxdeploy-x86_64.AppImage" \
-            "${base_qt}|linuxdeploy-plugin-qt-x86_64.AppImage"; do
-            base="${spec%%|*}"
-            file="${spec##*|}"
-            wget -q "${base}/${file}"
-            wget -q "${base}/${file}.sha256"
-            # Some releases publish the checksum with the original download path
-            # as the filename; normalise it to the local filename before -c.
-            sha256sum -c <(awk -v f="${file}" '{print $1 "  " f}' "${file}.sha256")
-            chmod +x "${file}"
-          done
-
-      - name: Build AppImage
-        id: appimage
-        # Don't fail the whole job if AppImage generation hiccups; the tarball
-        # fallback below still produces a usable artifact.
-        continue-on-error: true
-        env:
-          # qmake6 lets the Qt plugin locate the Qt6 installation.
-          QMAKE: /usr/bin/qmake6
-          # Embed the version in the generated AppImage filename.
-          LINUXDEPLOY_OUTPUT_VERSION: ${{ steps.version.outputs.version }}
-          OUTPUT: Limo-${{ steps.version.outputs.version }}-x86_64.AppImage
-        run: |
-          /tmp/linuxdeploy-x86_64.AppImage \
-            --appdir "$STAGE_DIR" \
-            --plugin qt \
-            --desktop-file "$STAGE_DIR/usr/share/applications/limo.desktop" \
-            --icon-file "$STAGE_DIR/usr/share/icons/hicolor/512x512/apps/limo.png" \
-            --output appimage
-          # linuxdeploy writes the AppImage into the current dir; surface its path.
-          APPIMAGE="$(ls -1 *.AppImage | head -n1)"
-          echo "Produced AppImage: $APPIMAGE"
-          echo "appimage_path=$APPIMAGE" >> "$GITHUB_OUTPUT"
 
       # --- Tarball fallback / supplement ----------------------------------
       # Always produced: a plain archive of the staged install tree. Acts as the
@@ -176,6 +132,50 @@ jobs:
           tar -czf "$TARBALL" -C "$STAGE_DIR" usr
           echo "Produced tarball: $TARBALL"
           ls -lh "$TARBALL"
+
+      # --- AppImage packaging ---------------------------------------------
+      # linuxdeploy bundles the ELF + its non-system libraries; the Qt plugin
+      # pulls in the needed Qt6 plugins/libs so the result runs on other distros.
+      - name: Download linuxdeploy
+        id: linuxdeploy
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          cd /tmp
+          tag=1-alpha-20240109-1
+          wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/$tag/linuxdeploy-x86_64.AppImage"
+          wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/$tag/linuxdeploy-plugin-qt-x86_64.AppImage"
+          sha256sum --check <<'SHA256'
+          c86d6540f1df31061f02f539a2d3445f8d7f85cc3994eee1e74cd1ac97b76df0  linuxdeploy-x86_64.AppImage
+          f53349093d333a6558c560844c1a0f64a3b6bd077bf02740af3ad3dbb8827433  linuxdeploy-plugin-qt-x86_64.AppImage
+          SHA256
+          chmod +x linuxdeploy{,-plugin-qt}-x86_64.AppImage
+
+      - name: Build AppImage
+        if: steps.linuxdeploy.outcome == 'success'
+        id: appimage
+        # Don't fail the whole job if AppImage generation hiccups; the tarball
+        # fallback below still produces a usable artifact.
+        continue-on-error: true
+        env:
+          # qmake6 lets the Qt plugin locate the Qt6 installation.
+          QMAKE: /usr/bin/qmake6
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          # Embed the version in the generated AppImage filename.
+          LINUXDEPLOY_OUTPUT_VERSION: ${{ steps.version.outputs.version }}
+          LDAI_OUTPUT: Limo-${{ steps.version.outputs.version }}-x86_64.AppImage
+        run: |
+          export PATH="/tmp:$PATH"
+          /tmp/linuxdeploy-x86_64.AppImage \
+            --appdir "$STAGE_DIR" \
+            --plugin qt \
+            --desktop-file "$STAGE_DIR/usr/share/applications/limo.desktop" \
+            --icon-file "$STAGE_DIR/usr/share/icons/hicolor/512x512/apps/limo.png" \
+            --output appimage
+          "./$LDAI_OUTPUT" --version
+          "./$LDAI_OUTPUT" --json list apps
+          echo "Produced AppImage: $LDAI_OUTPUT"
+          echo "appimage_path=$LDAI_OUTPUT" >> "$GITHUB_OUTPUT"
 
       # --- Verify the AppImage was actually produced ----------------------
       # The AppImage step is allowed to fail (continue-on-error) so the tarball
@@ -195,7 +195,7 @@ jobs:
 
       # --- Upload as workflow artifact (always) ---------------------------
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: limo-${{ steps.version.outputs.version }}
           path: |
@@ -215,7 +215,7 @@ jobs:
       # --- Attach to a GitHub Release (tag pushes only) -------------------
       - name: Publish GitHub Release
         if: github.ref_type == 'tag' && steps.check_appimage.outputs.appimage_ok == 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           # Drafts a release for the pushed tag and uploads the assets.
           tag_name: ${{ github.ref_name }}

@@ -17,7 +17,7 @@ This is a personal hard fork of [limo-app/limo](https://github.com/limo-app/limo
 | **The Witcher 3 deployer** | `Tw3Deployer` — encodes Limo load order into `mod{NNNN}_` folder-name prefixes so TW3's alphabetical loading rule stays in sync with Limo's list. |
 | **Cyberpunk 2077 deployer** | `CyberpunkDeployer` — targets the game root; prepends `{NNNN}_` to `.archive` filenames under `archive/pc/mod/` so top-of-list wins, leaves all other paths (CET, RED4ext, redscript, TweakXL…) untouched. |
 | **No-sudo build** | `LIMO_WITH_LOOT=OFF` (default) and `LIMO_WITH_UNRAR=OFF` (default) gate out libloot and libunrar entirely. The only non-packaged dependency is **cpr**, built from source into a local prefix — no `sudo make install`. |
-| **Qt6** | Migrated from Qt5 to Qt6; Qt5 fallback retained in CMake. |
+| **Qt6** | Requires Qt 6. |
 | **Palette-aware theme** | A modern application theme that respects the system light/dark palette. |
 | **CI** | GitHub Actions workflow on Ubuntu 24.04 / g++-14, building with LOOT and UNRAR off. |
 | **Integrated upstream PRs** | [#225](https://github.com/limo-app/limo/pull/225), [#208](https://github.com/limo-app/limo/pull/208), [#191](https://github.com/limo-app/limo/pull/191), [#199](https://github.com/limo-app/limo/pull/199) |
@@ -61,7 +61,9 @@ Quick reference (no sudo, LOOT and UNRAR off):
 
 ```bash
 # 1. Build cpr into a local prefix
-git clone --depth 1 https://github.com/libcpr/cpr /tmp/cpr
+git init /tmp/cpr
+git -C /tmp/cpr fetch --depth 1 https://github.com/libcpr/cpr f091b2c061b307ee89b164c39976fc9202a1c79d
+git -C /tmp/cpr checkout --detach FETCH_HEAD
 cmake -S /tmp/cpr -B /tmp/cpr/build -G Ninja \
   -DCPR_USE_SYSTEM_CURL=ON -DCPR_BUILD_TESTS=OFF \
   -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX=/tmp/cpr-prefix
@@ -85,18 +87,27 @@ LD_LIBRARY_PATH=/tmp/cpr-prefix/lib ./build/Limo
 |---|---|---|
 | `LIMO_WITH_LOOT` | `OFF` | Compile LOOT and OpenMW deployers. Requires libloot (`loot/api.h` + `libloot.so`). |
 | `LIMO_WITH_UNRAR` | `OFF` | Compile RAR-archive extraction. Requires libunrar. |
-| `LIMO_INSTALL_PREFIX` | `/usr/local` | Prefix for `cmake --install`. |
+| `CMAKE_INSTALL_PREFIX` | `/usr/local` | Default prefix for `cmake --install`. |
 | `IS_FLATPAK` | `OFF` | Routes paths under `/app/` for Flatpak builds. |
 
 The CI workflow (`.github/workflows/ci.yml`) runs on Ubuntu 24.04 with g++-14 and is the canonical reference for the expected compiler and flag set.
 
 ---
 
+## Command line
+
+Run `limo --help` for the command list and `limo list apps --json` for registered
+application IDs. Commands work without a display. Close the desktop app before
+running commands that change state.
+
 ## Status and caveats
 
 - The `Tw3Deployer` and `CyberpunkDeployer` implement the full load-order logic described in their respective guides and the source compiles cleanly under CI.
 - **Neither deployer has been validated end-to-end in-game under Proton.** The load-order prefix logic is correct per the documented game rules, but edge cases (script conflicts in TW3, CET symlink behavior in CP2077) have not been exhaustively tested.
-- Script merging (TW3) and REDmod compilation (CP2077) are out of scope — use a separate tool for those.
+- The release build disables LOOT, OpenMW plugin management, and the UNRAR fallback. Use a
+  source build with the relevant options to enable them.
+- Witcher 3 script merging and REDmod compilation are experimental. REDmod requires the
+  game's compiler and Protontricks.
 - See each guide for the full current-limitations section.
 
 ---
@@ -105,7 +116,7 @@ The CI workflow (`.github/workflows/ci.yml`) runs on Ubuntu 24.04 with g++-14 an
 
 - **In-game validation** of both new deployers under Proton on native Steam.
 - **Wiring the TW3 config-merge helper** (`tw3configmerge`) and the **CP2077 Proton-setup helper** into the Limo UI.
-- **REDmod integration** — invoking `redmod deploy` from within Limo for mods shipped as REDmod source projects.
+- **REDmod validation** — check the experimental compiler integration with real mods under Proton.
 - **Packaging** — AUR PKGBUILD and/or Flatpak manifest update for the fork.
 
 ---

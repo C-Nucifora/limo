@@ -1,4 +1,5 @@
 #include "test_utils.h"
+#include "../src/core/pathutils.h"
 #include <fstream>
 
 // DATA_DIR is initialized at runtime by initTestDataDir().
@@ -74,13 +75,7 @@ void verifyFilesAreEqual(sfs::path first_file, sfs::path second_file)
 
 void initTestDataDir()
 {
-  // Create a unique temporary working directory for this test run.
-  sfs::path tmp_base = sfs::temp_directory_path() / "limo_tests";
-  sfs::remove_all(tmp_base);
-  sfs::create_directories(tmp_base);
-
-  // Copy the entire immutable fixture tree into the temp dir.
-  sfs::copy(FIXTURE_DIR, tmp_base, sfs::copy_options::recursive);
-
-  DATA_DIR = tmp_base;
+  static const path_utils::TemporaryDirectory fixture(sfs::temp_directory_path());
+  DATA_DIR = fixture.path;
+  sfs::copy(FIXTURE_DIR, DATA_DIR, sfs::copy_options::recursive);
 }
